@@ -1,0 +1,12 @@
+{
+	"folders": [
+		{
+			"path": "s3Recorder"
+		},
+		{
+			"name": "featherUi",
+			"path": "featherUi"
+		}
+	],
+	"settings": {}
+}

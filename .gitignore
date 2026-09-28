@@ -1,0 +1,16 @@
+# PlatformIO build products
+**/.pio/
+
+# Per-project VS Code generated settings
+**/.vscode/
+
+# Python junk, if any tools/scripts are added later
+__pycache__/
+*.pyc
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Preserve firmware backups locally, but don't put large binary images in Git
+backups/*.bin
