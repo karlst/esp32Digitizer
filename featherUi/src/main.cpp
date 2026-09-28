@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <version.hpp>
 
 static const int iLedPin = 13;
 
@@ -12,6 +13,9 @@ void setup()
 
     Serial.println();
     Serial.println("featherUi starting...");
+
+    Serial.print("ESP32 Digitizer Version: ");
+    Serial.println(ESP32_DIGITIZER_VERSION);
 }
 
 void loop()

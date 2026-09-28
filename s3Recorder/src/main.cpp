@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <version.hpp>
 
 static const int iTestPin = 9;   // Temporary test GPIO; do not connect ADC yet
 
