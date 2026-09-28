@@ -1,0 +1,1 @@
+Esp32 24 bit digitizer project, more documentation to come.
