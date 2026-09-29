@@ -14,3 +14,6 @@ Thumbs.db
 
 # Preserve firmware backups locally, but don't put large binary images in Git
 backups/*.bin
+
+# Ignore this entire folder and contents
+/fpos/
