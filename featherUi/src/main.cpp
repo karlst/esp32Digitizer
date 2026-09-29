@@ -1,85 +1,36 @@
 /**
  * @file main.cpp
- * @brief Minimal Feather-hosted web UI placeholder for the ESP32 Digitizer project.
+ * @brief Arduino entry points for the Feather web application.
  */
-
 #include <Arduino.h>
-#include <WiFi.h>
-#include <WebServer.h>
-#include <LittleFS.h>
-
 #include <version.hpp>
+#include "webApp.h"
 
-static const char* pszAccessPointName = "ESP32-Digitizer";
-
-WebServer gWebServer(80);
+// Keep the application alive for the lifetime of the firmware.
+static webApp app;
 
 /**
- * @brief Configure filesystem, access point, and HTTP server.
+ * @brief Initialize diagnostics and application services.
  */
 void setup()
 {
+    // Report firmware identity before starting the application.
     Serial.begin(115200);
     delay(500);
-
     Serial.println();
     Serial.println("ESP32 Digitizer Feather UI");
     Serial.print("Version: ");
     Serial.println(ESP32_DIGITIZER_VERSION);
 
-    bool bFsMounted = LittleFS.begin(true);
-
-    if (!bFsMounted)
-    {
-        Serial.println("LittleFS mount failed.");
-    }
-    else
-    {
-        WiFi.mode(WIFI_AP);
-
-        bool bApStarted = WiFi.softAP(pszAccessPointName);
-
-        if (!bApStarted)
-        {
-            Serial.println("Wi-Fi access point start failed.");
-        }
-        else
-        {
-            Serial.print("Access point: ");
-            Serial.println(pszAccessPointName);
-
-            Serial.print("Access point IP: ");
-            Serial.println(WiFi.softAPIP());
-
-            gWebServer.on("/", HTTP_GET, []()
-            {
-                File tFile = LittleFS.open("/index.html", "r");
-
-                if (tFile)
-                {
-                    gWebServer.streamFile(tFile, "text/html");
-                    tFile.close();
-                }
-                else
-                {
-                    gWebServer.send(404, "text/plain", "index.html not found");
-                }
-});
-
-gWebServer.serveStatic("/app.css", LittleFS, "/app.css", "text/css");
-gWebServer.serveStatic("/app.js", LittleFS, "/app.js", "application/javascript");
-
-            gWebServer.begin();
-
-            Serial.println("Web server started.");
-        }
-    }
+    // Startup failures are reported by the application through serial diagnostics.
+    app.begin();
 }
 
 /**
- * @brief Service HTTP requests.
+ * @brief Service HTTP and hardware without blocking on blink timing.
  */
 void loop()
 {
-    gWebServer.handleClient();
+    // Advance all application services together.
+    app.update();
 }

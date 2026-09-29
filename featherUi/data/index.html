@@ -6,7 +6,7 @@
 
     <title>ESP32 Digitizer</title>
 
-    <link rel="stylesheet" href="/app.css">
+    <link rel="stylesheet" href="/static/css/app.css">
 </head>
 
 <body>
@@ -45,13 +45,16 @@
 
                     <div>DAC</div>
                     <div id="status-dac">Disabled</div>
+
+                    <div>LED blink</div>
+                    <div id="status-blink" role="status">Connecting...</div>
                 </div>
             </section>
 
             <section class="panel">
                 <div class="panel-header">Control</div>
                 <div class="panel-body control-stack">
-                    <button type="button" disabled>Control 1</button>
+                    <button id="blink-button" type="button" disabled>Start Blink</button>
                     <button type="button" disabled>Control 2</button>
                     <button type="button" disabled>Control 3</button>
                 </div>
@@ -67,6 +70,6 @@
         </div>
     </section>
 
-    <script src="/app.js"></script>
+    <script type="module" src="/static/js/app.js"></script>
 </body>
 </html>
