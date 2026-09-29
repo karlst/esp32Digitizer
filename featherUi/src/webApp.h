@@ -24,6 +24,7 @@ private:
     // Declaration order ensures dependencies exist before the controller.
     WebServer server;
     ledBlinker blinker;
+    dacGenerator generator;
     webController controller;
     bool serverStarted = false;
 };

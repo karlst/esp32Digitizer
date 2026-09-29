@@ -6,18 +6,19 @@
 #include <WiFi.h>
 #include "webApp.h"
 
-/** @brief Create the port-80 server and connect the controller to its server and LED service. */
-webApp::webApp() : server(80), controller(server, blinker)
+/** @brief Create the port-80 server and bind the controller to the LED and DAC/ADC services. */
+webApp::webApp() : server(80), controller(server, blinker, generator)
 {
     // Defer hardware initialization until Arduino calls setup.
 }
 
-/** @brief Initialize the LED, filesystem, access point, and HTTP routes; report startup success. */
+/** @brief Initialize hardware, filesystem, access point, and HTTP routes; report web startup success. */
 bool webApp::begin()
 {
-    // Initialize a safe LED state even when later startup steps fail.
+    // Keep outputs disabled at startup; expose the UI even if analog startup fails.
     bool retVal = false;
     blinker.begin();
+    generator.begin();
 
     // Mount browser assets before exposing the access point.
     if (!LittleFS.begin(true))
@@ -49,7 +50,7 @@ bool webApp::begin()
     return retVal;
 }
 
-/** @brief Process pending HTTP requests and advance LED timing on each Arduino loop pass. */
+/** @brief Process HTTP, advance LED timing, and execute pending reboot requests. */
 void webApp::update()
 {
     // Service HTTP only after startup, while always advancing hardware activity.
@@ -58,4 +59,5 @@ void webApp::update()
         server.handleClient();
     }
     blinker.update();
+    controller.update();
 }

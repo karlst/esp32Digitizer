@@ -12,6 +12,10 @@ export function initializeBlinkControl()
     let blinkEnabled = false;
     let stateKnown = false;
     let requestPending = false;
+    // Reads leave the button steady. Reserve one command if a click arrives
+    // during a poll, then send it as soon as that read has finished.
+    let commandPending = false;
+    let queuedAction = null;
     let connectionFailed = false;
 
     /**
@@ -19,11 +23,20 @@ export function initializeBlinkControl()
      */
     async function synchronizeBlink(action = null)
     {
+        // Preserve a click during a read without letting overlapping HTTP replies
+        // overwrite the result of the newer command with an older poll result.
+        if (requestPending && action && !commandPending)
+        {
+            queuedAction = action;
+            commandPending = true;
+            button.disabled = true;
+        }
         // Polling skips a cycle while a command or previous poll is still pending.
         if (!requestPending)
         {
             requestPending = true;
-            button.disabled = true;
+            commandPending = Boolean(action);
+            button.disabled = commandPending || !stateKnown;
 
             // Bound network waits so a disconnected Feather can later recover.
             const abortController = new AbortController();
@@ -79,7 +92,18 @@ export function initializeBlinkControl()
                 // Release the request slot and enable commands only with confirmed state.
                 window.clearTimeout(timeoutId);
                 requestPending = false;
-                button.disabled = !stateKnown;
+                commandPending = false;
+                // Keep the button disabled across the poll-to-command handoff.
+                if (queuedAction)
+                {
+                    const nextAction = queuedAction;
+                    queuedAction = null;
+                    synchronizeBlink(nextAction);
+                }
+                else
+                {
+                    button.disabled = !stateKnown;
+                }
             }
         }
     }

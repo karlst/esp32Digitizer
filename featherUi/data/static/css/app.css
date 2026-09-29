@@ -39,29 +39,22 @@ body {
 .page-grid {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-rows: repeat(2, 250px) auto;
     gap: 6px;
     margin-top: 6px;
 }
 
-.left-column,
-.right-column {
+.panel {
     display: flex;
     flex-direction: column;
-    gap: 6px;
     min-width: 0;
-}
-
-.panel {
+    min-height: 0;
     border: 1px solid #8f8f8f;
     background: #ffffff;
 }
 
-.panel-large {
-    min-height: 250px;
-    flex: 1 1 auto;
-}
-
 .panel-header {
+    flex: 0 0 auto;
     padding: 6px 8px;
     font-size: 14px;
     font-weight: 700;
@@ -74,9 +67,55 @@ body {
     min-height: 60px;
 }
 
+.waveform-panel { display: flex; flex-direction: column; flex: 1; min-height: 0; gap: 4px; }
+.graph-legend { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 12px; }
+.command-legend { color: #1859b5; }
+.measured-legend { color: #b74e0b; }
+.command-legend::before { content: "━━ "; }
+.measured-legend::before { content: "┄┄ "; }
+.graph-frame { position: relative; flex: 1; min-height: 80px; }
+#dac-graph { position: absolute; width: 100%; height: 100%; }
+#graph-status, .form-note { font-size: 12px; color: #444; overflow-wrap: anywhere; }
+.dac-form { display: grid; grid-template-columns: minmax(0, 1fr) minmax(70px, 150px); gap: 6px 10px; width: 100%; min-width: 0; border-top: 1px solid #ccc; padding-top: 8px; margin-top: 4px; }
+.dac-form label { align-self: center; font-size: 13px; }
+.dac-form input { width: 100%; min-height: 30px; padding: 4px; }
+.numeric-control {
+    display: grid;
+    grid-template-columns: 30px minmax(0, 1fr) 30px;
+    align-items: stretch;
+    min-width: 0;
+}
+.numeric-control input {
+    min-width: 0;
+    text-align: right;
+    border: 1px solid #9b9b9b;
+    border-radius: 0;
+    font-variant-numeric: tabular-nums;
+}
+.control-stack .numeric-control button {
+    padding: 0;
+    font-size: 18px;
+    border-radius: 0;
+}
+.numeric-control :focus-visible {
+    outline: 2px solid #1859b5;
+    outline-offset: 1px;
+    z-index: 1;
+}
+.dac-form .form-note, .control-actions { grid-column: 1 / -1; }
+.control-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+button:disabled { opacity: 0.55; }
+button:not(:disabled) { cursor: pointer; }
+#dac-message[data-error="true"] { color: #aa2222; }
+#dac-validation { color: #aa2222; }
+#dac-validation:empty { display: none; }
+.dac-form input[aria-invalid="true"] { border: 2px solid #aa2222; }
+#dac-apply:not(:disabled) { background: #1859b5; color: white; border-color: #1859b5; }
+
 .status-grid {
     display: grid;
-    grid-template-columns: max-content 1fr;
+    grid-template-columns: max-content minmax(0, 1fr);
+    overflow-wrap: anywhere;
     column-gap: 16px;
     row-gap: 4px;
     font-family: Consolas, "Courier New", monospace;
@@ -86,11 +125,13 @@ body {
 .control-stack {
     display: flex;
     flex-direction: column;
+    align-items: flex-start;
     gap: 5px;
 }
 
 .control-stack button {
-    width: 100%;
+    max-width: 100%;
+    padding: 4px 12px;
     min-height: 30px;
     font-weight: 600;
     background: #f7f7f7;
@@ -98,14 +139,11 @@ body {
     border-radius: 2px;
 }
 
-.recent-events {
-    margin-top: 6px;
-}
-
 .event-log {
-    min-height: 120px;
-    max-height: 180px;
+    flex: 1 1 auto;
+    min-height: 0;
     overflow-y: auto;
+    overflow-wrap: anywhere;
     padding: 8px;
     background: #111111;
     color: #eeeeee;
@@ -114,8 +152,9 @@ body {
     line-height: 1.35;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 600px) {
     .page-grid {
         grid-template-columns: 1fr;
+        grid-template-rows: repeat(4, 250px) auto auto;
     }
 }

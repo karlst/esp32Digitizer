@@ -3,12 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
     <title>ESP32 Digitizer</title>
-
-    <link rel="stylesheet" href="/static/css/app.css">
+    <link rel="stylesheet" href="/static/css/app.css?v=20260929-spin">
 </head>
-
 <body>
     <header class="top-bar">
         <div class="title">ESP32 Digitizer</div>
@@ -16,60 +13,88 @@
     </header>
 
     <main class="page-grid">
-        <section class="left-column">
-            <section class="panel panel-large">
-                <div class="panel-header">Panel 1</div>
-                <div class="panel-body"></div>
-            </section>
-
-            <section class="panel panel-large">
-                <div class="panel-header">Panel 2</div>
-                <div class="panel-body"></div>
-            </section>
+        <section class="panel" aria-labelledby="panel1-title">
+            <div class="panel-header" id="panel1-title">P1: DAC Output and ADC Measurement</div>
+            <div class="panel-body waveform-panel">
+                <div class="graph-legend"><span class="command-legend">Commanded (nominal V)</span><span class="measured-legend">Measured A2 (V)</span></div>
+                <div class="graph-frame"><canvas id="dac-graph" role="img" aria-label="Commanded and measured voltage versus time">DAC and ADC waveform graph</canvas></div>
+                <div id="graph-status" role="status">Waiting for Feather...</div>
+            </div>
         </section>
 
-        <section class="right-column">
-            <section class="panel panel-large">
-                <div class="panel-header">Panel 3</div>
-                <div class="panel-body"></div>
-            </section>
+        <section class="panel" aria-labelledby="panel2-title">
+            <div class="panel-header" id="panel2-title">P2: TBD</div>
+            <div class="panel-body"></div>
+        </section>
 
-            <section class="panel">
-                <div class="panel-header">Status</div>
-                <div class="panel-body status-grid">
-                    <div>Version</div>
-                    <div id="status-version">0.1.0</div>
+        <section class="panel" aria-labelledby="panel3-title">
+            <div class="panel-header" id="panel3-title">P3: TBD</div>
+            <div class="panel-body"></div>
+        </section>
 
-                    <div>System</div>
-                    <div id="status-system">Ready</div>
+        <section class="panel" aria-labelledby="events-title">
+            <div class="panel-header" id="events-title">Recent Events</div>
+            <div class="event-log" id="event-log" role="log" aria-labelledby="events-title">
+                <div>UI loaded.</div>
+            </div>
+        </section>
 
-                    <div>DAC</div>
-                    <div id="status-dac">Disabled</div>
+        <section class="panel" aria-labelledby="status-title">
+            <div class="panel-header" id="status-title">Status</div>
+            <div class="panel-body status-grid">
+                <div>Version</div>
+                <div id="status-version">0.1.0</div>
+                <div>System</div>
+                <div id="status-system">Ready</div>
+                <div>DAC</div>
+                <div id="status-dac">Disabled</div>
+                <div>Applied sine</div>
+                <div id="status-sine">Waiting...</div>
+                <div>Sampling</div>
+                <div id="status-sampling">Waiting...</div>
+                <div>ADC reference</div>
+                <div id="status-calibration">Waiting...</div>
+                <div>LED blink</div>
+                <div id="status-blink" role="status">Connecting...</div>
+            </div>
+        </section>
 
-                    <div>LED blink</div>
-                    <div id="status-blink" role="status">Connecting...</div>
-                </div>
-            </section>
-
-            <section class="panel">
-                <div class="panel-header">Control</div>
-                <div class="panel-body control-stack">
-                    <button id="blink-button" type="button" disabled>Start Blink</button>
-                    <button type="button" disabled>Control 2</button>
-                    <button type="button" disabled>Control 3</button>
-                </div>
-            </section>
+        <section class="panel" aria-labelledby="control-title">
+            <div class="panel-header" id="control-title">Control</div>
+            <div class="panel-body control-stack">
+                <button id="blink-button" type="button" disabled>Start Blink</button>
+                <form id="dac-form" class="dac-form" novalidate>
+                    <label for="dac-frequency">Frequency (Hz)</label>
+                    <div class="numeric-control">
+                        <button type="button" data-direction="-1" aria-label="Decrease frequency by 1 Hz">−</button>
+                        <input id="dac-frequency" name="frequencyHz" type="text" inputmode="numeric" role="spinbutton" aria-valuemin="1" aria-valuemax="100" aria-valuenow="10" data-step="1" value="10" autocomplete="off" aria-describedby="dac-validation">
+                        <button type="button" data-direction="1" aria-label="Increase frequency by 1 Hz">+</button>
+                    </div>
+                    <label for="dac-amplitude">Amplitude (V peak)</label>
+                    <div class="numeric-control">
+                        <button type="button" data-direction="-1" aria-label="Decrease amplitude by 0.05 V">−</button>
+                        <input id="dac-amplitude" name="amplitudeVolts" type="text" inputmode="decimal" role="spinbutton" aria-valuemin="0" aria-valuemax="1.1" aria-valuenow="0.5" data-step="0.05" value="0.5" autocomplete="off" aria-describedby="dac-validation">
+                        <button type="button" data-direction="1" aria-label="Increase amplitude by 0.05 V">+</button>
+                    </div>
+                    <label for="dac-offset">Offset (V)</label>
+                    <div class="numeric-control">
+                        <button type="button" data-direction="-1" aria-label="Decrease offset by 0.1 V">−</button>
+                        <input id="dac-offset" name="offsetVolts" type="text" inputmode="decimal" role="spinbutton" aria-valuemin="0.2" aria-valuemax="2.4" aria-valuenow="1.5" data-step="0.1" value="1.5" autocomplete="off" aria-describedby="dac-validation">
+                        <button type="button" data-direction="1" aria-label="Increase offset by 0.1 V">+</button>
+                    </div>
+                    <div id="dac-limits" class="form-note">Output range (offset ± amplitude): 0.2–2.4 V. Frequency: 1–100 Hz.</div>
+                    <div id="dac-validation" class="form-note" role="status" aria-live="polite"></div>
+                    <div class="control-actions">
+                        <button id="dac-apply" type="submit" disabled>Apply Settings</button>
+                        <button id="dac-button" type="button" disabled>Start DAC</button>
+                    </div>
+                    <div id="dac-message" class="form-note" role="status">Connecting...</div>
+                </form>
+                <button id="reboot-button" type="button" disabled>Reboot Feather</button>
+            </div>
         </section>
     </main>
 
-    <section class="panel recent-events">
-        <div class="panel-header">Recent Events</div>
-        <div class="event-log" id="event-log">
-            <div>UI loaded.</div>
-            <div>Placeholder event log.</div>
-        </div>
-    </section>
-
-    <script type="module" src="/static/js/app.js"></script>
+    <script type="module" src="/static/js/app.js?v=20260929-spin"></script>
 </body>
 </html>
