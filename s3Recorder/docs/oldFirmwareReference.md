@@ -89,6 +89,10 @@ These are retained only as historical clues; they do not by themselves define th
 
 ## Recovered ADS1256-to-ESP32-S3 Wiring
 
+**Historical mapping below is superseded:** the user's later wire tracing found
+PDWN connected to S3 **3.3 V**, not GPIO46. Current firmware never drives GPIO46.
+The other traced signals remain DRDY9, CS10, DIN11, SCLK12, DOUT13.
+
 The following mapping was reconstructed from the existing physical wiring and the ADS1256 module header labeling.
 
 | ADS1256 Signal | Wire Color | ESP32-S3 Connection |

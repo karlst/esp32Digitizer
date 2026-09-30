@@ -97,7 +97,7 @@ bool dacGenerator::begin()
 }
 
 /**
- * @brief Validate and apply a complete set of sine parameters from the web task.
+ * @brief Validate settings and start the DAC in one locked transaction.
  * @param frequency Requested cycles per second.
  * @param amplitude Peak excursion above/below the offset, in volts (not peak-to-peak).
  * @param offset Center voltage of the sine wave.
@@ -107,13 +107,13 @@ bool dacGenerator::begin()
  * Checking their range keeps the entire waveform within the loopback experiment's
  * limits. This is enforced here even when a caller bypasses browser validation.
  */
-bool dacGenerator::configure(float frequency, float amplitude, float offset)
+bool dacGenerator::start(float frequency, float amplitude, float offset)
 {
     bool retVal = false;
     // Permit only rounding error at decimal voltage boundaries, not a wider signal range.
     constexpr float voltageTolerance = 0.000001f;
     if (ready && std::isfinite(frequency) && std::isfinite(amplitude) && std::isfinite(offset) &&
-        frequency >= minFrequencyHz && frequency <= maxFrequencyHz && amplitude >= 0 &&
+        frequency >= minFrequencyHz && frequency <= maxFrequencyHz && floorf(frequency) == frequency && amplitude >= 0 &&
         offset - amplitude >= minSignalVolts - voltageTolerance &&
         offset + amplitude <= maxSignalVolts + voltageTolerance)
     {
@@ -122,15 +122,25 @@ bool dacGenerator::configure(float frequency, float amplitude, float offset)
         // with portMAX_DELAY suspends this task until the lock is available; every
         // successful take must be paired with a give, including future error paths.
         xSemaphoreTake(mutex, portMAX_DELAY);
-        frequencyHz = frequency;
-        amplitudeVolts = amplitude;
-        offsetVolts = offset;
-        phaseStartUs = esp_timer_get_time();
-        sampleCount = 0;
-        writeIndex = 0;
-        lastCaptureUs = phaseStartUs;
+        // Retry of the same Start is harmless; a different Start cannot silently
+        // retune running output. Stop must occur before changing its settings.
+        if (!enabled)
+        {
+            frequencyHz = frequency;
+            amplitudeVolts = amplitude;
+            offsetVolts = offset;
+            phaseStartUs = esp_timer_get_time();
+            sampleCount = 0;
+            writeIndex = 0;
+            lastCaptureUs = phaseStartUs;
+            enabled = true;
+            retVal = true;
+        }
+        else
+        {
+            retVal = frequencyHz == frequency && amplitudeVolts == amplitude && offsetVolts == offset;
+        }
         xSemaphoreGive(mutex);
-        retVal = true;
     }
     return retVal;
 }
@@ -213,7 +223,7 @@ void dacGenerator::taskEntry(void* context)
 void dacGenerator::sample()
 {
     // Keep settings, phase, history, and the physical DAC write in one protected
-    // transaction. configure(), setEnabled(), and stateJson() share this lock.
+    // transaction. start(), setEnabled(), and stateJson() share this lock.
     // ADC work lengthens the hold time; web code must therefore avoid slow work
     // while holding the lock. This design favors simple, coherent sample records.
     xSemaphoreTake(mutex, portMAX_DELAY);

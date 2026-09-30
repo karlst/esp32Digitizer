@@ -1,29 +1,33 @@
+/**
+ * @file main.cpp
+ * @brief S3 digitizer acquisition controlled and monitored by the Feather web UI.
+ */
 #include <Arduino.h>
-#include <version.hpp>
+#include "acquisition.h"
+#include "featherLink.h"
 
-static const int iTestPin = 9;   // Temporary test GPIO; do not connect ADC yet
+static acquisition recorder;
+static featherLink controlLink(recorder);
 
-void setup() {
-   Serial.begin(115200);
-    delay(1000);
-
-    Serial.println();
-    Serial.println("s3Recorder starting...");
-    Serial.print("CPU frequency: ");
-    Serial.print(getCpuFrequencyMhz());
-    Serial.println(" MHz");
-
-    Serial.print("Free heap: ");
-    Serial.print(ESP.getFreeHeap());
-    Serial.println(" bytes");
+/**
+ * @brief Open links and start the ADC worker; acquisition stays stopped.
+ */
+void setup()
+{
+    Serial.setTxBufferSize(512);
+    Serial.begin(115200);
+    controlLink.begin();
+    // Do not wait for a USB terminal: external-power operation must work too.
+    recorder.begin();
+    Serial.println("S3 recorder: AIN0-AIN1, gain 1; Feather UART RX18/TX17; starts stopped.");
 }
 
-void loop() {
-  static unsigned long uHeartbeat = 0;
-
-    Serial.print("Heartbeat ");
-    Serial.println(uHeartbeat++);
-
-    delay(1000);
+/**
+ * @brief Service commands while the separate worker collects conversions.
+ */
+void loop()
+{
+    controlLink.update();
+    // UART buffers incoming commands during this short scheduler yield.
+    delay(1);
 }
-

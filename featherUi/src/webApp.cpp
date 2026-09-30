@@ -6,8 +6,8 @@
 #include <WiFi.h>
 #include "webApp.h"
 
-/** @brief Create the port-80 server and bind the controller to the LED and DAC/ADC services. */
-webApp::webApp() : server(80), controller(server, blinker, generator)
+/** @brief Bind HTTP routes to LED, DAC/ADC, and dedicated S3 UART monitoring services. */
+webApp::webApp() : server(80), monitor(Serial1), controller(server, blinker, generator, monitor)
 {
     // Defer hardware initialization until Arduino calls setup.
 }
@@ -19,6 +19,7 @@ bool webApp::begin()
     bool retVal = false;
     blinker.begin();
     generator.begin();
+    monitor.begin();
 
     // Mount browser assets before exposing the access point.
     if (!LittleFS.begin(true))
@@ -50,9 +51,11 @@ bool webApp::begin()
     return retVal;
 }
 
-/** @brief Process HTTP, advance LED timing, and execute pending reboot requests. */
+/** @brief Drain S3 telemetry, service HTTP/LED activity, and execute pending reboot requests. */
 void webApp::update()
 {
+    // Drain S3 telemetry in this task; the independent DAC worker never accesses it.
+    monitor.update();
     // Service HTTP only after startup, while always advancing hardware activity.
     if (serverStarted)
     {

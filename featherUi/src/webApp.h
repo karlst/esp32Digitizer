@@ -25,6 +25,7 @@ private:
     WebServer server;
     ledBlinker blinker;
     dacGenerator generator;
+    s3Monitor monitor;
     webController controller;
     bool serverStarted = false;
 };

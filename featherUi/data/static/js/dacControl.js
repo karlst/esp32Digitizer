@@ -7,7 +7,7 @@ import { initializeNumericControl, readNumericValue } from "./numericControl.js?
 export function initializeDacControl()
 {
     const form = document.getElementById("dac-form");
-    const applyButton = document.getElementById("dac-apply");
+    const runningMessage = document.getElementById("dac-running");
     const outputButton = document.getElementById("dac-button");
     const rebootButton = document.getElementById("reboot-button");
     const message = document.getElementById("dac-message");
@@ -17,6 +17,7 @@ export function initializeDacControl()
     const amplitudeInput = document.getElementById("dac-amplitude");
     const offsetInput = document.getElementById("dac-offset");
     const validationMessage = document.getElementById("dac-validation");
+    const unavailableMessage = document.getElementById("dac-unavailable");
     let state = null;
     let dirty = false;
     // Draft preservation is separate from numeric dirty state: reverting a field
@@ -92,7 +93,7 @@ export function initializeDacControl()
         return retVal;
     }
 
-    /** Enable Apply only for a valid draft and explain every unavailable state. */
+    /** Lock settings during operation; Stop never depends on draft validity. */
     function updateButtons()
     {
         const unavailable = commandPending || !connected || Date.now() < rebootUntil;
@@ -103,19 +104,20 @@ export function initializeDacControl()
             readNumericValue(frequencyInput) !== state.frequencyHz ||
             readNumericValue(amplitudeInput) !== state.amplitudeVolts ||
             readNumericValue(offsetInput) !== state.offsetVolts);
-        const applyDisabled = unavailable || !state?.ready || !draftValid || !dirty;
-        if (applyButton.disabled !== applyDisabled)
-        {
-            applyButton.disabled = applyDisabled;
-        }
-        outputButton.disabled = unavailable || !state?.ready;
+        outputButton.disabled = unavailable || !state?.ready || (!state.enabled && !draftValid);
+        // Explain the actual gating condition instead of leaving a grey button unexplained.
+        unavailableMessage.textContent = Date.now() < rebootUntil ? "Controls unavailable: Feather is rebooting." :
+            commandPending ? "Controls unavailable: waiting for the Feather command response." :
+            !connected ? "Controls unavailable: waiting for a connection to Feather." :
+            !state?.ready ? "DAC unavailable: hardware initialization failed." :
+            !state.enabled && !draftValid ? "Start unavailable: correct the settings above." : "";
         rebootButton.disabled = unavailable;
-        // A disabled button must have a visible reason, not just a dim appearance.
-        applyButton.title = commandPending ? "Waiting for the current command to finish." :
-            !connected ? "Waiting for a connection to the Feather." :
-            !state?.ready ? "DAC initialization failed." :
-            !draftValid ? validationMessage.textContent :
-            !dirty ? "Settings match the Feather; no changes to apply." : "Send these settings to the Feather.";
+        form.querySelectorAll("input, .numeric-control button").forEach((control) =>
+        {
+            // Ordinary polling leaves controls unchanged. Pending commands also lock
+            // fields so the settings shown cannot change underneath a Start request.
+            control.disabled = unavailable || !state?.ready || state.enabled;
+        });
     }
 
     /** Show validation and command outcomes next to the controls. */
@@ -132,6 +134,9 @@ export function initializeDacControl()
         document.getElementById("status-dac").textContent = state.ready ?
             (state.enabled ? "Enabled" : "Disabled (0 V commanded)") : "Initialization failed";
         outputButton.textContent = state.ready && state.enabled ? "Stop DAC" : "Start DAC";
+        runningMessage.textContent = state.ready ? (state.enabled ?
+            `DAC started — ${state.frequencyHz} Hz, ${state.amplitudeVolts.toFixed(2)} V peak, ${state.offsetVolts.toFixed(2)} V offset` :
+            "DAC stopped.") : "DAC unavailable.";
         if (state.ready)
         {
             // Limits come from the firmware so its maximum-frequency constant is authoritative.
@@ -142,7 +147,7 @@ export function initializeDacControl()
             amplitudeInput.setAttribute("aria-valuemax", Number(((state.maxSignalVolts - state.minSignalVolts) / 2).toFixed(6)));
             document.getElementById("dac-limits").textContent =
                 `Output range (offset ± amplitude): ${state.minSignalVolts}–${state.maxSignalVolts} V. Frequency: ${state.minFrequencyHz}–${state.maxFrequencyHz} Hz.`;
-            if (!preserveDraft)
+            if (!preserveDraft || state.enabled)
             {
                 frequencyInput.value = state.frequencyHz;
                 amplitudeInput.value = state.amplitudeVolts;
@@ -212,6 +217,7 @@ export function initializeDacControl()
                     state = null;
                     document.getElementById("status-system").textContent = "Rebooting...";
                     document.getElementById("status-dac").textContent = "Waiting for restart";
+                    runningMessage.textContent = "DAC state unknown — Feather rebooting...";
                     graphStatus.textContent = "Rebooting — waiting for reconnection...";
                     drawWaveform(canvas, null);
                     showMessage("Reboot requested. Reconnect to ESP32-Digitizer if needed.");
@@ -228,15 +234,15 @@ export function initializeDacControl()
                     }
                     state = result;
                     connected = true;
-                    if (action === "settings" && sentRevision === editRevision)
+                    if (action === "start" && sentRevision === editRevision)
                     {
                         dirty = false;
                         preserveDraft = false;
                     }
                     if (action)
                     {
-                        const text = action === "settings" ? "DAC settings applied." :
-                            action === "start" ? "DAC output started." : "DAC output stopped.";
+                        const text = action === "start" ?
+                            `DAC started — ${state.frequencyHz} Hz, ${state.amplitudeVolts.toFixed(2)} V peak, ${state.offsetVolts.toFixed(2)} V offset` : "DAC stopped.";
                         showMessage(text);
                         appendEvent(text);
                     }
@@ -257,6 +263,7 @@ export function initializeDacControl()
             {
                 // Never imply that a lost command response confirms the physical output state.
                 connected = false;
+                runningMessage.textContent = "DAC state unknown — reconnecting...";
                 document.getElementById("status-system").textContent = "Reconnecting...";
                 document.getElementById("status-dac").textContent = "Unknown — waiting for Feather";
                 graphStatus.textContent = "Connection unavailable — graph paused (last received data).";
@@ -296,30 +303,29 @@ export function initializeDacControl()
         editRevision += 1;
         updateButtons();
         preserveDraft = dirty || commandPending || !connected;
-        showMessage(dirty ? "Unapplied settings. Select Apply Settings to send them." : "Settings match the Feather.");
+        showMessage(dirty ? "New settings will take effect on Start DAC." : "Settings take effect on Start DAC.");
     });
     form.addEventListener("submit", (event) =>
     {
         event.preventDefault();
-        if (state?.ready && connected && !commandPending && dirty)
+        if (state?.ready && connected && !commandPending)
         {
             // Recheck on submission too, covering Enter and programmatic submission.
             // The inline validator replaces browser popups that can block submit
             // before our handler has an opportunity to explain the problem.
-            if (validateDraft())
+            if (state.enabled)
             {
-                synchronize("settings", new URLSearchParams(new FormData(form)));
+                synchronize("stop");
+            }
+            else if (validateDraft())
+            {
+                synchronize("start", new URLSearchParams(new FormData(form)));
             }
             else
             {
                 updateButtons();
             }
         }
-    });
-    outputButton.addEventListener("click", () =>
-    {
-        // Start uses the last applied settings; pending edits never silently reach hardware.
-        synchronize(state.enabled ? "stop" : "start");
     });
     rebootButton.addEventListener("click", () =>
     {
