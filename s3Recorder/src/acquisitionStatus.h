@@ -37,6 +37,8 @@ struct acquisitionStatus
     uint32_t ackResult = 0;
     // Extra observed high-to-low Data Ready events before a read. Events can
     // themselves be missed, so this is not an exact count of all samples lost.
+    // This counter belongs to the task reader. At 30k the ISR reads immediately;
+    // overlapping reads are rejected, but unseen/coalesced edges are not counted.
     uint64_t missedEdges = 0;
     // Totals since S3 boot; Stop/Start preserves them. A rejected read is counted
     // once even if both reasons apply. These are observations, not exact lost data.
@@ -50,4 +52,14 @@ struct acquisitionStatus
     // Packed driver diagnostic: low byte is stage/result; upper bits hold elapsed
     // microseconds. Retained for USB debugging, not sent in the Feather frame.
     uint32_t readDetail = 0;
+    // Timing diagnostics reset on Start and are reported on USB only. Wake delay
+    // starts at ISR entry, so it excludes any delay before the interrupt runs.
+    uint32_t wakeUs = 0;
+    uint32_t spiUs = 0;
+    uint32_t maxWakeUs = 0;
+    uint32_t maxReadUs = 0;
+    uint32_t observedEdges = 0;
+    // Largest interval between 30k ISR entries; a warning clue, not an exact
+    // lost-sample count (GPIO can merge multiple edges while interrupts are masked).
+    uint32_t maxGapUs = 0;
 };

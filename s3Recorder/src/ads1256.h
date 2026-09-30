@@ -29,6 +29,11 @@ public:
      */
     bool stop();
     /**
+     * @brief Deselect the ADC without SPI if the controller itself stopped responding.
+     * Requires acquisition interrupts detached; recovery requires an S3 reboot.
+     */
+    void abandon();
+    /**
      * @brief Read one ready 24-bit sample; discard sample if false is returned.
      */
     bool read(int32_t& sample);
@@ -36,6 +41,11 @@ public:
      * @brief Return saved result code in low byte and read time in upper bits.
      */
     uint32_t readDiagnostic() const;
+    /**
+     * @brief Return microseconds spent inside the last three-byte SPI library call.
+     * This includes library overhead and any preemption, not just clocks on the wire.
+     */
+    uint32_t transferMicros() const;
 private:
     bool waitReady(uint32_t timeoutMs);
     bool configure(uint32_t rate);
@@ -48,4 +58,5 @@ private:
     bool continuous = false;
     bool continuousRead = false;
     uint32_t readDetail = 0;
+    uint32_t transferUs = 0;
 };

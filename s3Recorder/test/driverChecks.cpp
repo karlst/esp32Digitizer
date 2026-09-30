@@ -23,6 +23,15 @@ static uint32_t readCommandUs = 0;
 static std::vector<uint8_t> commands;
 
 /**
+ * @brief Simulate periodic DRDY edges while the stop code waits for a fresh one.
+ */
+static void clockReady()
+{
+    ++testUs;
+    testReady = testUs % 33 < 3 ? HIGH : LOW;
+}
+
+/**
  * @brief Check that the implementation uses the user's traced SPI pins.
  */
 void SPIClass::begin(int clock, int input, int output, int chipSelect)
@@ -145,7 +154,9 @@ int main()
             assert(commands.size() == beforeRead && commands.back() == 0x03);
         }
         testReady = LOW;
+        testClockHook = rate > 2000 ? clockReady : nullptr;
         assert(driver.stop() && commands.back() == 0xfd && testChipSelect == HIGH);
+        testClockHook = nullptr;
     }
     // Unsupported settings and stuck ready levels must fail rather than hang.
     assert(!driver.start(250));

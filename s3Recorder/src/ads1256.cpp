@@ -11,7 +11,8 @@
  * SCLK (pin 12) is the clock; DIN (pin 11) carries commands to the digitizer;
  * DOUT (pin 13) carries results back to the S3.
  *
- * acquisition.cpp decides WHEN to read. This file implements HOW to read.
+ * acquisition.cpp decides WHEN to read. This file implements the task reader;
+ * at 30k, fastCapture.cpp instead reads the same SPI hardware in the interrupt.
  * Only the acquisition background task calls this driver. SPI hardware moves
  * the bits; the CPU waits for each transfer to finish. This code uses no DMA.
  * It returns samples to its caller; it does not save a recording.
@@ -22,6 +23,7 @@
  */
 #include "ads1256.h"
 #include "commandProtocol.h"
+#include <freertos/FreeRTOS.h>
 
 /**
  * @brief Wait for the digitizer to pull its Data Ready wire low.
@@ -175,8 +177,8 @@ bool ads1256::begin()
  * @param rate Samples per second. Call this while acquisition is stopped.
  * @return True if configuration/calibration succeeds and reads can begin.
  *
- * This starts the device; acquisition.cpp subsequently calls read() for each
- * sample. CS stays low during acquisition so those SPI reads reach the chip.
+ * This starts the device; acquisition.cpp chooses the task or interrupt reader.
+ * CS stays low during acquisition so those SPI reads reach the chip.
  */
 bool ads1256::start(uint32_t rate)
 {
@@ -196,7 +198,7 @@ bool ads1256::start(uint32_t rate)
         // Higher rates use RDATAC (0x03: read data continuously), which lets us
         // fetch each new sample without repeating that command and its delay.
         // At 30000 samples/second only 33.3 microseconds separate samples;
-        // the high-rate path still needs hardware testing to prove it keeps up.
+        // fastCapture handles those reads without a per-sample task switch.
         continuousRead = rate > 2000;
         if (continuousRead)
         {
@@ -235,9 +237,35 @@ bool ads1256::stop()
         {
             if (continuousRead)
             {
-                command(0x0f);
+                // SDATAC must fit entirely between a fresh DRDY falling edge
+                // and the following update. A millisecond-scale waitReady()
+                // finds an arbitrary point in that window and can be too late
+                // at 30k. Briefly prevent task preemption, observe high then low,
+                // and send the eight stop bits immediately. Bound the whole
+                // edge wait to 1 ms (even 7500/s supplies an edge within 134 us).
+                portMUX_TYPE stopLock = portMUX_INITIALIZER_UNLOCKED;
+                portENTER_CRITICAL(&stopLock);
+                const uint32_t started = micros();
+                while (digitalRead(readyPin) == LOW && micros() - started < 1000)
+                {
+                    // Discard the age-unknown ready interval.
+                }
+                const bool sawHigh = digitalRead(readyPin) == HIGH;
+                while (sawHigh && digitalRead(readyPin) == HIGH && micros() - started < 1000)
+                {
+                    // The next falling edge opens a full command window.
+                }
+                retVal = sawHigh && digitalRead(readyPin) == LOW && micros() - started < 1000;
+                if (retVal)
+                {
+                    command(0x0f);
+                }
+                portEXIT_CRITICAL(&stopLock);
             }
-            command(0xfd);
+            if (retVal)
+            {
+                command(0xfd);
+            }
         }
         // Block further read() calls even if the device did not respond.
         continuous = false;
@@ -245,6 +273,18 @@ bool ads1256::stop()
     // Deselect the digitizer whether the stop succeeded or failed.
     digitalWrite(10, HIGH);
     return retVal;
+}
+
+/**
+ * @brief Stop software access without waiting on an already failed SPI controller.
+ * The interrupt reader has a hardware deadline; calling the ordinary library's
+ * unbounded transfer afterward would defeat that protection. Deselect the ADC
+ * and require reboot. We cannot claim the chip entered standby in this case.
+ */
+void ads1256::abandon()
+{
+    continuous = false;
+    digitalWrite(10, HIGH);
 }
 
 /**
@@ -284,7 +324,11 @@ bool ads1256::read(int32_t& sample)
         // The library waits for completion and copies them into bytes; no DMA
         // or per-bit software reads are involved. Then preserve the sample's
         // sign while expanding it from 24 bits into a signed 32-bit integer.
+        // Measure only the transfer separately from the command and ready checks.
+        // Store numbers here; printing in this time-sensitive path would change it.
+        const uint32_t transferStartUs = micros();
         bus.transferBytes(zeros, bytes, 3);
+        transferUs = micros() - transferStartUs;
         sample = commandProtocol::signedSample(bytes);
         // DRDY should rise after the sample is read. Checking immediately after
         // SPI completion rejected reads during bench testing. Allow up to three
@@ -311,5 +355,14 @@ bool ads1256::read(int32_t& sample)
 uint32_t ads1256::readDiagnostic() const
 {
     const uint32_t retVal = readDetail;
+    return retVal;
+}
+
+/**
+ * @brief Return the saved SPI-call duration without touching hardware again.
+ */
+uint32_t ads1256::transferMicros() const
+{
+    const uint32_t retVal = transferUs;
     return retVal;
 }

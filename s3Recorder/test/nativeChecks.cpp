@@ -20,6 +20,8 @@
 #include "nativeChecks.h"
 #include "acquisition.h"
 #include "featherLink.h"
+#include <soc/spi_struct.h>
+#include <soc/gpio_struct.h>
 
 // Tests advance simulated clocks explicitly and choose whether fake reads fail.
 // edgeDuringRead injects an observed ready event in the middle of a fake SPI read.
@@ -37,6 +39,7 @@ static bool queueFull = false;
 static acquisitionCommand queued;
 static int startCalls = 0;
 static int32_t rawValue = -123456;
+static int abandonCalls = 0;
 
 /**
  * @brief Simulate ADC initialization.
@@ -50,6 +53,10 @@ bool ads1256::start(uint32_t) { ++startCalls; return startOk; }
  * @brief Simulate either successful standby or a missing ADC.
  */
 bool ads1256::stop() { return stopOk; }
+/**
+ * @brief Simulate deselection without touching a failed controller.
+ */
+void ads1256::abandon() { ++abandonCalls; }
 /**
  * @brief Simulate a complete or failed conversion transfer.
  */
@@ -67,6 +74,10 @@ bool ads1256::read(int32_t& value)
  * @brief Fake an incomplete transfer diagnostic when readOk is false.
  */
 uint32_t ads1256::readDiagnostic() const { return readOk ? 0 : 3; }
+/**
+ * @brief No SPI time elapses in the state-machine fake.
+ */
+uint32_t ads1256::transferMicros() const { return 0; }
 /**
  * @brief Allocate a single simulated queue.
  */
@@ -294,7 +305,11 @@ void nativeChecks::checkLink()
     testMs = 1000;
     Serial1.output.clear();
     assert(link.report(status));
+#ifdef S3_LEGACY_STATUS
+    assert(Serial1.output == "S3,2,1000,0,0,0,0,4294967295,0,0,1000,0,0\n");
+#else
     assert(Serial1.output == "S3,3,1000,0,0,0,0,4294967295,0,0,1000,0,0,0,0,0,0,0,0\n");
+#endif
     status.sampleCount = UINT64_MAX;
     status.missedEdges = UINT64_MAX;
     status.rejectedReads = UINT64_MAX;
@@ -311,7 +326,9 @@ void nativeChecks::checkLink()
     assert(link.report(status));
     assert(Serial1.output.find("18446744073709551615") != std::string::npos);
     assert(Serial1.output.find("-8388608,20,") != std::string::npos);
+#ifndef S3_LEGACY_STATUS
     assert(Serial1.output.find(",18446744073709551615,18446744073709551615,18446744073709551615,18446744073709551615,18446744073709551615,3\n") != std::string::npos);
+#endif
     assert(Serial1.output.size() < 384);
     Serial1.capacity = 0;
     assert(!link.report(status));
@@ -326,7 +343,11 @@ void nativeChecks::checkLink()
     recorder.execute(queued);
     Serial1.output.clear();
     link.update();
+#ifdef S3_LEGACY_STATUS
+    assert(Serial1.flushed && Serial1.output.find(",42,1\n") != std::string::npos);
+#else
     assert(Serial1.flushed && Serial1.output.find(",42,1,0,0,0,0,0,0\n") != std::string::npos);
+#endif
     assert(ESP.restarts == 0);
     testMs += 100;
     link.update();
@@ -341,6 +362,68 @@ int main()
     checkProtocol();
     nativeChecks::checkAcquisition();
     nativeChecks::checkLink();
+    nativeChecks::checkFastAcquisition();
     std::cout << "PASS: protocol, framing, signed samples, acquisition state/faults, replay protection, UART and reboot ordering.\n";
     return 0;
+}
+
+/**
+ * @brief Finish simulated SPI immediately; dedicated reader tests cover its timing.
+ */
+static void finishFastTransfer()
+{
+    ++testUs;
+    GPIO.status = 0;
+    GPSPI2.cmd.update = 0;
+    if (GPSPI2.cmd.usr)
+    {
+        GPSPI2.cmd.usr = 0;
+        GPSPI2.data_buf[0] = 0x563412;
+        GPIO.in = 1U << 9;
+    }
+}
+
+/**
+ * @brief Verify task/ISR handoff, final Stop accounting, restart and controller faults.
+ */
+void nativeChecks::checkFastAcquisition()
+{
+    acquisition recorder;
+    recorder.current.ready = true;
+    startOk = true;
+    stopOk = true;
+    testMs = 100;
+    testUs = 100000;
+    testClockHook = finishFastTransfer;
+    recorder.execute({100, acquisitionCommand::Action::start, 30000});
+    assert(recorder.fastMode);
+    // Two interrupt reads occur before the worker copies anything. Count both,
+    // retain only the latest value, and never count them again on the next copy.
+    GPIO.in = 0;
+    acquisition::readyInterrupt(&recorder);
+    GPIO.in = 0;
+    acquisition::readyInterrupt(&recorder);
+    recorder.collectFast();
+    recorder.collectFast();
+    assert(recorder.current.sampleCount == 2 && recorder.current.latestRaw == 0x123456);
+    GPIO.in = 0;
+    acquisition::readyInterrupt(&recorder);
+    recorder.execute({101, acquisitionCommand::Action::stop, 0});
+    assert(!recorder.fastMode && !recorder.current.running && recorder.current.sampleCount == 3);
+    recorder.execute({102, acquisitionCommand::Action::start, 30000});
+    GPIO.in = 0;
+    acquisition::readyInterrupt(&recorder);
+    recorder.collectFast();
+    assert(recorder.current.sampleCount == 4);
+    // A controller already busy at entry must bypass ordinary SPI stop calls;
+    // preserve the four good readings and account for one rejected attempt.
+    testClockHook = nullptr;
+    GPSPI2.cmd.usr = 1;
+    GPIO.in = 0;
+    acquisition::readyInterrupt(&recorder);
+    recorder.collectFast();
+    assert(abandonCalls == 1 && !recorder.current.ready && !recorder.current.running);
+    assert(recorder.current.sampleCount == 4 && recorder.current.rejectedReads == 1);
+    assert(recorder.current.readFailures == 1 && recorder.current.error == 3);
+    GPSPI2 = {};
 }

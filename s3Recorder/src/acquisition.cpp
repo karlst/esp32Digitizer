@@ -11,11 +11,14 @@
  * 2. taskEntry() starts run(), which initializes the digitizer and waits.
  * 3. Communications code calls submit() to request Start, Stop, or Reboot.
  * 4. run() takes that command from the queue and calls execute().
- * 5. While running, collect() waits for ready samples and calls adc.read().
- *    ads1256.cpp implements the actual SPI commands and three-byte reads.
+ * 5. Below 30k, collect() waits for samples and calls adc.read() in ads1256.cpp.
+ *    At 30k, readyInterrupt() calls fastCapture::onReady() to read immediately;
+ *    collectFast() copies its latest sample and totals into ordinary status.
  *
  * The task runs on CPU core 0 and is the only task allowed to operate the
- * digitizer. The DRDY interrupt only counts events and wakes this task.
+ * digitizer. Below 30k the interrupt counts events and wakes this task. At 30k
+ * it performs the short SPI read itself; the task detaches that interrupt before
+ * sending commands, so both paths cannot use SPI at the same time.
  * The communications loop on the other core submits commands and reads status;
  * it never reaches into the digitizer while a sample is being read.
  *
@@ -129,7 +132,8 @@ void acquisition::taskEntry(void* argument)
  *
  * An edge is a voltage-level change. We attach this function only to FALLING
  * edges: DRDY changing from high to low. This interrupt briefly interrupts
- * normal task execution; it must stay short. It does not read SPI or print.
+ * normal task execution. At 30k it performs the bounded read immediately; at
+ * lower rates it only wakes the task. Neither path prints or allocates memory.
  * IRAM_ATTR places this function in the S3's internal instruction RAM.
  */
 void IRAM_ATTR acquisition::readyInterrupt(void* argument)
@@ -137,6 +141,12 @@ void IRAM_ATTR acquisition::readyInterrupt(void* argument)
     // Recover our object and count this event. collect() compares this count
     // before/after reading to detect another sample arriving during the read.
     acquisition* self = static_cast<acquisition*>(argument);
+    if (self->fastMode)
+    {
+        self->capture.onReady();
+        return;
+    }
+    self->readyUs = micros();
     ++self->readyEdges;
     // A task notification is a wake-up signal, not the sample itself. Use the
     // FromISR version because we are inside an interrupt service routine (ISR).
@@ -163,7 +173,15 @@ void acquisition::fault(uint32_t error)
     // Stop new wake-up interrupts, then ask the digitizer to stop. Keep the
     // original error even if that stop attempt also fails.
     detachInterrupt(ads1256::readyPin);
-    adc.stop();
+    fastMode = false;
+    if ((current.readDetail & 255) == 4)
+    {
+        adc.abandon();
+    }
+    else
+    {
+        adc.stop();
+    }
     // Report that software collection has stopped; this does not guarantee
     // an unresponsive digitizer actually entered standby.
     current.running = false;
@@ -221,6 +239,12 @@ void acquisition::execute(const acquisitionCommand& command)
                     current.error = 0;
                     current.readFault = 0;
                     current.readDetail = 0;
+                    current.wakeUs = 0;
+                    current.spiUs = 0;
+                    current.maxWakeUs = 0;
+                    current.maxReadUs = 0;
+                    current.observedEdges = 0;
+                    current.maxGapUs = 0;
                     current.measuredRate = 0;
                     // Remove wake-up signals left from the previous run (true
                     // clears the notification count; zero means do not wait).
@@ -228,12 +252,17 @@ void acquisition::execute(const acquisitionCommand& command)
                     // interrupt. Pass this object to readyInterrupt().
                     ulTaskNotifyTake(pdTRUE, 0);
                     readyEdges = 0;
+                    readyUs = 0;
+                    awaitingFirstEdge = command.rate > 2000;
+                    fastMode = command.rate == 30000;
+                    capture.reset();
+                    lastFastCount = 0;
                     previousEdge = 0;
                     attachInterruptArg(ads1256::readyPin, readyInterrupt, this, FALLING);
                     // Start the no-sample timeout and measured-rate window now.
-                    // DRDY may already be low when the interrupt is attached;
-                    // collect() checks the pin itself as well as wake-ups, so
-                    // that already-ready sample does not require a new edge.
+                    // At high rates, ignore a sample that predates interrupt
+                    // attachment: its remaining read window is unknown. The
+                    // first observed falling edge begins this run's collection.
                     lastReadMs = millis();
                     rateWindowMs = lastReadMs;
                     rateWindowCount = current.sampleCount;
@@ -251,6 +280,12 @@ void acquisition::execute(const acquisitionCommand& command)
             // Both Stop and Reboot first stop sample collection. This else
             // handles those two actions because the parser rejects unknown ones.
             detachInterrupt(ads1256::readyPin);
+            if (fastMode)
+            {
+                // Fold in the final accepted samples before reporting Stop.
+                collectFast();
+                fastMode = false;
+            }
             const bool stopped = adc.stop();
             current.running = false;
             current.measuredRate = 0;
@@ -302,7 +337,17 @@ void acquisition::run()
         // Returning here allows another command check between read attempts.
         if (current.running)
         {
-            collect();
+            if (fastMode)
+            {
+                collectFast();
+                // ISR capture continues during sleep. This gives idle/system tasks
+                // CPU time instead of a busy task starving the core at 30k.
+                vTaskDelay(pdMS_TO_TICKS(1));
+            }
+            else
+            {
+                collect();
+            }
         }
         else
         {
@@ -328,15 +373,20 @@ void acquisition::collect()
     {
         // DRDY low means a sample is already waiting, so read without sleeping.
         // Otherwise sleep until notified, or until the 20-millisecond wait ends.
-        if (digitalRead(ads1256::readyPin) != LOW)
+        // Calibration can leave DRDY low before we attach the interrupt. At high
+        // rates that old sample has unknown remaining read time. Establish this
+        // run's boundary at a newly observed ready event instead; the pre-boundary
+        // calibration sample is not an acquired or rejected sample in this run.
+        if (digitalRead(ads1256::readyPin) != LOW || (awaitingFirstEdge && readyEdges == 0))
         {
             // Clear accumulated notifications on wake. A notification only says
             // "check the device"; recheck the pin below before reading. The
             // timeout lets run() check commands even if no more samples arrive.
             ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(20));
         }
-        if (digitalRead(ads1256::readyPin) == LOW)
+        if (digitalRead(ads1256::readyPin) == LOW && (!awaitingFirstEdge || readyEdges != 0))
         {
+            awaitingFirstEdge = false;
             // Save how many ready interrupts have occurred. The difference from
             // the last accepted read reveals observed events we did not service.
             // unsigned subtraction also handles the 32-bit counter wrapping.
@@ -349,9 +399,24 @@ void acquisition::collect()
                 current.missedEdges += elapsedEdges - 1;
             }
             int32_t sample = 0;
+            // Split the observed latency into task wake delay and driver read time.
+            // No observed edge means startup already found the pin low; UINT32_MAX
+            // marks an unknown delay rather than pretending it was immediate.
+            current.wakeUs = edgeBefore ? micros() - readyUs : UINT32_MAX;
             const bool complete = adc.read(sample);
             // Save this observation once so the decision and reason counters agree.
             const bool overlapped = readyEdges != edgeBefore;
+            current.observedEdges = readyEdges;
+            current.readDetail = adc.readDiagnostic();
+            current.spiUs = adc.transferMicros();
+            if (current.wakeUs != UINT32_MAX && current.wakeUs > current.maxWakeUs)
+            {
+                current.maxWakeUs = current.wakeUs;
+            }
+            if ((current.readDetail >> 8) > current.maxReadUs)
+            {
+                current.maxReadUs = current.readDetail >> 8;
+            }
             // Accept only if the driver succeeded AND no new ready interrupt
             // occurred during the read. Otherwise the three received bytes might
             // not belong to one sample, so stop rather than record suspect data.
@@ -414,5 +479,68 @@ void acquisition::collect()
         {
             publish();
         }
+    }
+}
+
+/**
+ * @brief Merge the interrupt reader's latest result and totals into normal status.
+ *
+ * This task does not read SPI in fast mode. It copies an internally consistent
+ * capture record, accounts for all accepted reads since the last copy, and keeps
+ * the same rate/freshness/fault behavior as the low-rate path. No samples are
+ * lost merely because this task wakes less often: the ISR counts each accepted read.
+ * This remains a monitor, not a recording buffer for all raw sample values.
+ */
+void acquisition::collectFast()
+{
+    // Copy under a short same-core interrupt mask, then release it before doing
+    // arithmetic or publishing across cores. Counts include every accepted read,
+    // even when several interrupts ran between worker visits.
+    const fastCapture::captureSnapshot result = capture.snapshot();
+    if (result.count != lastFastCount)
+    {
+        current.sampleCount += result.count - lastFastCount;
+        lastFastCount = result.count;
+        current.latestRaw = result.raw;
+        current.hasSample = true;
+        current.lastSampleMs = millis() - (micros() - result.sampleUs) / 1000;
+        lastReadMs = current.lastSampleMs;
+    }
+    // These timings describe ISR work, not a task wake or library transfer.
+    // Zero wake/spi values at 30k mean those stages are absent, not free SPI.
+    current.observedEdges = result.events;
+    current.wakeUs = 0;
+    current.spiUs = 0; // No separately timed library call in the direct-register path.
+    current.readDetail = (result.readUs << 8) | result.stage;
+    current.maxReadUs = result.maxReadUs;
+    current.maxGapUs = result.maxGapUs;
+    if (result.fault && current.readFault == 0)
+    {
+        // Capture freezes at its first bad read. Account for that attempt once,
+        // preserve earlier good samples, detach the ISR and expose the error.
+        ++current.rejectedReads;
+        current.readFailures += (result.fault & 1) != 0;
+        current.overlapReads += (result.fault & 2) != 0;
+        current.readFault = result.fault;
+        fault(3);
+    }
+    else if (current.running && millis() - lastReadMs >= 100)
+    {
+        // A silent input produces no interrupt to report its own failure.
+        ++current.readyTimeouts;
+        fault(2);
+    }
+    const uint32_t elapsedMs = millis() - rateWindowMs;
+    // Report accepted reads per elapsed second, and publish status about every
+    // 10 ms. The communications task independently controls UART transmission.
+    if (current.running && elapsedMs >= 1000)
+    {
+        current.measuredRate = static_cast<uint32_t>((current.sampleCount - rateWindowCount) * 1000 / elapsedMs);
+        rateWindowCount = current.sampleCount;
+        rateWindowMs += elapsedMs;
+    }
+    if (millis() - lastPublishMs >= 10)
+    {
+        publish();
     }
 }

@@ -62,6 +62,19 @@ bool featherLink::report(const acquisitionStatus& status)
     // accepted sample, not the age of this periodic communications report.
     const uint32_t nowMs = millis();
     const uint32_t age = status.hasSample ? nowMs - status.lastSampleMs : UINT32_MAX;
+#ifdef S3_LEGACY_STATUS
+    // Bench builds can keep the currently deployed older Feather UI operational.
+    // Only the UART frame changes; full diagnostics remain available over USB.
+    const int length = snprintf(frame, sizeof(frame),
+        "S3,2,%lu,%u,%llu,%lu,%ld,%lu,%lu,%u,%lu,%lu,%lu\n",
+        static_cast<unsigned long>(nowMs), status.ready ? 1 : 0,
+        static_cast<unsigned long long>(status.sampleCount),
+        static_cast<unsigned long>(status.running ? status.measuredRate : 0),
+        static_cast<long>(status.latestRaw), static_cast<unsigned long>(age),
+        static_cast<unsigned long>(status.error), status.running ? 1 : 0,
+        static_cast<unsigned long>(status.rate), static_cast<unsigned long>(status.ackId),
+        static_cast<unsigned long>(status.ackResult));
+#else
     const int length = snprintf(frame, sizeof(frame),
         "S3,3,%lu,%u,%llu,%lu,%ld,%lu,%lu,%u,%lu,%lu,%lu,%llu,%llu,%llu,%llu,%llu,%lu\n",
         static_cast<unsigned long>(nowMs), status.ready ? 1 : 0,
@@ -77,6 +90,7 @@ bool featherLink::report(const acquisitionStatus& status)
         static_cast<unsigned long long>(status.overlapReads),
         static_cast<unsigned long long>(status.readyTimeouts),
         static_cast<unsigned long>(status.readFault));
+#endif
     // snprintf reports the length it needed. Reject truncation, and only write
     // when the whole line fits, so Feather never sees a deliberately partial report.
     const bool retVal = length > 0 && length < static_cast<int>(sizeof(frame)) &&
@@ -183,6 +197,18 @@ void featherLink::update()
         if (linkLength > 0 && linkLength < static_cast<int>(sizeof(text)) && Serial.availableForWrite() >= linkLength)
         {
             Serial.write(reinterpret_cast<const uint8_t*>(text), linkLength);
+        }
+        // Timing is captured by acquisition, but formatted only here on core 1.
+        // Unknown first-edge latency is printed as UINT32_MAX, never as zero.
+        const int timingLength = snprintf(text, sizeof(text),
+            "Timing wakeUs=%lu spiUs=%lu readUs=%lu maxWakeUs=%lu maxReadUs=%lu edges=%lu maxGapUs=%lu\n",
+            static_cast<unsigned long>(state.wakeUs), static_cast<unsigned long>(state.spiUs),
+            static_cast<unsigned long>(state.readDetail >> 8), static_cast<unsigned long>(state.maxWakeUs),
+            static_cast<unsigned long>(state.maxReadUs), static_cast<unsigned long>(state.observedEdges),
+            static_cast<unsigned long>(state.maxGapUs));
+        if (timingLength > 0 && timingLength < static_cast<int>(sizeof(text)) && Serial.availableForWrite() >= timingLength)
+        {
+            Serial.write(reinterpret_cast<const uint8_t*>(text), timingLength);
         }
         lastDebugMs = nowMs;
     }

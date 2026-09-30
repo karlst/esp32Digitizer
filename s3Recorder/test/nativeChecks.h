@@ -12,4 +12,5 @@ class nativeChecks
 public:
     static void checkAcquisition();
     static void checkLink();
+    static void checkFastAcquisition();
 };

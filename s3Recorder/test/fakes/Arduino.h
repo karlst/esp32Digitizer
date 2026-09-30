@@ -27,6 +27,8 @@ extern int testChipSelect;
 // same simulated state. UINT32_MAX here means no scheduled DRDY rise.
 inline bool testUartRxMapped = false;
 inline uint32_t testReadyRiseAt = UINT32_MAX;
+// Optional hardware simulation tick; ordinary tests leave time under manual control.
+inline void (*testClockHook)() = nullptr;
 /**
  * @brief Return simulated elapsed time.
  */
@@ -34,7 +36,7 @@ inline uint32_t millis() { return testMs; }
 /**
  * @brief Return simulated SPI timing.
  */
-inline uint32_t micros() { return testUs; }
+inline uint32_t micros() { if (testClockHook) { testClockHook(); } return testUs; }
 /**
  * @brief Return simulated DRDY.
  */
