@@ -185,6 +185,14 @@ bool ads1256::read(int32_t& sample)
         }
         bus.transferBytes(zeros, bytes, 3);
         sample = commandProtocol::signedSample(bytes);
+        // SPI completion is the controller's last clock, not a guarantee that
+        // the external DRDY pin has propagated high through the board/wiring.
+        // Allow at most 3 us for that acknowledgement; a stuck-low pin still
+        // fails, and the worker independently rejects a new edge during the read.
+        for (uint8_t attempt = 0; attempt < 3 && digitalRead(readyPin) == LOW; ++attempt)
+        {
+            delayMicroseconds(1);
+        }
         retVal = digitalRead(readyPin) == HIGH;
         readDetail = ((micros() - startedUs) << 8) | (retVal ? 0U : 3U);
     }

@@ -36,7 +36,8 @@ It never covers SPI, calibration, waiting, text formatting, or UART output.
 ## ADC choices and assumptions
 
 The driver follows [TI's ADS1256 datasheet](https://www.ti.com/lit/ds/symlink/ads1256.pdf).
-It assumes the module's usual 7.68 MHz clock and uses SPI mode 1 at 1.9 MHz. It selects
+It assumes the module's usual 7.68 MHz clock and uses SPI mode 1, at 1 MHz for
+initialization and rates through 2000 samples/s, and 1.9 MHz for higher rates. It selects
 AIN0 minus AIN1 at gain one, with input buffering and sensor-test currents disabled.
 The clock output is unused. Every Start validates register readback and performs
 self-calibration before continuous reads. The supported rates match the Feather menu.
@@ -44,8 +45,11 @@ self-calibration before continuous reads. The supported rates match the Feather 
 At 100 through 2000 samples/s each conversion uses an explicit RDATA command;
 the additional command and wait fit comfortably within the sampling period.
 At 7500 through 30000 samples/s continuous-read mode avoids that per-sample overhead.
-Low-rate RDATAC initially failed the DRDY completion check on the bench after one
-or two reads; the explicit-read path is being checked as a simpler baseline.
+The original read-completion check failed after one or two readings because it
+required DRDY high immediately when the S3 SPI controller finished. Real hardware
+needed a short propagation allowance. The driver now waits at most three microseconds
+for DRDY high. A stuck-low signal still fails; a new readiness edge during the read
+still invalidates the sample. This change restored sustained 1000-sample/s operation.
 The driver reads three bytes with zeroes on DIN so it cannot accidentally send a
 stop/reset opcode. A read crossing another readiness edge is treated as ambiguous
 and stops acquisition. Constant raw values, including zero and full scale, are
@@ -95,6 +99,11 @@ check status and analog response, exercise Stop/Reboot and disconnect behavior, 
 increase rates. Actual 30000-sample/s throughput, missed events, core scheduling,
 and watchdog behavior remain unverified. No watchdog is disabled to hide starvation.
 USB `missedEdges` is a diagnostic lower bound, not proof of lossless acquisition.
+
+The USB bench console also accepts the same strict `CMD,2,id,action,rate` commands.
+It uses a separate bounded parser; plain debug text cannot become a command. This
+allows automated Start/Stop tests without another browser click. It never starts
+acquisition automatically. Avoid issuing USB and Feather commands simultaneously.
 
 The existing generic S3 board configuration is retained (8 MB flash layout, PSRAM
 unused); the recorded hardware has 16 MB flash/8 MB PSRAM. This version needs neither

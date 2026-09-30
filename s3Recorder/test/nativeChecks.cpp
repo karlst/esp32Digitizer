@@ -16,6 +16,7 @@
 #include "featherLink.h"
 
 uint32_t testMs = 0;
+uint32_t testUs = 0;
 int testReady = LOW;
 fakeSerial Serial;
 fakeSerial Serial1;

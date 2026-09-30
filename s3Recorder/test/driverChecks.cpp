@@ -17,6 +17,7 @@ static bool missing = false;
 static bool corruptReadback = false;
 static bool registerRead = false;
 static bool readCount = false;
+static bool holdReadyLow = false;
 static uint32_t readCommandUs = 0;
 static std::vector<uint8_t> commands;
 
@@ -64,7 +65,9 @@ void SPIClass::transferBytes(const uint8_t* input, uint8_t* output, uint32_t cou
     {
         assert(count == 3);
         output[0] = 0x80; output[1] = 0; output[2] = 0;
-        testReady = HIGH;
+        // Reproduce real hardware: DRDY need not be high at controller completion.
+        testReady = LOW;
+        testReadyRiseAt = holdReadyLow ? UINT32_MAX : testUs + 2;
     }
 }
 /** @brief Capture the ADC configuration rather than pretending every read is valid. */
@@ -109,6 +112,9 @@ int main()
     }
     assert(!driver.start(250));
     assert(driver.start(1000));
+    holdReadyLow = true;
+    assert(!driver.read(value) && (driver.readDiagnostic() & 255) == 3);
+    holdReadyLow = false;
     testReady = HIGH;
     const uint32_t before = testMs;
     assert(!driver.stop() && testMs - before >= 100 && testChipSelect == HIGH);

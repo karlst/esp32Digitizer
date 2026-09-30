@@ -19,12 +19,21 @@ extern int testReady;
 extern int testChipSelect;
 // Model the S3 native UART RX mux: ordinary GPIO configuration removes it.
 inline bool testUartRxMapped = false;
+inline uint32_t testReadyRiseAt = UINT32_MAX;
 /** @brief Return simulated elapsed time. */
 inline uint32_t millis() { return testMs; }
 /** @brief Return simulated SPI timing. */
 inline uint32_t micros() { return testUs; }
 /** @brief Return simulated DRDY. */
-inline int digitalRead(int) { return testReady; }
+inline int digitalRead(int pin)
+{
+    if (pin == 9 && testReadyRiseAt != UINT32_MAX && testUs >= testReadyRiseAt)
+    {
+        testReady = HIGH;
+        testReadyRiseAt = UINT32_MAX;
+    }
+    return testReady;
+}
 /** @brief Model the native UART pin being returned to ordinary GPIO mode. */
 inline void pinMode(int pin, int) { if (pin == 18) { testUartRxMapped = false; } }
 /** @brief Observe the driver's chip-select level. */
