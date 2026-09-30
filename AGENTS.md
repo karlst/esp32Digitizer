@@ -34,6 +34,11 @@ These conventions apply throughout this project and may be updated as developmen
   summaries such as "ADC owner" or "complete conversion" without explanation.
 - Keep comments proportional: a simple getter needs its meaning and limitations,
   not a long restatement of its code. Comments must describe actual behavior.
+- For buffering and data-transfer code, identify the exact call that reads or
+  writes the data. Explain pointer arithmetic, wraparound, ownership transfer,
+  and synchronization with a concrete example where useful. Labels such as
+  "producer", "consumer", "sink", and "publish" need their project-specific
+  meaning explained; they are not explanations by themselves.
 
 ## Agreement on authorizing work
 

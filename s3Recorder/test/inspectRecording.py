@@ -11,19 +11,28 @@ from pathlib import Path
 
 def inspect(path):
     """Validate one part and report its first/last raw sample and completion state."""
+    # Open read-only: this is for copied recordings on the PC, not a command to
+    # the S3. A malformed file raises ValueError rather than returning success.
     with path.open("rb") as source:
         header = source.read(512)
         if len(header) != 512 or header[:8] != b"S3REC001":
             raise ValueError("missing recording header")
+        # struct format < means little endian; I is unsigned 32-bit and Q is
+        # unsigned 64-bit. Offsets match shared/recordingFileFormat.md.
         size, version, encoding, rate, width, disposition = struct.unpack_from("<6I", header, 8)
         payload, first_index, session, part = struct.unpack_from("<QQII", header, 32)
         if (size, version, encoding, width) != (512, 1, 1, 4) or disposition not in (0, 1, 2):
             raise ValueError("unsupported header/format")
+        # Trust neither the closing header nor file length alone: a completed
+        # file must agree in both places. An interrupted file may retain the
+        # original open header, so its payload count can legitimately be stale.
         actual = path.stat().st_size - 512
         if disposition == 1 and (actual != payload or actual % 4):
             raise ValueError("normally closed header disagrees with payload length")
         first = last = None
         remaining = actual - actual % 4
+        # Read in bounded chunks, ignoring an incomplete final word. Check
+        # signed range, not voltage calibration or continuous ADC timing.
         while remaining:
             block = source.read(min(65536, remaining))
             if not block or len(block) % 4:

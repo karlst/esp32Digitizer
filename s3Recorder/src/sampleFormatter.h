@@ -13,5 +13,7 @@
 class sampleFormatter
 {
 public:
+    // One measurement in, four copied bytes out. Static means no formatter object
+    // or private state is required. See the .cpp for byte order and negative examples.
     static bool BUFFERED_IRAM submit(bufferedWriter& writer, int32_t sample);
 };

@@ -3,13 +3,26 @@
  * @brief Keep card-specific details out of the reusable RAM buffer/writer.
  * Reading path: mount(), open(), write(), close(). Each part begins with a
  * 512-byte header; data after it is described by that header, not this filesystem.
- * An open/incomplete header remains distinguishable after power loss or failure.
+ * An open/incomplete header can identify unfinished work after a fault; power
+ * loss can also damage filesystem metadata, so no marker guarantees recovery.
+ *
+ * This is the card-specific half of recording. bufferedWriter owns queued RAM
+ * bytes; this object owns the actual file and filesystem. recordingService is
+ * the only task allowed to call us. None of these functions runs inside the
+ * digitizer interrupt. To trace a sample to disk, follow write(); to understand
+ * what Start/Stop do to files, follow open()/openPart() and close()/closePart().
  */
 #include "sdRecordingSink.h"
 #include <cstring>
 #include <cstdio>
 
-/** @brief Put an unsigned integer in the header, least significant byte first. */
+/**
+ * @brief Put an unsigned integer in the header, least significant byte first.
+ * Used only when building file headers, never in the ADC interrupt.
+ * destination points at the field being filled; bytes is its width (4 or 8).
+ * For each successive byte, shift away another eight bits and keep the lowest
+ * remaining eight. This defines a portable file format independent of CPU order.
+ */
 static void putLittle(uint8_t* destination, uint64_t value, size_t bytes)
 {
     for (size_t index = 0; index < bytes; ++index)
@@ -23,6 +36,16 @@ static void putLittle(uint8_t* destination, uint64_t value, size_t bytes)
  * A failed mount is reported as I/O failure: it can mean missing card, wiring,
  * power, or unsupported formatting; software cannot reliably distinguish them.
  * Repeated calls reuse a successful mount. Card removal during use is an error.
+ *
+ * Called by the storage thread at startup and before opening/deleting files.
+ * Mount means recognize the EXISTING filesystem and make its directories usable;
+ * it does not format the card. SdFs handles both FAT and exFAT through one API.
+ * The bus pin numbers are S3 GPIO numbers: clock 5, card-to-S3 data 6 (DO/MISO),
+ * S3-to-card data 7 (DI/MOSI), select 4. SPI sends bits over those wires; it is a
+ * separate controller from the digitizer's SPI so slow card work cannot use its bus.
+ * @return True means this object has mounted successfully. It is not a fresh card
+ * presence test on every call; removing an already-mounted card causes later I/O
+ * failures. Recovery from removal is not implemented as automatic hot swapping.
  */
 bool sdRecordingSink::mount()
 {
@@ -53,15 +76,26 @@ bool sdRecordingSink::mount()
  * @brief Recognize only files created by this recorder, including large IDs.
  * Full consumption plus the canonical spelling prevents deleting similarly
  * named unrelated files. No directory traversal or arbitrary path is accepted.
+ *
+ * Used while choosing the next session number and while filtering deletion.
+ * name is a directory entry's filename, not a complete path. Session and part
+ * outputs are meaningful only if true is returned. Both IDs must be nonzero.
+ * For example recording_000002_001.bin matches; recording_2_1.bin and a name with
+ * extra characters do not. The six/three digits are minimum padding, not limits.
+ * This recognizes a filename convention; it does not inspect the file's contents.
  */
 bool sdRecordingSink::recordingName(const char* name, uint32_t& foundSession, uint32_t& foundPart)
 {
+    // Parse both numbers and record where scanning stopped (%n). Checking that
+    // position against the string terminator rejects a valid prefix plus junk.
     unsigned long sessionValue = 0, partValue = 0;
     int end = 0;
     bool retVal = std::sscanf(name, "recording_%lu_%lu.bin%n", &sessionValue, &partValue, &end) == 2 &&
         name[end] == '\0' && sessionValue && partValue;
     if (retVal)
     {
+        // Rebuild the exact spelling our recorder generates, including zero padding.
+        // Only the exact filename convention is eligible for automatic deletion.
         char canonical[64];
         std::snprintf(canonical, sizeof(canonical), "recording_%06lu_%03lu.bin", sessionValue, partValue);
         retVal = std::strcmp(name, canonical) == 0;
@@ -75,6 +109,14 @@ bool sdRecordingSink::recordingName(const char* name, uint32_t& foundSession, ui
  * @brief Create a new session without replacing previous recordings.
  * Scan existing names to choose the next number, then use O_EXCL so even an
  * unexpected collision fails safely. No samples may be submitted before success.
+ *
+ * recordingService calls this before allowing ADC samples into the ring.
+ * A session is one Start-to-Stop recording; a part is one file within that session.
+ * @param sampleRate Requested ADC measurements per second, saved in each header.
+ * @return True only after the first part and its initial header are ready. False
+ * leaves acquisition stopped; it does not fall back to recording nowhere.
+ * Existing names determine the next number after reboot. If all recordings were
+ * deleted, numbering may restart. This is a file naming scheme, not a permanent ID.
  */
 bool sdRecordingSink::open(uint32_t sampleRate)
 {
@@ -83,6 +125,8 @@ bool sdRecordingSink::open(uint32_t sampleRate)
     {
         retVal = filesystem.mkdir("/recordings");
     }
+    // Inspect filenames only; do not read or alter old sample data. An existing
+    // directory with a recorder-shaped name also reserves that number safely.
     uint32_t highest = 0;
     FsFile directory;
     retVal = retVal && directory.open(&filesystem, "/recordings", O_RDONLY) && directory.isDir();
@@ -107,6 +151,8 @@ bool sdRecordingSink::open(uint32_t sampleRate)
     {
         retVal = directory.close() && retVal;
     }
+    // Avoid wrapping the last possible 32-bit session number back to zero.
+    // Reset byte accounting only when beginning a new session, not on part rollover.
     if (retVal && highest != UINT32_MAX)
     {
         session = highest + 1; part = 1; rate = sampleRate;
@@ -127,9 +173,21 @@ bool sdRecordingSink::open(uint32_t sampleRate)
  * (0=open, 1=closed normally, 2=incomplete), part payload bytes u64,
  * first sample index u64, session u32, part u32; remaining bytes reserved zero.
  * Completed writes count toward bytesWritten even when rewriting this header.
+ *
+ * A header describes the bytes that follow it so a later reader knows how to
+ * interpret the file. Payload means only the sample bytes, excluding this header.
+ * Called when a part opens and again when it closes with the final payload count.
+ * disposition 0 means opened but not finalized, 1 normal completion, 2 incomplete.
+ * The fields occupy fixed byte offsets; shared/recordingFileFormat.md is the table.
+ * @return True if the full header was accepted and the append position restored.
+ * This method does not flush by itself; openPart()/closePart() decide when to sync.
+ * Writing the final header is counted as another write even though it replaces
+ * existing bytes. Therefore UI bytesWritten can exceed final file size.
  */
 bool sdRecordingSink::header(uint32_t disposition)
 {
+    // Start with all reserved bytes zero. The 8-byte magic identifies this file
+    // as our recording format; subsequent fields describe its version and data.
     uint8_t bytes[512] = {};
     std::memcpy(bytes, "S3REC001", 8);
     putLittle(bytes + 8, 512, 4); putLittle(bytes + 12, 1, 4);
@@ -137,6 +195,8 @@ bool sdRecordingSink::header(uint32_t disposition)
     putLittle(bytes + 24, 4, 4); putLittle(bytes + 28, disposition, 4);
     putLittle(bytes + 32, partBytes, 8); putLittle(bytes + 40, partStart / 4, 8);
     putLittle(bytes + 48, session, 4); putLittle(bytes + 52, part, 4);
+    // Move to the first byte so finalization updates the header instead of
+    // appending a second header among the samples.
     bool retVal = file.seekSet(0);
     if (retVal)
     {
@@ -149,12 +209,22 @@ bool sdRecordingSink::header(uint32_t disposition)
     }
     if (retVal)
     {
+        // Restore the end-of-payload position. Any subsequent write must append
+        // samples after the header and all earlier data, not overwrite the header.
         retVal = file.seekSet(512 + partBytes);
     }
     return retVal;
 }
 
-/** @brief Exclusively create one part and synchronize its initial open header. */
+/**
+ * @brief Exclusively create one part and synchronize its initial open header.
+ * Called for the first file and whenever write() rolls over to another part.
+ * O_CREAT creates a missing file, O_EXCL refuses to replace an existing one, and
+ * O_RDWR permits both reading and writing. These flags are combined with bitwise OR.
+ * The 512-byte initial header is synchronized before returning success. If that
+ * fails, close any opened handle; a partial file may remain for later inspection.
+ * No caller may submit new recording data until the initial open has succeeded.
+ */
 bool sdRecordingSink::openPart()
 {
     char path[96];
@@ -174,16 +244,31 @@ bool sdRecordingSink::openPart()
  * @brief Append bytes, opening a new part before the agreed size limit.
  * Returns only payload bytes actually accepted. Rollover finishes the previous
  * part first; if that fails, stop instead of hiding a possibly incomplete file.
+ *
+ * This is the byteSink implementation reached by bufferedWriter::pump(). It runs
+ * in the storage task and may wait on the card. data points directly into the ring;
+ * length is the number of contiguous bytes pump selected. Do not retain that
+ * pointer after returning: a successful return lets the ring reuse those bytes.
+ * The return value is the library's accepted byte count; less than length makes
+ * the reusable writer stop normal writing and report failure. It is not a claim
+ * that the card's own cache would survive a sudden loss of power.
+ * While this call closes/opens a part, the producer can continue filling RAM.
  */
 size_t sdRecordingSink::write(const uint8_t* data, size_t length)
 {
     size_t retVal = 0;
     bool writable = file.isOpen();
+    // Check the NEXT write before crossing the size limit, including the header.
+    // A split must occur between complete submissions, never in the middle of one.
     if (writable && 512 + partBytes + length >= partLimit)
     {
         writable = closePart(true) && part != UINT32_MAX;
-        if (writable)
+        // Write exactly the span pump lent us. SdFat handles card commands and
+    // filesystem allocation; this adapter keeps project-level file accounting.
+    if (writable)
         {
+            // Keep the same session, increment the part, and remember how much payload
+            // preceded it. Its header first-sample index is partStart / four bytes.
             ++part; partStart = payloadBytes;
             writable = openPart();
         }
@@ -195,6 +280,8 @@ size_t sdRecordingSink::write(const uint8_t* data, size_t length)
         {
             retVal = static_cast<size_t>(written);
             partBytes += retVal; payloadBytes += retVal;
+            // Remember the last four accepted bytes for the close-time readback.
+            // Only normally completed parts use this as a complete-sample comparison.
             if (written >= sizeof(lastWord))
             {
                 std::memcpy(lastWord, data + written - sizeof(lastWord), sizeof(lastWord));
@@ -204,7 +291,14 @@ size_t sdRecordingSink::write(const uint8_t* data, size_t length)
     return retVal;
 }
 
-/** @brief Ask the filesystem to synchronize pending data; failure is observable. */
+/**
+ * @brief Ask the filesystem to synchronize pending data; failure is observable.
+ * bufferedWriter::finish() calls this after emptying the ring. closePart() also
+ * uses it before and after updating the header. sync asks SdFat to write cached
+ * file data and filesystem bookkeeping. A successful write alone is weaker than
+ * a successful write followed by sync; neither can guarantee sudden-power-loss
+ * survival inside the card. False also covers calling this without an open file.
+ */
 bool sdRecordingSink::flush()
 {
     const bool retVal = file.isOpen() && file.sync();
@@ -215,14 +309,27 @@ bool sdRecordingSink::flush()
  * @brief Finalize a part; do not mark complete unless its earlier data synchronized.
  * A sudden power loss can still defeat the card's internal cache. These markers
  * describe successful software calls, not a promise against unplugging power.
+ *
+ * Called after the ring drains, or by write() before opening another part.
+ * Order matters: sync payload, write final header, sync that header, close handle,
+ * then read back a small amount for verification. Even on failure, attempt the
+ * later synchronization/close so a file handle is not deliberately left open.
+ * complete is the caller's assessment of acquisition/recording success; we also
+ * require the payload sync to succeed before writing a normal-completion marker.
+ * A failure while updating/syncing the marker can itself leave an uncertain header;
+ * status remains failed even if a reader later happens to see disposition 1.
  */
 bool sdRecordingSink::closePart(bool complete)
 {
     bool retVal = file.isOpen();
     if (file.isOpen())
     {
+        // Synchronize earlier samples before claiming normal completion. A failed
+        // sync forces an incomplete marker even if the caller requested complete=true.
         const bool dataSaved = flush();
         retVal = header(complete && dataSaved ? 1 : 2) && dataSaved;
+        // Attempt both sync and close regardless of the earlier result; only report
+        // success if every required stage succeeded.
         const bool headerSaved = flush();
         const bool closed = file.close();
         retVal = retVal && headerSaved && closed;
@@ -234,7 +341,13 @@ bool sdRecordingSink::closePart(bool complete)
     return retVal;
 }
 
-/** @brief Close the final part, preserving incomplete status after an ADC/storage fault. */
+/**
+ * @brief Close the final part, preserving incomplete status after an ADC/storage fault.
+ * The storage service calls this for final Stop/fault cleanup. Already closed
+ * returns true, making repeated cleanup harmless. False means saving/finalization
+ * or its readback failed. complete=false still saves earlier good bytes, but tells
+ * the header that this recording did not finish normally.
+ */
 bool sdRecordingSink::close(bool complete)
 {
     const bool retVal = !file.isOpen() || closePart(complete);
@@ -245,6 +358,14 @@ bool sdRecordingSink::close(bool complete)
  * @brief Delete only our canonical recording files, and only while no file is open.
  * Called solely for an explicit delete command after acquisition has stopped.
  * Unrelated files and subdirectories are preserved; there is no format operation.
+ *
+ * The browser confirmation and acquisition-stopped check happen before this call.
+ * This method also requires no open recording file. deleted is reset on entry and
+ * counts successful deletions even if a later deletion fails. A missing recordings
+ * directory is treated as nothing to delete, not as a request to create it.
+ * Only regular files whose names match recordingName() are removed. No recursion,
+ * formatting, or deletion of arbitrary card contents occurs. Name matching alone
+ * cannot distinguish our files from someone else's identically named files.
  */
 bool sdRecordingSink::deleteRecordings(uint64_t& deleted)
 {
@@ -289,6 +410,14 @@ bool sdRecordingSink::deleteRecordings(uint64_t& deleted)
  * This bounded readback catches layout/seek/truncation mistakes without rereading
  * gigabytes on every Stop. It is not a full-payload checksum or power-loss test.
  * Close-time latency includes this small verification and remains visible in P3.
+ *
+ * Called only after closePart() has successfully closed the writer's handle.
+ * Build the expected header from the recording metadata, open a separate read-only
+ * handle, and require the stored length to match header plus payload. For a normally
+ * closed nonempty part, compare the final four bytes to the last word we submitted.
+ * Partial/failed payloads are not expected to have a complete final word.
+ * A true result verifies these limited checks, NOT every byte in the middle of the
+ * file. The printed result goes to USB diagnostics, not the Feather UART protocol.
  */
 bool sdRecordingSink::verifyPart(uint32_t disposition)
 {
@@ -296,6 +425,8 @@ bool sdRecordingSink::verifyPart(uint32_t disposition)
     std::snprintf(path, sizeof(path), "/recordings/recording_%06lu_%03lu.bin",
         static_cast<unsigned long>(session), static_cast<unsigned long>(part));
     FsFile check;
+    // Only the first 56 header bytes currently contain defined fields. Reserved
+    // bytes are not compared here, nor is the entire payload reread.
     uint8_t actual[56] = {}, expected[56] = {};
     std::memcpy(expected, "S3REC001", 8);
     putLittle(expected + 8, 512, 4); putLittle(expected + 12, 1, 4);
@@ -303,11 +434,15 @@ bool sdRecordingSink::verifyPart(uint32_t disposition)
     putLittle(expected + 24, 4, 4); putLittle(expected + 28, disposition, 4);
     putLittle(expected + 32, partBytes, 8); putLittle(expected + 40, partStart / 4, 8);
     putLittle(expected + 48, session, 4); putLittle(expected + 52, part, 4);
+    // Opening read-only cannot modify the saved samples. Short reads, unexpected
+    // file length, or mismatched header bytes all make verification fail.
     bool retVal = check.open(&filesystem, path, O_RDONLY) && check.fileSize() == 512 + partBytes &&
         check.read(actual, sizeof(actual)) == sizeof(actual) &&
         std::memcmp(actual, expected, sizeof(actual)) == 0;
     if (retVal && disposition == 1 && partBytes >= 4)
     {
+        // Seek directly to the final sample. This check takes bounded work even
+        // when a part contains hundreds of millions of samples.
         uint8_t tail[4];
         retVal = check.seekSet(512 + partBytes - 4) && check.read(tail, sizeof(tail)) == sizeof(tail) &&
             std::memcmp(tail, lastWord, sizeof(tail)) == 0;
@@ -322,7 +457,16 @@ bool sdRecordingSink::verifyPart(uint32_t disposition)
     return retVal;
 }
 
-/** @brief Read filesystem capacity and available bytes; never erase to obtain space. */
+/**
+ * @brief Read filesystem capacity and available bytes; never erase to obtain space.
+ * Called only by the disk thread: at startup, after commands, and periodically
+ * while recording. total/free are output references in BYTES. A cluster is the
+ * filesystem's allocation unit (a group of sectors); files consume whole clusters.
+ * The library counts clusters, so multiply by bytesPerCluster using 64-bit math.
+ * A scan failure sets cardState to I/O failure and preserves previous numbers;
+ * those retained space values must not be mistaken for a fresh successful scan.
+ * This query can block and let the ring fill; it is not an ADC/sample operation.
+ */
 void sdRecordingSink::space(uint64_t& total, uint64_t& free)
 {
     // Promote BEFORE multiplication: a 64-GB card cannot fit in a 32-bit byte

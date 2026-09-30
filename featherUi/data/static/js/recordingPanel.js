@@ -2,7 +2,13 @@
 // UART byte totals arrive as decimal strings; BigInt preserves their exact value.
 // History is a bounded browser-session display, not a substitute for recorded data.
 
-/** Format bytes with a readable unit while retaining exact bytes in the main total. */
+/**
+ * Format bytes with a readable unit while retaining exact bytes in the main total.
+ * value is a decimal-string byte count supplied by S3. BigInt keeps every
+ * integer bit; converting the original total to Number could round large counts.
+ * Division here truncates to one decimal place. KiB/MiB/GiB mean powers of 1024,
+ * not disk manufacturers' decimal KB/MB/GB. This is display formatting only.
+ */
 function byteSize(value)
 {
     const bytes = BigInt(value);
@@ -11,17 +17,30 @@ function byteSize(value)
     return unit ? `${bytes / unit[0]}.${(bytes % unit[0]) * 10n / unit[0]} ${unit[1]}` : `${bytes} B`;
 }
 
-/** Format a recording-relative duration; no synchronization of board clocks is needed. */
+/**
+ * Format a recording-relative duration; no synchronization of board clocks is needed.
+ * value is elapsed milliseconds measured on S3, passed as a decimal string.
+ * Drop fractional seconds, split into hours/minutes/seconds, and zero-pad the last
+ * two components. Hours can exceed 24; this is a duration, not a time of day.
+ */
 function elapsed(value)
 {
     const seconds = BigInt(value) / 1000n;
     return `${seconds / 3600n}:${String(seconds / 60n % 60n).padStart(2, "0")}:${String(seconds % 60n).padStart(2, "0")}`;
 }
 
-/** Attach P3 once and return a renderer called after each successful status poll. */
+/**
+ * Attach P3 once and return a renderer called after each successful status poll.
+ * The main S3 UI module calls this once, then calls the returned render function
+ * with each HTTP status snapshot. The closure retains chart history between calls.
+ * No sample payload arrives here: this page receives counters/positions/durations,
+ * not the digitizer's 30000 samples per second. P3 is a monitor, not a recorder.
+ */
 export function createRecordingPanel()
 {
     const get = (id) => document.getElementById(id);
+    // Keep at most 240 observations and two minutes of time. This is a small
+    // display history in this browser tab; reloading discards it.
     const history = [];
     const maxima = [];
     const canvas = get("recording-history");
@@ -29,15 +48,26 @@ export function createRecordingPanel()
     let lastKey = null;
     let previousMaxDelay = 0;
 
-    /** Draw occupancy and write-delay history with separate explicitly labelled scales. */
+    /**
+     * Draw occupancy and write-delay history with separate explicitly labelled scales.
+     * The newest status time is at the right; 120000 ms (two minutes) fills the width.
+     * Blue uses a fixed 0-100 percent scale for RAM occupancy. Orange uses the displayed
+     * millisecond delay scale, which expands to fit the visible observations/maxima.
+     * Canvas pixel coordinates increase downward, hence subtracting from 78 for y.
+     * Resizing resets the canvas, so rebuild the drawing from retained observations.
+     */
     function draw()
     {
+        // Use CSS pixels for layout but more backing pixels on high-density screens
+        // so the small chart remains sharp. Avoid a zero-sized drawing surface.
         const width = Math.max(1, canvas.clientWidth);
         canvas.width = width * window.devicePixelRatio;
         canvas.height = 80 * window.devicePixelRatio;
         const ctx = canvas.getContext("2d");
         ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
         ctx.clearRect(0, 0, width, 80);
+        // A minimum 1-ms scale avoids division by zero when no delays are measured.
+        // Maximum markers may exceed the latest per-report delay, so include both.
         const maxDelay = Math.max(1, ...history.map((point) => point.delay), ...maxima.map((point) => point.delay));
         get("rec-chart-scale").textContent = `· delay scale 0–${maxDelay.toFixed(1)} ms`;
         ctx.strokeStyle = "#d6dde5";
@@ -71,7 +101,14 @@ export function createRecordingPanel()
         }
     }
 
-    /** Render one coherent snapshot; clear live claims when either connection fails. */
+    /**
+     * Render one coherent snapshot; clear live claims when either connection fails.
+     * state is the browser's parsed S3 status object. It may be missing or stale if
+     * a link is lost. Hide live values in that case rather than showing zero losses or
+     * an empty buffer as if they were measured. The history arrays remain in memory.
+     * On valid status, replace labels and geometry, add a changed observation to the
+     * chart, then redraw. A displayed Saved state is S3's report, not a browser guess.
+     */
     return function render(state)
     {
         const rec = state?.connected ? state.recording : null;
@@ -105,6 +142,8 @@ export function createRecordingPanel()
                 active ? "Current recording" : rec.session !== "0" ? "Last recording" : "Ready for the first recording.";
             get("rec-state").textContent = `${labels[Number(rec.state)]} / ${elapsed(rec.elapsedMs)}`;
             get("rec-file").textContent = rec.session === "0" ? "—" : `recording_${rec.session.padStart(6, "0")}_${rec.part.padStart(3, "0")}.bin`;
+            // Calculate a bounded percentage AFTER exact integer arithmetic. Converting
+            // that small scaled result to Number is safe for chart/display purposes.
             const cardPercent = BigInt(rec.cardBytes) ? Number((BigInt(rec.cardBytes) - BigInt(rec.freeBytes)) * 1000n / BigInt(rec.cardBytes)) / 10 : 0;
             get("rec-card").textContent = `${cardLabels[Number(rec.card)]} · ${cardPercent}% used · ${byteSize(rec.freeBytes)} free`;
             get("rec-bytes").textContent = `${BigInt(rec.bytesWritten).toLocaleString("en-US")} bytes (${byteSize(rec.bytesWritten)})`;
@@ -113,12 +152,16 @@ export function createRecordingPanel()
             get("rec-delay").textContent = `${(Number(rec.latestDelayUs) / 1000).toFixed(3)} ms`;
             const kind = ["none", "write", "flush"][Number(rec.maxDelayKind)];
             get("rec-max-delay").textContent = `${(Number(rec.maxDelayUs) / 1000).toFixed(3)} ms · ${kind} · at ${elapsed(rec.maxDelayAtMs)}`;
+            // These values were restricted to 32-bit positions by Feather validation,
+            // so Number can represent them exactly. They index the ring, not a disk file.
             const capacity = Number(rec.bufferBytes);
             const fill = capacity ? Number(rec.usedBytes) * 100 / capacity : 0;
             const peak = capacity ? Number(rec.peakBytes) * 100 / capacity : 0;
             // Shade the actual unread region, splitting at the end of the ring.
             // A full ring shades all positions even when read and write are equal.
             const readOffset = Number(rec.readPosition);
+            // Example: 12 queued bytes starting four bytes before the array end become
+            // a four-byte segment on the right plus an eight-byte segment on the left.
             const first = Math.min(Number(rec.usedBytes), capacity - readOffset);
             get("rec-fill").style.left = `${capacity ? readOffset * 100 / capacity : 0}%`;
             get("rec-fill").style.width = `${capacity ? first * 100 / capacity : 0}%`;
@@ -140,6 +183,8 @@ export function createRecordingPanel()
             {
                 history.length = 0; maxima.length = 0; lastKey = null; previousMaxDelay = 0; session = rec.session;
             }
+            // HTTP may poll the same UART report more than once. This key avoids
+            // drawing duplicate points just because the browser polled again.
             const key = `${rec.elapsedMs}:${rec.bytesWritten}:${rec.latestDelayUs}:${rec.usedBytes}`;
             if (key !== lastKey && rec.session !== "0")
             {
@@ -153,6 +198,8 @@ export function createRecordingPanel()
                 }
                 history.push({ time, fill, delay: Number(rec.latestDelayUs) / 1000, cardPercent });
                 previousMaxDelay = maximum;
+                // Discard old observations to bound browser memory. The chart cannot recover
+                // all short stalls between reports; S3 separately preserves peak/max values.
                 while (history.length > 240 || (history.length && time - history[0].time > 120000)) { history.shift(); }
                 while (maxima.length > 240 || (maxima.length && time - maxima[0].time > 120000)) { maxima.shift(); }
                 lastKey = key;

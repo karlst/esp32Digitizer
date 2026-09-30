@@ -13,15 +13,27 @@
 #include <iostream>
 
 uint64_t writerTestUs = 0;
-/** @brief Deterministic clock used only by the consumer. */
+/**
+ * @brief Deterministic clock used only by the consumer.
+ */
 static uint64_t clockUs() { return writerTestUs; }
 
-/** @brief Run deterministic failures followed by concurrent byte-order stress. */
+/**
+ * @brief Run deterministic failures followed by concurrent byte-order stress.
+ * This PC executable links the REAL formatter and ring writer to a simulated
+ * storage destination. Assertions stop the test if behavior differs from expected.
+ * No serial port is opened and nothing is uploaded to either board.
+ * First test known byte patterns/timing, then force failures, then exercise a
+ * producer thread and a consumer thread concurrently through many ring wraps.
+ * These tests check software ordering; they do not measure ESP32 interrupt timing.
+ */
 int main()
 {
     bufferedWriter writer;
     memorySink sink;
     writer.start(sink, clockUs);
+    // Use negative one and both signed 24-bit extremes to catch wrong byte
+    // order or missing sign extension. Expected bytes are written out explicitly.
     sampleFormatter::submit(writer, -1);
     sampleFormatter::submit(writer, -8388608);
     sampleFormatter::submit(writer, 8388607);
@@ -49,6 +61,8 @@ int main()
     assert(!writer.finish());
     assert(sink.bytes.size() == 3 && writer.snapshot().bytes == 3 && writer.snapshot().used == 4);
     assert(writer.snapshot().errors == 1);
+    // A successful payload write still cannot make finish successful if its
+    // final synchronization fails. Then separately test failed preparation timing.
     sink.shortWrite = false; sink.flushOk = false;
     writer.start(sink, clockUs);
     assert(!writer.finish() && writer.snapshot().errors == 1);
@@ -65,7 +79,10 @@ int main()
     sink.flushOk = true; sink.bytes.clear(); writer.start(sink, clockUs);
     std::atomic<uint32_t> consumed{0};
     constexpr uint32_t count = 250000;
+    // This second OS thread simulates the sample source; it alone calls submit.
+    // The main test thread runs pump and publishes how many words were consumed.
     std::thread producer([&]() {
+        // Submit increasing values so the consumer can check their order later.
         for (uint32_t index = 0; index < count; ++index)
         {
             while (index - consumed.load(std::memory_order_acquire) >= 8000) { std::this_thread::yield(); }
@@ -78,8 +95,12 @@ int main()
         consumed.store(static_cast<uint32_t>(writer.snapshot().bytes / 4), std::memory_order_release);
         std::this_thread::yield();
     }
+    // Wait for the source to finish before draining the final short block.
+    // Otherwise finish would race new submissions, violating its contract.
     producer.join();
     assert(writer.finish() && sink.bytes.size() == count * 4);
+    // Decode saved words and check for missing, duplicated or overwritten data
+    // across every ring wrap, not just the final reported sample count.
     for (uint32_t index = 0; index < count; ++index)
     {
         const uint8_t* bytes = sink.bytes.data() + index * 4;

@@ -14,7 +14,11 @@
 class recordingMonitor
 {
 public:
+    // Last fully validated S3 recording values; retained after Stop so P3 can
+    // show the completed run. Retaining a copy is not evidence of a live connection.
     recordingStatus status;
+    // True only when the accepted UART frame supports recording statistics.
+    // This is protocol capability, not card-present or recording-active status.
     bool available = false;
     String stateJson(bool connected) const;
 };
