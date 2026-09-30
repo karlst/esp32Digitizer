@@ -1,17 +1,32 @@
 /**
  * @file commandProtocol.cpp
- * @brief Strict version-2 command decoding and ADS1256 data representation.
+ * @brief Turn incoming serial text into validated commands for the acquisition task.
+ *
+ * featherLink.cpp calls feed() for each received character. feed() waits for a
+ * complete newline-terminated message, then parse() checks every field. Neither
+ * function touches hardware or executes the request; the caller queues accepted
+ * commands for acquisition.cpp. A separate parser is used for each serial port.
+ *
+ * Command example: CMD,2,42,start,1000 means version 2, request ID 42, Start at
+ * 1000 samples/second. Commands remain version 2 even though status is version 3.
+ * This file also maps rates to chip register codes and joins three sample bytes
+ * into a signed number. Those helpers have no dependency on an attached board.
  */
 #include "commandProtocol.h"
 #include <cstring>
 
 /**
- * @brief Parse a complete unsigned decimal without signs, whitespace, or overflow.
+ * @brief Read a nonempty string of decimal digits into a 32-bit unsigned integer.
+ * @param text Null-terminated text; signs, spaces, fractions and exponents fail.
+ * @param value Receives the parsed number only on success; unchanged on failure.
+ * @return True only if every character is valid and the number fits in 32 bits.
  */
 bool commandProtocol::unsignedNumber(const char* text, uint32_t& value)
 {
     bool retVal = *text != '\0';
     uint32_t parsed = 0;
+    // Check the limit BEFORE multiplying by ten; otherwise overflow could wrap
+    // a huge input into an apparently valid small command ID or rate.
     for (size_t index = 0; text[index] && retVal; ++index)
     {
         const char digit = text[index];
@@ -32,7 +47,13 @@ bool commandProtocol::unsignedNumber(const char* text, uint32_t& value)
 }
 
 /**
- * @brief Map the UI choices to DRATE bytes for a 7.68 MHz ADS1256 clock.
+ * @brief Translate a supported samples-per-second choice to the ADS1256 DRATE byte.
+ * @param rate Sample production rate, not the SPI bit-transfer clock speed.
+ * @param value Receives the chip-specific code on success; unchanged on failure.
+ * @return False for any rate outside our seven supported choices.
+ *
+ * The mapping assumes the digitizer has its standard 7.68 MHz clock. The register
+ * byte is an encoded setting, not the decimal rate truncated to eight bits.
  */
 bool commandProtocol::rateRegister(uint32_t rate, uint8_t& value)
 {
@@ -52,10 +73,20 @@ bool commandProtocol::rateRegister(uint32_t rate, uint8_t& value)
 }
 
 /**
- * @brief Split exactly five fields and commit only a wholly valid command.
+ * @brief Validate one entire CMD,2,id,action,rate message without executing it.
+ * @param line Writable, null-terminated text without its newline. Commas are
+ * replaced with string terminators, so the original text is modified.
+ * @param command Receives the complete request only if every check succeeds.
+ * @return True for an accepted format; false leaves command unchanged.
+ *
+ * IDs must be nonzero. Start requires a supported rate; Stop/Reboot require zero
+ * in that field. A syntactically valid command can still be rejected later by
+ * acquisition.cpp because the digitizer is unavailable or already running.
  */
 bool commandProtocol::parse(char* line, acquisitionCommand& command)
 {
+    // Split without allocating strings. Empty fields remain visible to validation;
+    // extra commas are an error rather than ignored trailing data.
     char* fields[5] = {line};
     size_t count = 1;
     bool retVal = true;
@@ -74,12 +105,16 @@ bool commandProtocol::parse(char* line, acquisitionCommand& command)
             }
         }
     }
+    // Work on a temporary request so a valid prefix cannot partially update the
+    // caller's command when a later field is invalid.
     acquisitionCommand parsed;
     retVal = retVal && count == 5 && std::strcmp(fields[0], "CMD") == 0 &&
         std::strcmp(fields[1], "2") == 0 && unsignedNumber(fields[2], parsed.id) &&
         parsed.id != 0 && unsignedNumber(fields[4], parsed.rate);
     if (retVal)
     {
+        // Rate lookup validates Start even though this parser does not write the
+        // register. Stop/Reboot ignore settings operationally but require wire zero.
         uint8_t ignored = 0;
         if (std::strcmp(fields[3], "start") == 0)
         {
@@ -105,7 +140,16 @@ bool commandProtocol::parse(char* line, acquisitionCommand& command)
 }
 
 /**
- * @brief Reject oversized, expired, or corrupted frames through the next newline.
+ * @brief Add one serial character; return a command only at a valid line ending.
+ * @param byte Next character read by featherLink from one serial port.
+ * @param nowMs Current S3 time in milliseconds, for incomplete-message expiry.
+ * @param command Written only when a full valid command has been assembled.
+ * @return True for that completed command; false for partial or rejected input.
+ *
+ * LF is a newline; CRLF is also accepted, but CR anywhere else is invalid. A
+ * partial message with more than 500 ms between characters is discarded. After
+ * noise, overflow or timeout, discard through the next newline before starting
+ * a new message. This prevents a broken message's tail becoming a new command.
  */
 bool commandProtocol::feed(char byte, uint32_t nowMs, acquisitionCommand& command)
 {
@@ -116,6 +160,8 @@ bool commandProtocol::feed(char byte, uint32_t nowMs, acquisitionCommand& comman
         discard = true;
     }
     lastByteMs = nowMs;
+    // A newline finishes either the message or the discard period. In both
+    // cases reset the parser so the next line starts independently.
     if (byte == '\n')
     {
         line[length] = '\0';
@@ -129,6 +175,8 @@ bool commandProtocol::feed(char byte, uint32_t nowMs, acquisitionCommand& comman
     }
     else if (!discard)
     {
+        // Keep one slot for the final null terminator. Once CR is seen, only
+        // LF may follow; accepting other characters would silently splice text.
         if (byte == '\r' && !carriageReturn)
         {
             carriageReturn = true;
@@ -146,7 +194,13 @@ bool commandProtocol::feed(char byte, uint32_t nowMs, acquisitionCommand& comman
 }
 
 /**
- * @brief Sign-extend the big-endian 24-bit two's-complement ADC result safely.
+ * @brief Assemble the digitizer's three bytes into one signed sample, not volts.
+ * @param bytes At least three bytes in received order: highest-value byte first.
+ * @return A signed value from -8388608 to 8388607, stored in a 32-bit integer.
+ *
+ * The top bit of the 24-bit result is its sign. If set, subtract 2^24 from the
+ * unsigned value to recover the negative number (for example, 0xffffff is -1).
+ * This avoids treating every negative input as a large positive sample.
  */
 int32_t commandProtocol::signedSample(const uint8_t* bytes)
 {

@@ -98,7 +98,12 @@ This verifies initialization, not live sample collection. Initial bench testing 
 check status and analog response, exercise Stop/Reboot and disconnect behavior, then
 increase rates. Actual 30000-sample/s throughput, missed events, core scheduling,
 and watchdog behavior remain unverified. No watchdog is disabled to hide starvation.
-USB `missedEdges` is a diagnostic lower bound, not proof of lossless acquisition.
+`missedEdges`, reported over USB and version-3 status to Feather, counts observed
+misses; zero is not proof of lossless acquisition. Feather also shows cumulative
+rejected reads, driver-check failures, reads overlapped by a new ready event, and
+data-ready timeouts. Totals survive Stop/Start and reset on S3 reboot. A rejected
+read can have both failure reasons, so those reason counts must not be added.
+See `shared/s3StatusProtocol.md` for the frame and update order.
 
 The USB bench console also accepts the same strict `CMD,2,id,action,rate` commands.
 It uses a separate bounded parser; plain debug text cannot become a command. This

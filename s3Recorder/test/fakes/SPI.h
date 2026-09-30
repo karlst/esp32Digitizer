@@ -1,5 +1,9 @@
-/** @file SPI.h
- * @brief The ADC driver is replaced at its interface in desktop state tests.
+/**
+ * @file SPI.h
+ * @brief Define a pretend SPI controller for desktop tests.
+ * driverChecks.cpp implements these methods and interprets driver commands in
+ * memory. nativeChecks.cpp replaces ADC methods instead, so it only needs this
+ * type to construct the acquisition object. Neither executable accesses SPI pins.
  */
 #pragma once
 #include <cstdint>
@@ -7,20 +11,28 @@
 #define FSPI 0
 #define MSBFIRST 1
 #define SPI_MODE1 1
-/** @brief Retain the driver's chosen clock and mode for assertions. */
+/**
+ * @brief Retain the driver's chosen clock and mode for assertions.
+ */
 struct SPISettings
 {
     uint32_t frequency;
     int order;
     int mode;
-    /** @brief Store requested bus settings. */
+    /**
+     * @brief Store requested bus settings.
+     */
     SPISettings(uint32_t frequency, int order, int mode) : frequency(frequency), order(order), mode(mode) {}
 };
-/** @brief Provide the driver member's type without opening hardware. */
+/**
+ * @brief Provide the driver member's type without opening hardware.
+ */
 class SPIClass
 {
 public:
-    /** @brief Retain construction compatibility only. */
+    /**
+     * @brief Retain construction compatibility only.
+     */
     explicit SPIClass(int) {}
     void begin(int clock, int input, int output, int chipSelect);
     void beginTransaction(SPISettings settings);

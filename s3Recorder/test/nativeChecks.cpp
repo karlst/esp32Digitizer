@@ -1,5 +1,11 @@
-/** @file nativeChecks.cpp
- * @brief Run real parser, acquisition state, and UART code with deterministic fake hardware.
+/**
+ * @file nativeChecks.cpp
+ * @brief Test real command/acquisition/link code on the PC using simulated hardware.
+ * The runner compiles production .cpp files with test/fakes headers first in the
+ * include search path. ADC methods below supply controlled success/failure values;
+ * no real SPI, serial port, thread or interrupt is started. Tests call finite
+ * worker steps through the friend class nativeChecks instead of its endless loop.
+ * These assertions prove state transitions, not electrical timing or lossless sampling.
  */
 #include <cassert>
 #include <cstring>
@@ -15,6 +21,8 @@
 #include "acquisition.h"
 #include "featherLink.h"
 
+// Tests advance simulated clocks explicitly and choose whether fake reads fail.
+// edgeDuringRead injects an observed ready event in the middle of a fake SPI read.
 uint32_t testMs = 0;
 uint32_t testUs = 0;
 int testReady = LOW;
@@ -24,50 +32,88 @@ fakeEsp ESP;
 static bool startOk = true;
 static bool stopOk = true;
 static bool readOk = true;
+static volatile uint32_t* edgeDuringRead = nullptr;
 static bool queueFull = false;
 static acquisitionCommand queued;
 static int startCalls = 0;
 static int32_t rawValue = -123456;
 
-/** @brief Simulate ADC initialization. */
+/**
+ * @brief Simulate ADC initialization.
+ */
 bool ads1256::begin() { return true; }
-/** @brief Count actual starts to detect duplicate side effects. */
+/**
+ * @brief Count actual starts to detect duplicate side effects.
+ */
 bool ads1256::start(uint32_t) { ++startCalls; return startOk; }
-/** @brief Simulate either successful standby or a missing ADC. */
+/**
+ * @brief Simulate either successful standby or a missing ADC.
+ */
 bool ads1256::stop() { return stopOk; }
-/** @brief Simulate a complete or failed conversion transfer. */
-bool ads1256::read(int32_t& value) { value = rawValue; testReady = HIGH; return readOk; }
-/** @brief Fake an incomplete transfer diagnostic when readOk is false. */
+/**
+ * @brief Simulate a complete or failed conversion transfer.
+ */
+bool ads1256::read(int32_t& value)
+{
+    value = rawValue;
+    testReady = HIGH;
+    if (edgeDuringRead)
+    {
+        ++*edgeDuringRead;
+    }
+    return readOk;
+}
+/**
+ * @brief Fake an incomplete transfer diagnostic when readOk is false.
+ */
 uint32_t ads1256::readDiagnostic() const { return readOk ? 0 : 3; }
-/** @brief Allocate a single simulated queue. */
+/**
+ * @brief Allocate a single simulated queue.
+ */
 QueueHandle_t xQueueCreate(int, size_t) { queueFull = false; return &queued; }
-/** @brief Release the simulated queue. */
+/**
+ * @brief Release the simulated queue.
+ */
 void vQueueDelete(QueueHandle_t) { queueFull = false; }
-/** @brief Preserve the pending item when the one-slot queue is full. */
+/**
+ * @brief Preserve the pending item when the one-slot queue is full.
+ */
 int xQueueSend(QueueHandle_t, const void* item, int)
 {
     const int retVal = queueFull ? pdFALSE : pdTRUE;
     if (!queueFull) { queued = *static_cast<const acquisitionCommand*>(item); queueFull = true; }
     return retVal;
 }
-/** @brief Consume the simulated request. */
+/**
+ * @brief Consume the simulated request.
+ */
 int xQueueReceive(QueueHandle_t, void* item, int)
 {
     const int retVal = queueFull ? pdTRUE : pdFALSE;
     if (queueFull) { *static_cast<acquisitionCommand*>(item) = queued; queueFull = false; }
     return retVal;
 }
-/** @brief Suppress actual task creation; tests invoke finite worker steps. */
+/**
+ * @brief Suppress actual task creation; tests invoke finite worker steps.
+ */
 int xTaskCreatePinnedToCore(void (*)(void*), const char*, int, void*, int, TaskHandle_t* task, int)
 { *task = &queued; return pdPASS; }
-/** @brief Model a readiness timeout. */
+/**
+ * @brief Model a readiness timeout.
+ */
 uint32_t ulTaskNotifyTake(int, uint32_t wait) { testMs += wait; return 0; }
-/** @brief No scheduler exists in the deterministic tests. */
+/**
+ * @brief No scheduler exists in the deterministic tests.
+ */
 void vTaskNotifyGiveFromISR(TaskHandle_t, BaseType_t*) {}
-/** @brief Advance simulated scheduler time. */
+/**
+ * @brief Advance simulated scheduler time.
+ */
 void vTaskDelay(uint32_t wait) { testMs += wait; }
 
-/** @brief Parse a mutable copy without modifying the test's string literal. */
+/**
+ * @brief Parse a mutable copy without modifying the test's string literal.
+ */
 static bool parse(const char* text, acquisitionCommand& command)
 {
     char copy[160];
@@ -77,7 +123,9 @@ static bool parse(const char* text, acquisitionCommand& command)
     return retVal;
 }
 
-/** @brief Feed a complete UART fragment; count only accepted complete frames. */
+/**
+ * @brief Feed a complete UART fragment; count only accepted complete frames.
+ */
 static int feed(commandProtocol& parser, const std::string& text, uint32_t now)
 {
     int retVal = 0;
@@ -89,7 +137,13 @@ static int feed(commandProtocol& parser, const std::string& text, uint32_t now)
     return retVal;
 }
 
-/** @brief Check untrusted UART input, resynchronization, rate encoding, and signed limits. */
+/**
+ * @brief Reject malformed command text and verify the supported rates and signed values.
+ *
+ * Feed real parser code fragmented/oversized/expired input, including a clock wrap.
+ * Then check all seven rate-to-register mappings and the positive/negative limits
+ * of the digitizer's three-byte number format. No chip or serial port is involved.
+ */
 static void checkProtocol()
 {
     acquisitionCommand command;
@@ -123,7 +177,14 @@ static void checkProtocol()
     { assert(commandProtocol::signedSample(values[index]) == expected[index]); }
 }
 
-/** @brief Check actual acquisition state changes, idempotence, faults, and cumulative counts. */
+/**
+ * @brief Exercise Start/Stop/repeated commands and each acquisition failure reason.
+ *
+ * Drive one collect() call at a time using simulated ready levels, event counts,
+ * and read results. Check that accepted counts exclude rejected reads, diagnostic
+ * totals survive Start, last-fault flags reset, and a failed read stops acquisition.
+ * A read failing both checks increments rejectedReads once, not twice.
+ */
 void nativeChecks::checkAcquisition()
 {
     acquisition recorder;
@@ -162,6 +223,7 @@ void nativeChecks::checkAcquisition()
     testMs += 101;
     recorder.collect();
     assert(!recorder.snapshot().ready && recorder.snapshot().error == 2);
+    assert(recorder.snapshot().readyTimeouts == 1 && recorder.snapshot().rejectedReads == 0);
     recorder.execute({6, acquisitionCommand::Action::stop, 0});
     assert(recorder.snapshot().ackResult == 1 && recorder.snapshot().error == 2);
     recorder.current.ready = true;
@@ -174,9 +236,32 @@ void nativeChecks::checkAcquisition()
     start.id = 8;
     recorder.execute(start);
     readOk = false;
+    recorder.readyEdges = 3;
+    edgeDuringRead = &recorder.readyEdges;
     testReady = LOW;
     recorder.collect();
     assert(recorder.snapshot().sampleCount == 1 && recorder.snapshot().error == 3);
+    assert(recorder.snapshot().missedEdges == 4); // Pre-read misses count even on failure.
+    assert(recorder.snapshot().rejectedReads == 1 && recorder.snapshot().readFailures == 1);
+    assert(recorder.snapshot().overlapReads == 1 && recorder.snapshot().readFault == 3);
+    // Start resets last-fault flags but preserves every total. An overlap alone
+    // is another rejected read, not another driver failure.
+    readOk = true;
+    recorder.current.ready = true;
+    recorder.execute({10, acquisitionCommand::Action::start, 1000});
+    assert(recorder.snapshot().readFault == 0 && recorder.snapshot().rejectedReads == 1);
+    testReady = LOW;
+    recorder.collect();
+    assert(recorder.snapshot().rejectedReads == 2 && recorder.snapshot().overlapReads == 2);
+    assert(recorder.snapshot().readFailures == 1 && recorder.snapshot().readFault == 2);
+    edgeDuringRead = nullptr;
+    recorder.current.ready = true;
+    recorder.execute({11, acquisitionCommand::Action::start, 1000});
+    readOk = false;
+    testReady = LOW;
+    recorder.collect();
+    assert(recorder.snapshot().rejectedReads == 3 && recorder.snapshot().readFailures == 2);
+    assert(recorder.snapshot().overlapReads == 2 && recorder.snapshot().readFault == 1);
     readOk = true;
     stopOk = false;
     recorder.execute({9, acquisitionCommand::Action::reboot, 0});
@@ -184,7 +269,14 @@ void nativeChecks::checkAcquisition()
     stopOk = true;
 }
 
-/** @brief Check frame shape, 64-bit counts, congestion, and acknowledgement-before-reboot. */
+/**
+ * @brief Verify the actual status formatter and command-to-reboot ordering.
+ *
+ * Capture serial output in memory to check the version-3 frame and full-width
+ * 64-bit counters. Simulate a full transmit buffer, one-slot command queue, and
+ * reboot request. Require the acknowledgement to be flushed before restart.
+ * The UART receive-mapping check guards against reintroducing the pinMode ordering bug.
+ */
 void nativeChecks::checkLink()
 {
     acquisition recorder;
@@ -202,8 +294,14 @@ void nativeChecks::checkLink()
     testMs = 1000;
     Serial1.output.clear();
     assert(link.report(status));
-    assert(Serial1.output == "S3,2,1000,0,0,0,0,4294967295,0,0,1000,0,0\n");
+    assert(Serial1.output == "S3,3,1000,0,0,0,0,4294967295,0,0,1000,0,0,0,0,0,0,0,0\n");
     status.sampleCount = UINT64_MAX;
+    status.missedEdges = UINT64_MAX;
+    status.rejectedReads = UINT64_MAX;
+    status.readFailures = UINT64_MAX;
+    status.overlapReads = UINT64_MAX;
+    status.readyTimeouts = UINT64_MAX;
+    status.readFault = 3;
     status.latestRaw = -8388608;
     status.ackId = UINT32_MAX;
     status.hasSample = true;
@@ -213,7 +311,8 @@ void nativeChecks::checkLink()
     assert(link.report(status));
     assert(Serial1.output.find("18446744073709551615") != std::string::npos);
     assert(Serial1.output.find("-8388608,20,") != std::string::npos);
-    assert(Serial1.output.size() < 160);
+    assert(Serial1.output.find(",18446744073709551615,18446744073709551615,18446744073709551615,18446744073709551615,18446744073709551615,3\n") != std::string::npos);
+    assert(Serial1.output.size() < 384);
     Serial1.capacity = 0;
     assert(!link.report(status));
     Serial1.capacity = 512;
@@ -227,14 +326,16 @@ void nativeChecks::checkLink()
     recorder.execute(queued);
     Serial1.output.clear();
     link.update();
-    assert(Serial1.flushed && Serial1.output.find(",42,1\n") != std::string::npos);
+    assert(Serial1.flushed && Serial1.output.find(",42,1,0,0,0,0,0,0\n") != std::string::npos);
     assert(ESP.restarts == 0);
     testMs += 100;
     link.update();
     assert(ESP.restarts == 1);
 }
 
-/** @brief Run finite desktop checks; never touch USB devices or serial ports. */
+/**
+ * @brief Run finite desktop checks; never touch USB devices or serial ports.
+ */
 int main()
 {
     checkProtocol();

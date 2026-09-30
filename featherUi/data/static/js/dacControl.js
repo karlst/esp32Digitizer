@@ -1,9 +1,23 @@
-// Coordinate DAC settings, measurement polling, and confirmed Feather restarts.
+// Browser-side control of the Feather DAC and its local A1-to-A2 voltage graph.
+// app.js calls initializeDacControl once after HTML is ready. Browser fetch requests
+// go to webController.cpp; the browser never touches a pin or runs the waveform.
+// Read validateDraft for input rules, synchronize for HTTP/command ordering, and
+// renderState for the distinction between typed drafts and confirmed settings.
+// DAC = digital-to-analog output; ADC = analog-to-digital measurement of that output.
 import { appendEvent } from "./eventLog.js";
 import { drawWaveform } from "./waveformGraph.js";
 import { initializeNumericControl, readNumericValue } from "./numericControl.js?v=20260929-spin";
 
-/** Connect controls while preserving unfinished edits across measurement updates. */
+/**
+ * Connect the DAC form, status labels, graph, and periodic device-status requests.
+ * All local variables live as long as the installed event handlers and polling timer.
+ * state is the last device reply; input fields may instead contain an unsent draft.
+ * Nothing is applied just by typing. Start submits all settings; Stop sends none.
+ *
+ * Browser JavaScript callbacks run one at a time, but network replies arrive later.
+ * The request flags prevent an old poll reply from overtaking a newer command.
+ * Firmware still performs independent validation and protects its sampling task.
+ */
 export function initializeDacControl()
 {
     const form = document.getElementById("dac-form");
@@ -18,6 +32,8 @@ export function initializeDacControl()
     const offsetInput = document.getElementById("dac-offset");
     const validationMessage = document.getElementById("dac-validation");
     const unavailableMessage = document.getElementById("dac-unavailable");
+    // These describe three different things: last confirmed device state, edited
+    // field values, and whether a network request/command is still outstanding.
     let state = null;
     let dirty = false;
     // Draft preservation is separate from numeric dirty state: reverting a field
@@ -34,10 +50,14 @@ export function initializeDacControl()
     let rebootUntil = 0;
 
     /**
-     * Explain invalid drafts immediately without changing what the user is typing.
-     * Editors allow temporary empty/out-of-range text during editing. Validate
-     * all three values and their combined envelope
-     * here, and keep this feedback separate from connection/command messages.
+     * Check the typed numbers and explain errors without applying settings.
+     * Return true only if all fields are valid and the entire sine stays in range.
+     * A sine spans offset-amplitude to offset+amplitude; this is the voltage envelope.
+     * Amplitude is peak deviation, not peak-to-peak. Frequency must be a whole number.
+     *
+     * numericControl filters characters but allows unfinished edits such as empty text.
+     * This function handles those unfinished edits, ranges, and cross-field constraints.
+     * aria attributes provide the same validity/current-value information to screen readers.
      */
     function validateDraft()
     {
@@ -93,7 +113,13 @@ export function initializeDacControl()
         return retVal;
     }
 
-    /** Lock settings during operation; Stop never depends on draft validity. */
+    /**
+     * Derive button availability from connection, pending commands, and actual DAC state.
+     * Background polling alone must not disable buttons: doing that caused visible blinking.
+     * Start requires a valid draft; Stop ignores draft validity so bad text cannot block it.
+     * Settings lock while running or awaiting a command result. "dirty" means the numeric
+     * draft differs from applied settings, not merely that an input event occurred.
+     */
     function updateButtons()
     {
         const unavailable = commandPending || !connected || Date.now() < rebootUntil;
@@ -120,14 +146,24 @@ export function initializeDacControl()
         });
     }
 
-    /** Show validation and command outcomes next to the controls. */
+    /**
+     * Show a plain-text control message and mark whether it describes an error.
+     * The data-error attribute lets CSS select the error appearance. This does not add
+     * an event-log entry or imply that hardware changed; callers decide those separately.
+     */
     function showMessage(text, error = false)
     {
         message.textContent = text;
         message.dataset.error = String(error);
     }
 
-    /** Render confirmed settings without overwriting an unfinished settings edit. */
+    /**
+     * Render a validated device reply as the confirmed state and measured graph.
+     * Running summaries always use device settings, never the user's unsent fields.
+     * Stopped drafts are preserved while preserveDraft is set; running fields reflect
+     * what the device actually applied. Firmware-supplied limits override page defaults.
+     * Graph data is the Feather's local ADC loopback, not the S3 digitizer stream.
+     */
     function renderState()
     {
         document.getElementById("status-system").textContent = "Connected";
@@ -191,6 +227,8 @@ export function initializeDacControl()
             commandPending = Boolean(action);
             updateButtons();
             const sentRevision = requestedRevision;
+            // Aborting after five seconds releases a stalled request slot. It does
+            // not undo a command that the board may already have executed.
             const abortController = new AbortController();
             const timeoutId = window.setTimeout(() => abortController.abort(), 5000);
             try
@@ -305,6 +343,8 @@ export function initializeDacControl()
         preserveDraft = dirty || commandPending || !connected;
         showMessage(dirty ? "New settings will take effect on Start DAC." : "Settings take effect on Start DAC.");
     });
+    // Handle Enter and button submission ourselves; prevent a normal page reload.
+    // The last confirmed output state determines whether this is Start or Stop.
     form.addEventListener("submit", (event) =>
     {
         event.preventDefault();
@@ -327,6 +367,7 @@ export function initializeDacControl()
             }
         }
     });
+    // Reboot loses running settings; require the existing browser confirmation.
     rebootButton.addEventListener("click", () =>
     {
         if (window.confirm("Reboot the Feather? Output will stop and settings will reset to their startup defaults."))
@@ -334,11 +375,14 @@ export function initializeDacControl()
             synchronize("reboot");
         }
     });
+    // Redraw on layout changes without asking the hardware for another sample.
     const resizeObserver = new ResizeObserver(() =>
     {
         drawWaveform(canvas, state?.ready ? state : null);
     });
     resizeObserver.observe(canvas);
+    // Fetch immediately, then every half-second. A busy request skips a polling
+    // turn; it is not duplicated. This polling rate is not the DAC update rate.
     synchronize();
     window.setInterval(() => synchronize(), 500);
 }

@@ -7,7 +7,10 @@
 #include <cstdint>
 
 /**
- * @brief A fully validated request; invalid input never reaches the acquisition task.
+ * @brief Plain values passed from the serial parser to the acquisition task.
+ * The parser validates incoming text before filling this record. id lets the
+ * sender match a later reply; rate is samples/second for Start and zero otherwise.
+ * The default ID zero is not a valid incoming command.
  */
 struct acquisitionCommand
 {
@@ -18,8 +21,11 @@ struct acquisitionCommand
 };
 
 /**
- * @brief Bounded newline receiver shared by firmware and native regression tests.
- * No allocation, blocking reads, or prefix acceptance of malformed numbers is used.
+ * @brief Accumulate one serial line and turn it into a request only when fully valid.
+ * One instance per input port prevents mixing partial USB and Feather messages.
+ * feed() is called once per character, never waits for another character, and
+ * uses a fixed buffer. parse() can also validate a complete writable line directly.
+ * Desktop tests use this same implementation, with no hardware attached.
  */
 class commandProtocol
 {
@@ -30,6 +36,8 @@ public:
     static int32_t signedSample(const uint8_t* bytes);
 private:
     static bool unsignedNumber(const char* text, uint32_t& value);
+    // At most 79 characters plus a terminating zero. discard remains set until
+    // newline after a bad/oversized/expired line; carriageReturn permits CRLF only.
     char line[80] = {};
     size_t length = 0;
     uint32_t lastByteMs = 0;

@@ -5,6 +5,12 @@
  * Browser requests run in Arduino's loop task; waveform updates run in a separate
  * FreeRTOS worker. An ESP timer wakes that worker at nominal 500 us intervals.
  * HTTP latency therefore does not directly determine the waveform sample rate.
+ * DAC means digital-to-analog converter: an 8-bit number sets the A1 output.
+ * ADC means analog-to-digital converter: Feather's own A2 input measures that
+ * voltage through the loopback wire. This is separate from the ADS1256 on S3.
+ * Read begin() for task/timer setup, start() for settings, sample() for analog
+ * work, and stateJson() for the browser snapshot. A task is a scheduled thread;
+ * a notification wakes it without carrying a sample value.
  * Shared data is locked only while reading/changing it; JSON formatting and network
  * transmission happen outside the lock so they cannot hold up sampling for long.
  */
@@ -27,7 +33,8 @@ bool dacGenerator::begin()
 {
     bool retVal = false;
     // Create the shared-state lock before any task can access waveform settings or
-    // history. A mutex is a FreeRTOS object; this variable stores its handle, not a
+    // history. Mutex means mutual exclusion: only one task may hold this lock.
+    // A mutex is a FreeRTOS object; this variable stores its handle, not a
     // Boolean flag. A null handle indicates allocation failure. Taking it blocks
     // only the calling task until the owner releases it; it does not stop the CPU.
     mutex = xSemaphoreCreateMutex();
@@ -42,7 +49,8 @@ bool dacGenerator::begin()
     if (mutex && analogReady)
     {
         // Build the raw-count-to-millivolt conversion using factory eFuse data when
-        // available. 1100 mV is the fallback ADC reference, not the board supply.
+        // available. eFuse is calibration information programmed into the chip.
+        // 1100 mV is the fallback ADC reference, not the board supply.
         // Save the source so the UI reveals whether factory calibration was available.
         calibrationSource = esp_adc_cal_characterize(ADC_UNIT_1, ADC_ATTEN_DB_12,
             ADC_WIDTH_BIT_12, 1100, &calibration);
@@ -242,9 +250,10 @@ void dacGenerator::sample()
     const uint32_t millivolts = esp_adc_cal_raw_to_voltage(raw, &calibration);
 
     // The graph ring has only 256 slots. At 1 Hz, saving every 500 us would retain
-    // only 0.128 s, far short of a full period. Decimate stored records enough to
+    // only 0.128 s, far short of a full period. Save only selected records to
     // retain roughly two periods at low frequencies, while still updating the DAC
-    // and reading the ADC on every tick. At high frequencies store every sample.
+    // and reading the ADC on every tick. This selective saving is called decimation;
+    // it affects graph history, not waveform timing. At high frequencies save each sample.
     const int64_t capturePeriodUs = std::max<int64_t>(samplePeriodUs,
         static_cast<int64_t>(2000000.0f / (frequencyHz * (historySize - 1))));
     if (nowUs - lastCaptureUs >= capturePeriodUs)

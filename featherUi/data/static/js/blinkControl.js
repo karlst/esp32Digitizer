@@ -1,8 +1,12 @@
-// Synchronize the blink control with the Feather's authoritative command state.
+// Legacy browser LED test. app.js no longer imports or initializes this module,
+// and index.html has no blink button. Kept for old pages that still use the routes.
+// Its status describes requested blinking, not whether the LED is lit right now.
 import { appendEvent } from "./eventLog.js";
 
 /**
- * Connect the button and periodically refresh state for reloads and other clients.
+ * Connect a legacy blink button only if both button and status elements exist.
+ * Poll every two seconds to recover actual firmware state after reload or another
+ * client's command. A missing control causes no polling or hardware command.
  */
 export function initializeBlinkControl()
 {
@@ -19,7 +23,13 @@ export function initializeBlinkControl()
     let connectionFailed = false;
 
     /**
-     * Fetch or change blink state without overlapping requests or optimistic labels.
+     * Read state (null action) or send an explicit start/stop request to Feather.
+     * Only one HTTP request runs at a time. A click during a poll reserves the next slot;
+     * commands disable the button, but routine polls do not make it blink disabled.
+     *
+     * Wait for the reply before changing the displayed enabled state. A lost reply
+     * makes the state unknown even if the hardware acted; later polls recover it.
+     * The five-second browser timeout releases a stuck request, not a running LED.
      */
     async function synchronizeBlink(action = null)
     {

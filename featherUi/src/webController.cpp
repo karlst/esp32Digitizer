@@ -1,20 +1,41 @@
 /**
  * @file webController.cpp
- * @brief Page serving, DAC/ADC snapshots, hardware controls, and deferred reboot.
+ * @brief Translate browser HTTP requests into Feather actions or queued S3 commands.
+ *
+ * webApp registers these routes once, then server.handleClient() calls their
+ * handlers from Arduino loop(). GET reads status; POST requests a change. JSON
+ * is the text object returned to JavaScript. HTTP 200 means a successful reply,
+ * 202 means accepted/pending, and 4xx/5xx report rejected/unavailable requests.
+ *
+ * A local DAC Start returns its actual state after the operation. An S3 command
+ * returns pending and is confirmed later by an S3 serial acknowledgement. The
+ * browser must not interpret acceptance for delivery as hardware confirmation.
  */
 #include <LittleFS.h>
 #include "webController.h"
 #include <cmath>
 #include <cstdlib>
 
-/** @brief Retain the server, LED, DAC/ADC, and S3 monitor services owned by webApp. */
+/**
+ * @brief Save references to the server and services owned by webApp.
+ *
+ * All referenced objects live as long as this controller. Route callbacks capture
+ * this pointer to reach them later; no hardware is configured in this constructor.
+ */
 webController::webController(WebServer& server, ledBlinker& blinker, dacGenerator& generator, s3Monitor& monitor)
     : server(server), blinker(blinker), generator(generator), monitor(monitor)
 {
     // Share services without copying their state.
 }
 
-/** @brief Register page, asset, LED, DAC, S3 status, and reboot handlers during startup. */
+/**
+ * @brief Register the URL handlers the browser can call after the web server starts.
+ *
+ * server.on stores callbacks; it does not execute those callbacks here. [this]
+ * lets each later callback access this controller's services. Static files are
+ * served from flash, while /api routes read live state or request actions.
+ * Legacy blink routes remain available even though the current page has no button.
+ */
 void webController::begin()
 {
     // Register handlers now; handleClient() serves matching requests later in loop().
@@ -74,7 +95,13 @@ void webController::begin()
     });
 }
 
-/** @brief Restart outside the request callback, after a short response-delivery grace period. */
+/**
+ * @brief Complete a previously requested Feather reboot after a 750 ms grace period.
+ *
+ * The request handler already replied to the browser. Waiting outside that handler
+ * lets the reply leave before restarting, although delivery is not guaranteed.
+ * Stop the DAC before restart; startup will restore defaults with output disabled.
+ */
 void webController::update()
 {
     if (rebootPending && millis() - rebootRequestedMs >= 750)
@@ -84,14 +111,30 @@ void webController::update()
     }
 }
 
-/** @brief Return the latest coherent DAC and ADC snapshot without browser caching. */
+/**
+ * @brief Reply with one consistent snapshot of actual DAC settings and loopback samples.
+ *
+ * The generator copies shared data under its own lock and releases it before
+ * formatting JSON. Network sending here does not hold that sampling lock.
+ * no-store tells browser caches to fetch current status rather than reuse an old reply.
+ */
 void webController::sendDacState()
 {
     server.sendHeader("Cache-Control", "no-store");
     server.send(200, "application/json", generator.stateJson());
 }
 
-/** @brief Accept a complete finite numeric field, rejecting missing or malformed values. */
+/**
+ * @brief Convert a required HTTP form field to a finite floating-point number.
+ * @param name Field name, such as frequencyHz or sampleRate.
+ * @param value Parsed result; use it only if this function returns true.
+ * @return False for a missing field, no numeric characters, trailing junk, infinity,
+ * or NaN (not a number). Range and integer-only checks belong to the caller.
+ *
+ * strtof handles numeric syntax, which is broader than our browser editor (for
+ * example, it can accept a leading sign or exponent). This helper alone does not
+ * establish that a number is an allowed hardware setting.
+ */
 bool webController::readNumber(const char* name, float& value)
 {
     bool retVal = false;
@@ -99,13 +142,22 @@ bool webController::readNumber(const char* name, float& value)
     {
         const String text = server.arg(name);
         char* end = nullptr;
+        // end points to the first unparsed character. Require at least one parsed
+        // character AND the end of the string, preventing "10junk" becoming 10.
         value = strtof(text.c_str(), &end);
         retVal = end != text.c_str() && *end == '\0' && std::isfinite(value);
     }
     return retVal;
 }
 
-/** @brief Start with validated sine settings, preserving current state on rejection. */
+/**
+ * @brief Validate all three submitted sine settings and start the local DAC together.
+ *
+ * Frequency is cycles/second, amplitude is peak volts around the offset, and offset
+ * is the center voltage. generator.start enforces the allowed combined voltage
+ * range and rejects changing a running waveform. Invalid input leaves settings
+ * unchanged and returns HTTP 400; success returns the confirmed state as JSON.
+ */
 void webController::startDac()
 {
     float frequency = 0;
@@ -124,9 +176,13 @@ void webController::startDac()
 }
 
 /**
- * @brief Send a validated command without waiting in the HTTP handler for UART traffic.
- * Stop/Reboot do not read settings. This keeps Stop usable even if a browser draft
- * is invalid. A command succeeds only when s3Monitor matches its id to an S3 reply.
+ * @brief Validate a browser request and ask the serial monitor to send it to S3.
+ * @param action One of the registered actions: start, stop, or reboot.
+ *
+ * Only Start reads sampleRate; Stop/Reboot remain usable with an invalid draft.
+ * The monitor checks supported rates, connection freshness, and pending commands.
+ * HTTP 202 means the command was sent and is awaiting S3 confirmation. HTTP 409
+ * means it was not accepted for sending. This handler never waits for the S3 reply.
  */
 void webController::commandS3(const char* action)
 {
@@ -144,7 +200,13 @@ void webController::commandS3(const char* action)
     }
 }
 
-/** @brief Send index.html from LittleFS, or return HTTP 404 when the page is missing. */
+/**
+ * @brief Stream the saved HTML page from LittleFS, or return 404 if it is absent.
+ *
+ * LittleFS is the flash filesystem uploaded separately from firmware. Opening for
+ * reading does not create the file. Close after streaming so the handle is released.
+ * A missing page is an asset-upload problem, not evidence that acquisition failed.
+ */
 void webController::serveIndex()
 {
     // Close the page after streaming, or report the missing filesystem file.
@@ -160,7 +222,13 @@ void webController::serveIndex()
     }
 }
 
-/** @brief Send the current blink-enabled flag as JSON with caching disabled. */
+/**
+ * @brief Reply with the legacy LED test's commanded enabled flag.
+ *
+ * This describes whether blinking is requested, not whether the LED is lit at this
+ * instant. The current page does not use this route; it remains available for older
+ * clients. Disable response caching so successive queries see actual command state.
+ */
 void webController::sendBlinkState()
 {
     // Prevent caches from returning stale hardware command state.

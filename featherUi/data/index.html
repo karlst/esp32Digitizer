@@ -1,10 +1,15 @@
 <!DOCTYPE html>
+<!-- Feather browser page, served from LittleFS by webController.cpp.
+     Element IDs are the contract with the JavaScript modules, which attach handlers
+     after parsing. Initial controls are disabled until firmware status is known.
+     Typing edits drafts; only Start sends settings. Upload these files separately
+     from firmware when changing the UI. No hardware is controlled by HTML alone. -->
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ESP32 Digitizer</title>
-    <link rel="stylesheet" href="/static/css/app.css?v=20260929-button-state">
+    <link rel="stylesheet" href="/static/css/app.css?v=20260930-counters">
 </head>
 <body>
     <header class="top-bar">
@@ -12,6 +17,8 @@
         <div class="top-status">Feather UI</div>
     </header>
 
+    <!-- Six panels: local Feather graph, S3 state, acquisition diagnostics, events,
+         Feather controls, and S3 controls. CSS stacks the same order on phones. -->
     <main class="page-grid">
         <section class="panel" aria-labelledby="panel1-title">
             <div class="panel-header" id="panel1-title">P1: DAC Output and ADC Measurement</div>
@@ -28,7 +35,7 @@
                 <div>S3 connected</div><div id="s3-connected">No</div>
                 <div>Digitizer ready</div><div id="s3-adc">Unknown</div>
                 <div>Receiving samples</div><div id="s3-receiving">Unknown</div>
-                <div>Samples received</div><div id="s3-count">&mdash;</div>
+                <div>Samples accepted</div><div id="s3-count">&mdash;</div>
                 <div>Samples / second</div><div id="s3-rate">&mdash;</div>
                 <div>Latest raw reading</div><div id="s3-raw">&mdash;</div>
                 <div>Digitizer error</div><div id="s3-error">Unknown</div>
@@ -37,8 +44,16 @@
         </section>
 
         <section class="panel" aria-labelledby="panel3-title">
-            <div class="panel-header" id="panel3-title">P3: TBD</div>
-            <div class="panel-body"></div>
+            <div class="panel-header" id="panel3-title">Acquisition Diagnostics</div>
+            <div class="panel-body status-grid diagnostic-grid" aria-live="polite">
+                <div>Detected missed samples</div><div id="s3-missed">&mdash;</div>
+                <div>Rejected reads</div><div id="s3-rejected">&mdash;</div>
+                <div>Reads failing driver checks</div><div id="s3-read-failures">&mdash;</div>
+                <div>Reads with a new sample arriving</div><div id="s3-overlaps">&mdash;</div>
+                <div>Data-ready timeouts</div><div id="s3-timeouts">&mdash;</div>
+                <div>Last read rejection</div><div id="s3-read-fault">Unknown</div>
+            </div>
+            <div id="s3-counter-note" class="monitor-message">Counters are totals since S3 reboot; Stop/Start preserves them. Detected misses may undercount losses. A rejected read can fail both checks, so do not add its reason counts together.</div>
         </section>
 
         <section class="panel" aria-labelledby="events-title">
@@ -51,6 +66,10 @@
         <section class="panel" aria-labelledby="control-title">
             <div class="panel-header" id="control-title">Feather Controls</div>
             <div class="panel-body control-stack">
+                <!-- novalidate lets our validator explain errors inline rather than
+                     browser popups blocking submit. Text fields plus numericControl.js
+                     enforce digits/decimals and explicit +/- steps. aria attributes
+                     expose each editor's role, range and value to screen readers. -->
                 <form id="dac-form" class="dac-form" novalidate>
                     <label for="dac-frequency">Frequency (Hz)</label>
                     <div class="numeric-control">
@@ -92,6 +111,8 @@
         <section class="panel" aria-labelledby="s3-control-title">
             <div class="panel-header" id="s3-control-title">S3 Controls</div>
             <div class="panel-body control-stack">
+                <!-- This dropdown is a draft for the next Start. The running summary
+                     below it is populated only from S3-confirmed applied settings. -->
                 <form id="s3-form" class="dac-form" novalidate>
                     <label for="s3-sample-rate">Sample rate (samples/s)</label>
                     <select id="s3-sample-rate" name="sampleRate" disabled>
@@ -114,6 +135,6 @@
         </section>
     </main>
 
-    <script type="module" src="/static/js/app.js?v=20260929-button-state"></script>
+    <script type="module" src="/static/js/app.js?v=20260930-counters"></script>
 </body>
 </html>

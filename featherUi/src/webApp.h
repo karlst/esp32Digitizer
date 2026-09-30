@@ -8,16 +8,26 @@
 #include "webController.h"
 
 /**
- * @brief Own and coordinate the HTTP server, controller, and hardware services.
+ * @brief Keep the Feather's services alive and call them in the required order.
+ * This is the top-level application object owned by main.cpp. begin() performs
+ * startup once; update() is called repeatedly by Arduino loop(). Only the DAC
+ * generator creates a separate worker task. The controller holds references to
+ * these members, so their declaration/construction order matters.
  */
 class webApp
 {
 public:
-    /** @brief Construct the server and bind its controller dependencies. */
+    /**
+     * @brief Construct the server and bind its controller dependencies.
+     */
     webApp();
-    /** @brief Initialize hardware, filesystem, Wi-Fi, and routes; report success. */
+    /**
+     * @brief Initialize hardware, filesystem, Wi-Fi, and routes; report success.
+     */
     bool begin();
-    /** @brief Service HTTP and nonblocking hardware activity. */
+    /**
+     * @brief Service HTTP and nonblocking hardware activity.
+     */
     void update();
 
 private:
@@ -27,5 +37,6 @@ private:
     dacGenerator generator;
     s3Monitor monitor;
     webController controller;
+    // Gate HTTP servicing after startup failure; serial monitoring still runs.
     bool serverStarted = false;
 };

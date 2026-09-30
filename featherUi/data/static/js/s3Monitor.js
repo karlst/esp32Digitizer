@@ -1,10 +1,18 @@
-// Display acquisition evidence reported by S3; never invent sample activity in the browser.
+// Browser-side S3 controls and diagnostics, reached through Feather's HTTP API.
+// The browser does not talk directly to S3. Feather's s3Monitor.cpp receives UART
+// reports, validates them, and matches command acknowledgements before this code
+// displays them. S3 stores cumulative acquisition counters; browser reloads do not
+// reset them. Read refreshStatus for requests, updateControls for button rules.
 import { appendEvent } from "./eventLog.js";
 
 /**
- * Poll Feather's validated UART snapshot once per second without overlapping requests.
- * Firmware evaluates S3 freshness. HTTP failure is separate: if the browser loses
- * Feather, it cannot know whether S3 is still connected. Clear readings in both cases.
+ * Connect S3 controls and poll Feather's validated status every half-second.
+ * The S3 itself normally sends one serial report per second; faster browser polling
+ * does not create more samples or new S3 reports. Firmware evaluates S3 link freshness.
+ *
+ * Two connections can fail independently: browser-to-Feather HTTP, and Feather-to-S3
+ * serial. Clear live readings in either case. A pending S3 command belongs to Feather
+ * firmware, so reloading this page cannot erase it or falsely confirm it.
  */
 export function initializeS3Monitor()
 {
@@ -12,6 +20,16 @@ export function initializeS3Monitor()
     const adc = document.getElementById("s3-adc");
     const receiving = document.getElementById("s3-receiving");
     const count = document.getElementById("s3-count");
+    // Preserve each 64-bit total as decimal text. Reasons are separate counters
+    // because a single rejected read can fail both checks.
+    const diagnosticCounters = [
+        ["missedEdges", document.getElementById("s3-missed")],
+        ["rejectedReads", document.getElementById("s3-rejected")],
+        ["readFailures", document.getElementById("s3-read-failures")],
+        ["overlapReads", document.getElementById("s3-overlaps")],
+        ["readyTimeouts", document.getElementById("s3-timeouts")]
+    ];
+    const readFault = document.getElementById("s3-read-fault");
     const rate = document.getElementById("s3-rate");
     const raw = document.getElementById("s3-raw");
     const error = document.getElementById("s3-error");
@@ -32,7 +50,13 @@ export function initializeS3Monitor()
     let requestPending = false;
     let browserOffline = false;
 
-    /** Preserve editable stopped drafts, but display only device-confirmed running state. */
+    /**
+     * Set controls from confirmed S3 state while preserving an unsubmitted rate choice.
+     * Disable actions while disconnected or waiting for command confirmation. Start also
+     * requires the digitizer to be ready; Stop remains available for a running acquisition.
+     * The dropdown locks while running. Ordinary status polls do not disable controls.
+     * A draft rate becomes applied only when a later S3 report confirms Start.
+     */
     function updateControls()
     {
         const available = latestState?.connected && !browserOffline;
@@ -66,18 +90,37 @@ export function initializeS3Monitor()
         }
     }
 
-    /** Clear measurements when their freshness can no longer be established. */
+    /**
+     * Replace live measurements with unknown markers after either connection is lost.
+     * Do not display zero: zero would claim a measured count rather than missing data.
+     * This only changes browser text; it does not clear S3 counters or stop acquisition.
+     */
     function clearMeasurements()
     {
         adc.textContent = "Unknown";
         receiving.textContent = "Unknown";
         count.textContent = "—";
+        for (const [, element] of diagnosticCounters)
+        {
+            element.textContent = "—";
+        }
+        readFault.textContent = "Unknown";
         rate.textContent = "—";
         raw.textContent = "—";
         error.textContent = "Unknown";
     }
 
-    /** Read and render one telemetry snapshot; log transitions rather than every poll. */
+    /**
+     * Fetch status, or send one action and then display the returned command state.
+     * action is null for a GET poll or start/stop/reboot for POST. body carries the next
+     * Start's sample rate; other actions have no settings body. Allow one request at a
+     * time and reserve one clicked command behind a poll instead of losing that click.
+     *
+     * A 202 HTTP reply only means Feather accepted a command for delivery. Polling must
+     * continue until firmware reports confirmed, rejected, or timeout. A timeout leaves
+     * the actual outcome uncertain; this code never retries a hardware command itself.
+     * Log transitions once, rather than filling Recent Events on every repeated report.
+     */
     async function refreshStatus(action = null, body = null)
     {
         // A command clicked during a background read gets the next slot. Disable
@@ -93,6 +136,8 @@ export function initializeS3Monitor()
             requestPending = true;
             commandBusy = Boolean(action);
             updateControls();
+            // Bound this HTTP wait at three seconds. Aborting the browser request
+            // does not cancel a serial command already handed to S3 by Feather.
             const abortController = new AbortController();
             const timeoutId = window.setTimeout(() => abortController.abort(), 3000);
             try
@@ -116,6 +161,16 @@ export function initializeS3Monitor()
                 {
                     throw new Error("Invalid S3 status response");
                 }
+                // Older S3 firmware has no diagnostics. Missing data stays unknown;
+                // malformed new diagnostics must not appear as reassuring zeros.
+                if (state.connected && state.diagnosticsAvailable &&
+                    (diagnosticCounters.some(([key]) =>
+                    {
+                        return typeof state[key] !== "string" || !/^\d+$/.test(state[key]);
+                    }) || !Number.isInteger(state.readFault) || state.readFault < 0 || state.readFault > 3))
+                {
+                    throw new Error("Invalid S3 diagnostic counters");
+                }
                 connected.textContent = state.connected ? "Yes" : "No";
                 latestState = state;
                 if (state.connected)
@@ -124,6 +179,13 @@ export function initializeS3Monitor()
                     receiving.textContent = state.receiving ? "Yes" : "No";
                     // Keep the 64-bit count as text; conversion to Number can lose digits.
                     count.textContent = state.sampleCount;
+                    for (const [key, element] of diagnosticCounters)
+                    {
+                        element.textContent = state.diagnosticsAvailable ? state[key] : "Unavailable";
+                    }
+                    const faultNames = ["None since last Start", "Driver check failed",
+                        "New sample arrived during read", "Driver check failed; new sample arrived during read"];
+                    readFault.textContent = state.diagnosticsAvailable ? faultNames[state.readFault] : "Unavailable";
                     rate.textContent = String(state.samplesPerSecond);
                     raw.textContent = state.latestRaw === null ? "—" : String(state.latestRaw);
                     const errorNames = ["None", "ADC initialization failed", "ADC data-ready timeout", "ADC read/configuration error"];
@@ -185,6 +247,8 @@ export function initializeS3Monitor()
                 window.clearTimeout(timeoutId);
                 requestPending = false;
                 commandBusy = false;
+                // Give a waiting click the next request slot before reenabling
+                // controls; otherwise a second click could slip into that gap.
                 if (queuedCommand)
                 {
                     const nextCommand = queuedCommand;
@@ -205,6 +269,7 @@ export function initializeS3Monitor()
         rateDirty = true;
         commandMessage.textContent = "Selected rate will take effect on Start Acquisition.";
     });
+    // Prevent a page reload; choose Start/Stop from S3-confirmed running state.
     form.addEventListener("submit", (event) =>
     {
         event.preventDefault();
@@ -215,6 +280,7 @@ export function initializeS3Monitor()
             refreshStatus(action, body);
         }
     });
+    // Only a deliberate confirmed click requests reboot; a poll never does.
     rebootButton.addEventListener("click", () =>
     {
         if (!rebootButton.disabled && window.confirm("Reboot S3? Acquisition will stop."))

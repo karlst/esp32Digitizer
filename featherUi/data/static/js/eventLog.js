@@ -1,7 +1,11 @@
 // Manage messages displayed in the Recent Events panel.
 
 /**
- * Append a plain-text message when the event log is present.
+ * Append one plain-text line to Recent Events, if that panel exists.
+ * message is displayed literally via textContent, never interpreted as HTML.
+ * This is a browser-session log, not a device recording: reload clears it, and
+ * this helper does not timestamp, persist, or limit the number of entries.
+ * Callers should log meaningful transitions rather than every polling response.
  */
 export function appendEvent(message)
 {

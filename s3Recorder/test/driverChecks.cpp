@@ -1,4 +1,5 @@
-/** @file driverChecks.cpp
+/**
+ * @file driverChecks.cpp
  * @brief Exercise the real SPI driver against a small command/register simulator.
  * This checks sequencing and fault paths, not electrical timing on a real board.
  */
@@ -21,15 +22,28 @@ static bool holdReadyLow = false;
 static uint32_t readCommandUs = 0;
 static std::vector<uint8_t> commands;
 
-/** @brief Check that the implementation uses the user's traced SPI pins. */
+/**
+ * @brief Check that the implementation uses the user's traced SPI pins.
+ */
 void SPIClass::begin(int clock, int input, int output, int chipSelect)
 { assert(clock == 12 && input == 13 && output == 11 && chipSelect == 10); }
-/** @brief Check a legal clock/mode for the assumed 7.68 MHz module. */
+/**
+ * @brief Check a legal clock/mode for the assumed 7.68 MHz module.
+ */
 void SPIClass::beginTransaction(SPISettings settings)
 { assert(settings.frequency <= 1920000 && settings.mode == SPI_MODE1 && settings.order == MSBFIRST); }
-/** @brief No actual bus semaphore is needed in the single-thread driver simulator. */
+/**
+ * @brief No actual bus semaphore is needed in the single-thread driver simulator.
+ */
 void SPIClass::endTransaction() {}
-/** @brief Interpret commands, including standby and continuous-mode entry/exit. */
+/**
+ * @brief Simulate one command byte sent by the real digitizer driver.
+ *
+ * Assert chip select is low. Track register-read commands so the following count
+ * byte is interpreted as a count, not another command. Standby raises fake DRDY;
+ * wakeup/reset/calibration lower it unless the test says the chip is missing.
+ * The zero returned here is dummy received data, not a confirmed ADC sample.
+ */
 uint8_t SPIClass::transfer(uint8_t byte)
 {
     assert(testChipSelect == LOW);
@@ -49,7 +63,14 @@ uint8_t SPIClass::transfer(uint8_t byte)
     }
     return 0;
 }
-/** @brief Supply verified registers or a signed conversion and model DRDY deassertion. */
+/**
+ * @brief Supply a register reply or a three-byte sample to the real driver.
+ *
+ * For registers, require four bytes and the required command-to-read delay; optionally
+ * corrupt one setting to prove readback checking works. For samples, return -8388608
+ * and arrange for DRDY to rise two simulated microseconds later, or never rise when
+ * holdReadyLow is set. This reproduces the condition behind the early-read fault.
+ */
 void SPIClass::transferBytes(const uint8_t* input, uint8_t* output, uint32_t count)
 {
     assert(testChipSelect == LOW);
@@ -70,16 +91,30 @@ void SPIClass::transferBytes(const uint8_t* input, uint8_t* output, uint32_t cou
         testReadyRiseAt = holdReadyLow ? UINT32_MAX : testUs + 2;
     }
 }
-/** @brief Capture the ADC configuration rather than pretending every read is valid. */
+/**
+ * @brief Capture the four configuration bytes that the real driver sends.
+ *
+ * Require WREG starting at zero and the four-register count. Add read-only ID bits
+ * so validation must mask STATUS correctly rather than comparing all bits to zero.
+ * Later simulated register reads return these saved values, not hardcoded success.
+ */
 void SPIClass::writeBytes(const uint8_t* bytes, uint32_t count)
 {
     assert(count == 6 && bytes[0] == 0x50 && bytes[1] == 3);
     std::memcpy(registers, bytes + 2, 4);
     registers[0] |= 0x30;
 }
-/** @brief Test no-hardware timeout, register mismatch, start/read/stop, and DRDY failure. */
+/**
+ * @brief Run driver setup, supported-rate reads, and deliberate hardware-fault simulations.
+ *
+ * First simulate an absent digitizer, then incorrect configuration readback, then
+ * normal startup/read/stop at every supported rate. Finally hold DRDY low during
+ * read and high during stop to verify bounded failures. These tests exercise actual
+ * driver code but cannot establish real wire timing, signal integrity, or throughput.
+ */
 int main()
 {
+    // Setup must fail cleanly when DRDY never answers or settings read back wrong.
     ads1256 driver;
     missing = true;
     testReady = HIGH;
@@ -91,6 +126,8 @@ int main()
     assert(driver.begin() && testChipSelect == HIGH);
     int32_t value = 0;
     assert(!driver.read(value));
+    // Each advertised rate must select a working command sequence. Low rates
+    // request every sample; high rates enter continuous-read mode once.
     const uint32_t rates[] = {100,500,1000,2000,7500,15000,30000};
     for (uint32_t rate : rates)
     {
@@ -110,6 +147,7 @@ int main()
         testReady = LOW;
         assert(driver.stop() && commands.back() == 0xfd && testChipSelect == HIGH);
     }
+    // Unsupported settings and stuck ready levels must fail rather than hang.
     assert(!driver.start(250));
     assert(driver.start(1000));
     holdReadyLow = true;

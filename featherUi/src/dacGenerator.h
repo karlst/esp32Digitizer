@@ -34,21 +34,35 @@ public:
     // Nominal 2 kHz updates give 20 DAC steps per period at the 100 Hz maximum.
     // Task scheduling introduces jitter; this is not a hardware-clocked DAC stream.
     static constexpr uint32_t samplePeriodUs = 500;
-    /** @brief Initialize DAC/ADC and start sampling with waveform output disabled. */
+    /**
+     * @brief Initialize DAC/ADC and start sampling with waveform output disabled.
+     */
     bool begin();
-    /** @brief Validate settings and atomically start output; running settings cannot change. */
+    /**
+     * @brief Validate settings and atomically start output; running settings cannot change.
+     */
     bool start(float frequency, float amplitude, float offset);
-    /** @brief Enable or disable the waveform; disabled output is DAC code zero. */
+    /**
+     * @brief Enable or disable the waveform; disabled output is DAC code zero.
+     */
     bool setEnabled(bool enabled);
-    /** @brief Serialize a coherent snapshot of settings and measured graph samples. */
+    /**
+     * @brief Serialize a coherent snapshot of settings and measured graph samples.
+     */
     String stateJson();
 
 private:
-    /** @brief Wake the worker without doing analog conversions in the timer callback. */
+    /**
+     * @brief Wake the worker without doing analog conversions in the timer callback.
+     */
     static void timerCallback(void* context);
-    /** @brief Run analog sampling independently of HTTP handling. */
+    /**
+     * @brief Run analog sampling independently of HTTP handling.
+     */
     static void taskEntry(void* context);
-    /** @brief Measure the previous output, then write the next time-based sine sample. */
+    /**
+     * @brief Measure the previous output, then write the next time-based sine sample.
+     */
     void sample();
 
     /**
@@ -75,11 +89,15 @@ private:
     // Set once during startup before HTTP handling begins, then read without a lock.
     bool ready = false;
     uint8_t lastCode = 0;
+    // Estimate of extra elapsed 500-microsecond intervals; cumulative until reboot.
+    // The graph ring resets on state changes; this timing diagnostic does not.
     uint32_t missedIntervals = 0;
     int64_t phaseStartUs = 0;
     int64_t lastSampleUs = 0;
     int64_t lastCaptureUs = 0;
-    // FreeRTOS mutex = exclusive access to shared state, with priority inheritance.
+    // FreeRTOS mutex = exclusive access to shared state. Priority inheritance means
+    // a lower-priority holder can temporarily run at a waiting task's priority,
+    // helping it finish and release the lock instead of delaying that task indefinitely.
     // It prevents mixed settings, torn history copies, and a sample writing a
     // nonzero DAC code after a completed Stop request. It does not control timing.
     SemaphoreHandle_t mutex = nullptr;

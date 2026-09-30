@@ -1,10 +1,21 @@
-// Exercise the Start-applies-settings UI with delayed HTTP and explicit S3 acknowledgements.
+// Run the real browser UI in headless Edge with simulated HTTP responses.
+// Playwright opens the page and operates controls; route handlers below supply
+// device replies from in-memory objects. No Feather/S3 connection is made, and
+// no hardware command is sent. This checks UI behavior, not firmware correctness.
+// Delayed responses deliberately reproduce clicks made while a poll is pending.
 const { chromium } = require("playwright");
 const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 
-/** Test controls, failures, confirmed state, and responsive layout without commanding hardware. */
+/**
+ * Load local HTML/JS/CSS and exercise controls, state changes, and responsive layout.
+ * Fake dac/s3 objects are the device's replies, not browser-invented production data.
+ * The commands list records requested POSTs so tests can detect duplicate actions.
+ * Assertions cover drafts, numeric steps, pending versus confirmed commands, timeouts,
+ * counter precision, disconnect/recovery and desktop/phone layout. Screenshots are
+ * saved under ignored .pio. Always close the browser, even when an assertion fails.
+ */
 async function runChecks()
 {
     const browser = await chromium.launch({ channel: "msedge", headless: true });
@@ -13,6 +24,8 @@ async function runChecks()
         const page = await browser.newPage({ viewport: { width: 1100, height: 1000 } });
         const errors = [];
         const commands = [];
+        // Fault switches let the route handler simulate unreachable Feather or a
+        // rejected DAC Start without needing to disconnect a physical board.
         let offline = false;
         let rejectDac = false;
         let dac = { ready: true, enabled: false, frequencyHz: 10, amplitudeVolts: 0.5,
@@ -20,7 +33,13 @@ async function runChecks()
             maxSignalVolts: 2.4, sampleRateHz: 2000, missedIntervals: 0, calibration: "Factory eFuse", samples: [] };
         let s3 = { connected: false, commandStatus: "idle", commandId: 0, commandAction: "", lastMessageAgeMs: null };
         page.on("pageerror", (error) => { errors.push(error.message); });
-        /** Wait for transport acceptance before injecting a simulated S3 acknowledgement. */
+        /**
+         * Click an S3 action and wait until its HTTP delivery response has arrived.
+         * selector identifies the button; action selects the matching /api/s3 URL.
+         * Install the response wait BEFORE clicking so a fast reply cannot be missed.
+         * Only after this returns should the test inject a confirmed/rejected S3 result;
+         * otherwise it could skip the pending state the UI is supposed to show.
+         */
         async function clickS3(selector, action)
         {
             const accepted = page.waitForResponse((response) =>
@@ -91,11 +110,15 @@ async function runChecks()
             }
             else
             {
+                // Load production page assets from disk, ignoring cache query strings.
+                // API requests above never fall through to external network access.
                 const file = path.join(__dirname, "../data", pathname === "/" ? "index.html" : pathname);
                 await route.fulfill({ body: await fs.readFile(file), contentType:
                     { ".html": "text/html", ".js": "text/javascript", ".css": "text/css" }[path.extname(file)] });
             }
         });
+        // Opening the page starts its real background polls; wait for confirmed
+        // readiness rather than assuming a fixed load delay before clicking.
         await page.goto("http://feather.test/");
         await page.waitForFunction(() => { return !document.getElementById("dac-button").disabled; });
         assert.equal(await page.locator("#blink-button, #dac-apply").count(), 0);
@@ -142,6 +165,22 @@ async function runChecks()
         s3 = { ...s3, connected: true, adcReady: true, receiving: false, sampleCount: "0",
             samplesPerSecond: 0, latestRaw: null, errorCode: 0, acquisitionRunning: false, appliedRate: 1000 };
         await page.waitForFunction(() => { return !document.getElementById("s3-acquisition-button").disabled; });
+        assert.equal(await page.locator("#s3-missed").innerText(), "Unavailable");
+        // Show exact large decimal counters without Number rounding. Reasons
+        // can overlap; total rejected reads is supplied separately by the S3.
+        s3 = { ...s3, diagnosticsAvailable: true, missedEdges: "9007199254740993",
+            rejectedReads: "12", readFailures: "8", overlapReads: "7", readyTimeouts: "4", readFault: 3 };
+        await page.waitForFunction(() => { return document.getElementById("s3-missed").textContent === "9007199254740993"; });
+        assert.equal(await page.locator("#s3-rejected").innerText(), "12");
+        assert.equal(await page.locator("#s3-read-failures").innerText(), "8");
+        assert.equal(await page.locator("#s3-overlaps").innerText(), "7");
+        assert.equal(await page.locator("#s3-timeouts").innerText(), "4");
+        assert.match(await page.locator("#s3-read-fault").innerText(), /Driver check failed; new sample/);
+        await page.screenshot({ path: path.join(__dirname, "../.pio/diagnostics-desktop.png"), fullPage: true });
+        await page.setViewportSize({ width: 375, height: 950 });
+        await page.screenshot({ path: path.join(__dirname, "../.pio/diagnostics-mobile.png"), fullPage: true });
+        assert.equal(await page.evaluate(() => { return document.documentElement.scrollWidth <= innerWidth; }), true);
+        await page.setViewportSize({ width: 1100, height: 1000 });
         await page.locator("#s3-sample-rate").selectOption("7500");
         await clickS3("#s3-acquisition-button", "start");
         await page.waitForFunction(() => { return document.getElementById("s3-command-message").textContent.includes("pending"); });
@@ -182,6 +221,8 @@ async function runChecks()
         await page.waitForFunction(() => { return document.getElementById("s3-connected").textContent === "No"; });
         assert.equal(await page.locator("#s3-acquisition-button").isDisabled(), true);
         offline = true;
+        assert.equal(await page.locator("#s3-missed").innerText(), "—");
+        assert.equal(await page.locator("#s3-read-fault").innerText(), "Unknown");
         await page.waitForFunction(() => { return document.getElementById("status-dac").textContent.includes("Unknown"); });
         offline = false;
         await page.waitForFunction(() => { return document.getElementById("status-system").textContent === "Connected"; });

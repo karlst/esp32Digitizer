@@ -1,6 +1,16 @@
 /**
  * @file s3Monitor.cpp
- * @brief Separate S3 link health from evidence that ADC conversions are arriving.
+ * @brief Feather-side serial receiver and command tracker for the S3 board.
+ *
+ * webApp calls begin() once and update() on each Arduino loop pass. update()
+ * assembles serial lines; acceptLine() validates every field before storing it.
+ * stateJson() supplies the browser snapshot. sendCommand() sends a request once
+ * and leaves it pending until a matching S3 report confirms or rejects it.
+ *
+ * A fresh serial message proves only that S3 is communicating. To say samples
+ * are arriving we also require its accepted-sample counter to advance recently.
+ * A constant input voltage can produce identical values but advancing counts.
+ * No full sample recording passes through this monitor.
  */
 #include "s3Monitor.h"
 #include <cstring>
@@ -8,8 +18,11 @@
 #include <esp_system.h>
 
 /**
- * @brief Bind the UART without touching hardware during global construction.
- * @param serialPort Dedicated inter-board UART; do not use the USB debug Serial.
+ * @brief Keep a reference to the dedicated inter-board serial port.
+ * @param serialPort Serial1 owned by the runtime; USB diagnostics use Serial instead.
+ *
+ * The constructor can run before Arduino startup, so hardware work waits for begin().
+ * This object is used only by the loop task, not the DAC worker or an interrupt.
  */
 s3Monitor::s3Monitor(HardwareSerial& serialPort) : serialPort(serialPort)
 {
@@ -25,6 +38,8 @@ s3Monitor::s3Monitor(HardwareSerial& serialPort) : serialPort(serialPort)
  */
 void s3Monitor::begin()
 {
+    // Buffer bursts while the same loop task is occupied serving an HTTP request.
+    // RX receives S3 pin 17; TX sends commands to S3 pin 18, with common ground.
     serialPort.setRxBufferSize(1024);
     // Set the idle pull-up before the UART owns the pin's peripheral function.
     pinMode(RX, INPUT_PULLUP);
@@ -71,7 +86,11 @@ bool s3Monitor::readUnsigned(const char* text, uint64_t maximum, uint64_t& value
 }
 
 /**
- * @brief Accept thirteen version-2 fields, including applied state and command acknowledgement.
+ * @brief Validate a complete S3 status report before replacing the displayed state.
+ *
+ * Version 3 has nineteen fields, including diagnostic totals. Older version-2
+ * reports have thirteen fields and remain usable while boards are updated;
+ * their missing diagnostics are reported as unknown, not as zero.
  * @param nowMs Feather receipt time; S3 uptime is never compared to the Feather clock.
  * @return True only after a whole frame has passed validation and been committed.
  *
@@ -80,7 +99,7 @@ bool s3Monitor::readUnsigned(const char* text, uint64_t maximum, uint64_t& value
  */
 bool s3Monitor::acceptLine(uint32_t nowMs)
 {
-    char* fields[13] = {line};
+    char* fields[19] = {line};
     size_t fieldCount = 1;
     bool retVal = true;
     // Split in place, preserving empty fields so missing values are rejected.
@@ -89,7 +108,7 @@ bool s3Monitor::acceptLine(uint32_t nowMs)
         if (line[index] == ',')
         {
             line[index] = '\0';
-            if (fieldCount < 13)
+            if (fieldCount < 19)
             {
                 fields[fieldCount++] = &line[index + 1];
             }
@@ -99,8 +118,10 @@ bool s3Monitor::acceptLine(uint32_t nowMs)
             }
         }
     }
-    retVal = retVal && fieldCount == 13 && strcmp(fields[0], "S3") == 0 && strcmp(fields[1], "2") == 0;
-    uint64_t parsed[11] = {};
+    const bool hasDiagnostics = fieldCount == 19 && strcmp(fields[1], "3") == 0;
+    retVal = retVal && strcmp(fields[0], "S3") == 0 &&
+        (hasDiagnostics || (fieldCount == 13 && strcmp(fields[1], "2") == 0));
+    uint64_t parsed[17] = {};
     bool negative = false;
     if (retVal)
     {
@@ -118,6 +139,17 @@ bool s3Monitor::acceptLine(uint32_t nowMs)
             readUnsigned(fields[10], 30000, parsed[8]) && validRate(static_cast<uint32_t>(parsed[8])) &&
             readUnsigned(fields[11], UINT32_MAX, parsed[9]) &&
             readUnsigned(fields[12], 2, parsed[10]);
+        // Validate every added field before committing any of this report. Keep
+        // 64-bit counts intact; last-fault flags have only two defined bits.
+        if (retVal && hasDiagnostics)
+        {
+            retVal = readUnsigned(fields[13], UINT64_MAX, parsed[11]) &&
+                readUnsigned(fields[14], UINT64_MAX, parsed[12]) &&
+                readUnsigned(fields[15], UINT64_MAX, parsed[13]) &&
+                readUnsigned(fields[16], UINT64_MAX, parsed[14]) &&
+                readUnsigned(fields[17], UINT64_MAX, parsed[15]) &&
+                readUnsigned(fields[18], 3, parsed[16]);
+        }
     }
     if (retVal)
     {
@@ -136,9 +168,19 @@ bool s3Monitor::acceptLine(uint32_t nowMs)
             lastProgressMs = nowMs;
             observedProgress = true;
         }
+        // Commit the complete validated snapshot at once. parsed indexes follow
+        // wire-field order after the S3 tag and version; keep them aligned with
+        // shared/s3StatusProtocol.md when extending the message.
         uptimeMs = static_cast<uint32_t>(parsed[0]);
         adcReady = parsed[1] != 0;
         sampleCount = parsed[2];
+        diagnosticsAvailable = hasDiagnostics;
+        missedEdges = parsed[11];
+        rejectedReads = parsed[12];
+        readFailures = parsed[13];
+        overlapReads = parsed[14];
+        readyTimeouts = parsed[15];
+        readFault = static_cast<uint32_t>(parsed[16]);
         samplesPerSecond = static_cast<uint32_t>(parsed[3]);
         latestRaw = negative ? -static_cast<int32_t>(parsed[4]) : static_cast<int32_t>(parsed[4]);
         sampleAgeMs = static_cast<uint32_t>(parsed[5]);
@@ -160,11 +202,16 @@ bool s3Monitor::acceptLine(uint32_t nowMs)
 }
 
 /**
- * @brief Consume at most 256 buffered bytes per pass without waiting for a newline.
+ * @brief Drain available serial bytes and update pending-command timeout state.
  *
- * At one short report per second this is ample capacity. A bounded loop keeps
- * arbitrary UART noise from starving the browser. CRLF and LF are both accepted;
- * other control bytes, oversize lines, and expired fragments are discarded.
+ * Called from webApp, never from an interrupt. Read at most 256 bytes per call;
+ * longer buffered input is handled by the next pass. No call waits for another byte.
+ * A whole valid line refreshes the link; malformed text does not. Lines are capped
+ * by lineCapacity and fragments expire after 500 ms. LF ends a line; CR is ignored.
+ *
+ * A command with no matching confirmation after five seconds becomes timeout.
+ * That means its outcome is unknown, not that S3 definitely did nothing. Do not
+ * retry automatically: the next status can still show what S3 is actually doing.
  */
 void s3Monitor::update()
 {
@@ -175,6 +222,8 @@ void s3Monitor::update()
     {
         commandStatus = "timeout";
     }
+    // After expiry discard through newline; otherwise a later fragment could
+    // accidentally be interpreted as the continuation of an unrelated report.
     if (lineLength && nowMs - lastByteMs > 500)
     {
         lineLength = 0;
@@ -184,6 +233,7 @@ void s3Monitor::update()
     {
         const char nextByte = static_cast<char>(serialPort.read());
         lastByteMs = nowMs;
+        // Newline is the only point where a report may replace displayed state.
         if (nextByte == '\n')
         {
             line[lineLength] = '\0';
@@ -209,13 +259,17 @@ void s3Monitor::update()
 }
 
 /**
- * @brief Serialize fresh state, using null for measurements after a link timeout.
+ * @brief Build a browser reply from the most recent validated S3 report.
+ * @return JSON text with live measurements, or null measurements after disconnection.
  *
- * Link age uses only Feather time; sample age is the S3's reported age plus time
- * elapsed since receipt. A disconnected or stalled device must not look live.
- * sampleCount is a decimal JSON string to preserve integers above JavaScript's
- * exact numeric range. A steady voltage is valid data; raw value changes are not
- * required to establish reception, only an advancing conversion count.
+ * A report older than three seconds is disconnected. "receiving" additionally
+ * requires running/ready flags, recent count progress, and a recently read sample.
+ * S3 sample age is extended by time since Feather received the report; the boards'
+ * absolute clocks are never compared. Stale values must not masquerade as live data.
+ *
+ * All 64-bit totals are decimal strings so JavaScript cannot round away digits.
+ * Version-2 reports lack diagnostics and show them as null. Command outcome fields
+ * remain available even when live measurements become unknown.
  */
 String s3Monitor::stateJson() const
 {
@@ -231,6 +285,27 @@ String s3Monitor::stateJson() const
     retVal += ",\"commandId\":" + String(commandId);
     retVal += ",\"commandStatus\":\"" + commandStatus + "\"";
     retVal += ",\"commandAction\":\"" + commandAction + "\"";
+    // A counter is a decimal JSON string so browsers cannot round large totals.
+    // Missing old-firmware diagnostics and disconnected values are explicitly null.
+    const bool showDiagnostics = connected && diagnosticsAvailable;
+    retVal += ",\"diagnosticsAvailable\":" + String(showDiagnostics ? "true" : "false");
+    const char* names[] = {"missedEdges", "rejectedReads", "readFailures", "overlapReads", "readyTimeouts"};
+    const uint64_t totals[] = {missedEdges, rejectedReads, readFailures, overlapReads, readyTimeouts};
+    for (size_t index = 0; index < 5; ++index)
+    {
+        retVal += ",\"" + String(names[index]) + "\":";
+        if (showDiagnostics)
+        {
+            char totalText[24];
+            snprintf(totalText, sizeof(totalText), "%llu", static_cast<unsigned long long>(totals[index]));
+            retVal += "\"" + String(totalText) + "\"";
+        }
+        else
+        {
+            retVal += "null";
+        }
+    }
+    retVal += ",\"readFault\":" + (showDiagnostics ? String(readFault) : String("null"));
     if (connected)
     {
         char countText[24];
@@ -254,7 +329,13 @@ String s3Monitor::stateJson() const
     return retVal;
 }
 
-/** @brief Restrict this initial control surface to a useful subset of ADS1256 rates. */
+/**
+ * @brief Check that samples-per-second is one of the seven rates offered by this UI.
+ * @return True for an exact supported rate, not for every integer below 30000.
+ *
+ * This matches S3's commandProtocol::rateRegister choices. Neither this test nor
+ * the dropdown establishes that acquisition can sustain every offered rate.
+ */
 bool s3Monitor::validRate(uint32_t rate)
 {
     const uint32_t supported[] = {100, 500, 1000, 2000, 7500, 15000, 30000};
@@ -267,12 +348,16 @@ bool s3Monitor::validRate(uint32_t rate)
 }
 
 /**
- * @brief Queue one complete UART command and wait asynchronously for its matching reply.
- * @return False if disconnected, busy, invalid, or UART has insufficient buffer space.
+ * @brief Send one validated command to S3 and mark it pending without waiting.
+ * @param action start, stop, or reboot; all other text is rejected.
+ * @param rate Samples/second for Start; Stop/Reboot always transmit zero instead.
+ * @return True if the entire command was accepted by the serial transmit buffer.
+ * False means disconnected, busy, invalid settings/state, or insufficient buffer room.
  *
- * HTTP 202 only acknowledges transport acceptance. This function never sets running
- * state; only a validated S3 report can do that. USB/web polling cannot block waiting
- * for S3. The short command is buffered in full, and timeout handling runs in update().
+ * Only the loop task calls this. A successful return is NOT hardware confirmation:
+ * acceptLine() later checks the matching request ID, S3 result, and applied state.
+ * The five-second timeout is handled in update(); there is no automatic retransmit.
+ * An already running acquisition cannot be retuned to a different rate with Start.
  */
 bool s3Monitor::sendCommand(const char* action, uint32_t rate)
 {
@@ -284,12 +369,16 @@ bool s3Monitor::sendCommand(const char* action, uint32_t rate)
         commandStatus != "pending" && (!isStart || (adcReady && validRate(rate) &&
         (!acquisitionRunning || rate == appliedRate))))
     {
+        // Each request gets a new ID so an old reply cannot complete this one.
+        // Skip zero after 32-bit wrap: zero means "no command" in the protocol.
         uint32_t nextId = commandId + 1;
         if (nextId == 0)
         {
             nextId = 1;
         }
         const String command = "CMD,2," + String(nextId) + "," + action + "," + String(isStart ? rate : 0) + "\n";
+        // Require space for the whole line before writing. Remember pending state
+        // only if every character was accepted, including the ending newline.
         if (serialPort.availableForWrite() >= static_cast<int>(command.length()))
         {
             retVal = serialPort.print(command) == command.length();

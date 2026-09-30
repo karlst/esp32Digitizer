@@ -1,12 +1,25 @@
 /**
  * @file featherLink.cpp
- * @brief Bounded command input and confirmed-state output for the existing Feather UI.
+ * @brief Carry commands from Feather to S3 and send confirmed acquisition status back.
+ *
+ * main.cpp calls begin() once and update() repeatedly from Arduino's loop task.
+ * Serial1 is the inter-board UART (asynchronous serial link); Serial is USB debug.
+ * Incoming text becomes a validated command, then goes into acquisition's queue.
+ * The acquisition task performs the hardware operation and publishes an answer.
+ * This file sends that answer and periodic snapshots; it never reads ADC samples.
+ *
+ * "ack" means acknowledgement: a result paired with the command's request ID.
+ * Accepting a command into a queue is not proof that the device performed it.
  */
 #include "featherLink.h"
 #include <cstdio>
 
 /**
- * @brief Bind the recorder without starting hardware during global initialization.
+ * @brief Keep a reference to the acquisition service that outlives this link.
+ * @param recorder The global acquisition object owned by main.cpp.
+ *
+ * Construction happens before Arduino setup, so no pins, tasks or serial ports
+ * are started here. begin() performs hardware setup after the runtime is ready.
  */
 featherLink::featherLink(acquisition& recorder) : recorder(recorder)
 {
@@ -14,7 +27,12 @@ featherLink::featherLink(acquisition& recorder) : recorder(recorder)
 }
 
 /**
- * @brief Assign RX18/TX17 explicitly; digitizer SPI remains on GPIO9 through GPIO13.
+ * @brief Open the dedicated Feather link at 115200 bits/second, receive 18/send 17.
+ *
+ * Serial framing is 8 data bits, no parity bit and 1 stop bit (SERIAL_8N1).
+ * Pins 9-13 are already used by the digitizer. Receive/transmit buffers let the
+ * main loop handle short bursts without waiting for each character on the wire.
+ * The RX pull-up sets a disconnected input high, the serial line's idle level.
  */
 void featherLink::begin()
 {
@@ -29,22 +47,38 @@ void featherLink::begin()
 }
 
 /**
- * @brief Send exactly thirteen fields from one consistent snapshot, without blocking.
+ * @brief Send one version-3 status report, including cumulative acquisition diagnostics.
+ *
+ * The first thirteen fields retain their previous meanings. Six added fields
+ * carry detected misses, rejected reads, driver failures, overlapping reads,
+ * ready timeouts, and the last read-fault flags. All come from the same snapshot.
+ * If the UART has no room, skip this report; the next contains the same totals.
  */
 bool featherLink::report(const acquisitionStatus& status)
 {
-    char frame[160];
+    // Room for every counter at its full 64-bit decimal width plus all other fields.
+    char frame[384];
+    // UINT32_MAX means "no sample yet"; otherwise age is time since the last
+    // accepted sample, not the age of this periodic communications report.
     const uint32_t nowMs = millis();
     const uint32_t age = status.hasSample ? nowMs - status.lastSampleMs : UINT32_MAX;
     const int length = snprintf(frame, sizeof(frame),
-        "S3,2,%lu,%u,%llu,%lu,%ld,%lu,%lu,%u,%lu,%lu,%lu\n",
+        "S3,3,%lu,%u,%llu,%lu,%ld,%lu,%lu,%u,%lu,%lu,%lu,%llu,%llu,%llu,%llu,%llu,%lu\n",
         static_cast<unsigned long>(nowMs), status.ready ? 1 : 0,
         static_cast<unsigned long long>(status.sampleCount),
         static_cast<unsigned long>(status.running ? status.measuredRate : 0),
         static_cast<long>(status.latestRaw), static_cast<unsigned long>(age),
         static_cast<unsigned long>(status.error), status.running ? 1 : 0,
         static_cast<unsigned long>(status.rate), static_cast<unsigned long>(status.ackId),
-        static_cast<unsigned long>(status.ackResult));
+        static_cast<unsigned long>(status.ackResult),
+        static_cast<unsigned long long>(status.missedEdges),
+        static_cast<unsigned long long>(status.rejectedReads),
+        static_cast<unsigned long long>(status.readFailures),
+        static_cast<unsigned long long>(status.overlapReads),
+        static_cast<unsigned long long>(status.readyTimeouts),
+        static_cast<unsigned long>(status.readFault));
+    // snprintf reports the length it needed. Reject truncation, and only write
+    // when the whole line fits, so Feather never sees a deliberately partial report.
     const bool retVal = length > 0 && length < static_cast<int>(sizeof(frame)) &&
         Serial1.availableForWrite() >= length &&
         Serial1.write(reinterpret_cast<const uint8_t*>(frame), length) == static_cast<size_t>(length);
@@ -52,7 +86,17 @@ bool featherLink::report(const acquisitionStatus& status)
 }
 
 /**
- * @brief Drain bounded input, send periodic/immediate acknowledgements, and finish reboot.
+ * @brief Read pending commands, send status/replies, and finish a requested reboot.
+ *
+ * Called repeatedly by main.cpp on Arduino's loop task, not from an interrupt.
+ * Read at most 128 bytes from each input per call so serial noise cannot keep us
+ * here forever. Commands are queued without waiting; hardware work happens in
+ * acquisition.cpp. Failed queue submission does not produce a success reply.
+ *
+ * Send one status report per second and an earlier report for a new command
+ * result. If transmission has no room, retry on a later call. For Reboot, wait
+ * until its acknowledgement has left the UART, then restart after 100 ms.
+ * USB diagnostics are separate human-readable messages, never protocol input.
  */
 void featherLink::update()
 {
@@ -85,8 +129,12 @@ void featherLink::update()
             }
         }
     }
+    // Take one consistent copy: the other core may be collecting while we format
+    // the message. No acquisition lock is held during formatting or transmission.
     const acquisitionStatus state = recorder.snapshot();
     const uint32_t nowMs = millis();
+    // Compare both ID and result so a changed outcome is not hidden until the
+    // periodic report. Update sent fields only after the UART accepted the frame.
     const bool newAck = state.ackId != sentAckId || state.ackResult != sentAckResult;
     if (!rebootSent && (nowMs - lastReportMs >= 1000 || newAck))
     {

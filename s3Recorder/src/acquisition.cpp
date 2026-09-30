@@ -1,17 +1,53 @@
 /**
  * @file acquisition.cpp
- * @brief Interrupt-woken ADC worker; the interrupt itself never performs SPI reads.
+ * @brief Run sample collection in a background task, separate from communications.
+ *
+ * ADC means analog-to-digital converter: our ADS1256 digitizer. A sample is
+ * one measured value. DRDY means Data Ready, the wire on S3 pin 9 that goes
+ * from high to low whenever the digitizer has a new sample available.
+ *
+ * Follow the program in this order:
+ * 1. begin() creates a command queue and a FreeRTOS task (a background thread).
+ * 2. taskEntry() starts run(), which initializes the digitizer and waits.
+ * 3. Communications code calls submit() to request Start, Stop, or Reboot.
+ * 4. run() takes that command from the queue and calls execute().
+ * 5. While running, collect() waits for ready samples and calls adc.read().
+ *    ads1256.cpp implements the actual SPI commands and three-byte reads.
+ *
+ * The task runs on CPU core 0 and is the only task allowed to operate the
+ * digitizer. The DRDY interrupt only counts events and wakes this task.
+ * The communications loop on the other core submits commands and reads status;
+ * it never reaches into the digitizer while a sample is being read.
+ *
+ * current is the acquisition task's working status. publish() copies it into
+ * published, and snapshot() gives communications a protected copy of published.
+ * We keep the latest sample and a count, not a recording of all samples.
  */
 #include "acquisition.h"
 
 /**
- * @brief Allocate the one-command mailbox and start the ADC owner on core zero.
+ * @brief Create the command queue and launch the background acquisition task.
+ *
+ * The queue holds one pending Start, Stop, or Reboot command. The new task
+ * initializes the digitizer but waits for Start before collecting samples.
+ * @return True if the queue and task were created. This does NOT confirm that
+ * the digitizer initialized; the task reports that separately through status.
  */
 bool acquisition::begin()
 {
+    // Allocate space for one command, copied by value. The queue safely moves
+    // commands from the communications task to this task, even across CPU cores.
+    // A null handle means allocation failed.
     commands = xQueueCreate(1, sizeof(acquisitionCommand));
+    // Only try to create the task if the queue exists (the && enforces this).
+    // Arguments: entry function; debugging name; 4096-byte stack for calls and
+    // local variables; this object as the entry argument; scheduling priority 3;
+    // where to store the task handle; CPU core 0. pdPASS means creation succeeded.
+    // The new task can start executing before begin() returns.
     const bool retVal = commands && xTaskCreatePinnedToCore(taskEntry, "adcReader", 4096,
         this, 3, &worker, 0) == pdPASS;
+    // If startup failed, release any queue we created and expose an initialization
+    // error (code 1). publish() updates shared status; it sends no serial message.
     if (!retVal)
     {
         if (commands)
@@ -26,19 +62,31 @@ bool acquisition::begin()
 }
 
 /**
- * @brief Enqueue without blocking the UART loop; full mailboxes are never overwritten.
+ * @brief Give the acquisition task a command to execute when it next checks its queue.
+ * @param command Already validated Start, Stop, or Reboot request, including its ID.
+ * @return True if a copy was queued, not proof that the command has executed.
+ * False means there is no queue or its single pending-command slot is full.
  */
 bool acquisition::submit(const acquisitionCommand& command)
 {
+    // The final zero means "do not wait for space." Keep communications responsive
+    // if acquisition is busy; never overwrite a command that is already waiting.
     const bool retVal = commands && xQueueSend(commands, &command, 0) == pdTRUE;
     return retVal;
 }
 
 /**
- * @brief Copy a coherent record; neither caller nor worker holds the lock afterward.
+ * @brief Give the caller a consistent copy of the last published acquisition status.
+ * @return A separate status object the caller can format/transmit after unlocking.
+ * It may lag the working status by about 10 milliseconds during acquisition.
  */
 acquisitionStatus acquisition::snapshot()
 {
+    // Another core could be replacing published while we copy it. Without a
+    // lock we could mix an old sample with a new count, or read only half of an
+    // updated 64-bit count on this 32-bit processor. This short critical-section
+    // lock lets only one core copy published at a time. It is not a sample/SPI
+    // lock and is released before any formatting, transmission, or waiting.
     portENTER_CRITICAL(&snapshotLock);
     const acquisitionStatus retVal = published;
     portEXIT_CRITICAL(&snapshotLock);
@@ -46,10 +94,16 @@ acquisitionStatus acquisition::snapshot()
 }
 
 /**
- * @brief Publish about every 10 ms or immediately after commands/faults, not per sample.
+ * @brief Copy working status into the shared status used by communications.
+ *
+ * Called after commands and faults, and about every 10 milliseconds while
+ * collecting. "Publish" here means copy in memory, not send to the Feather.
+ * The communications code decides when to transmit its own snapshot.
  */
 void acquisition::publish()
 {
+    // Use the same lock as snapshot() so nobody sees a partly replaced record.
+    // Keep the protected work to one structure copy; do no hardware I/O here.
     portENTER_CRITICAL(&snapshotLock);
     published = current;
     portEXIT_CRITICAL(&snapshotLock);
@@ -57,7 +111,12 @@ void acquisition::publish()
 }
 
 /**
- * @brief Bridge the FreeRTOS C entry point to this object's permanent worker loop.
+ * @brief Start this object's run() method when FreeRTOS launches the task.
+ * @param argument The acquisition object passed as "this" in begin().
+ *
+ * FreeRTOS calls an ordinary function with an untyped pointer. This static
+ * function converts that pointer back to an acquisition object so it can call
+ * the object's member function. run() loops indefinitely; it does not return.
  */
 void acquisition::taskEntry(void* argument)
 {
@@ -65,14 +124,26 @@ void acquisition::taskEntry(void* argument)
 }
 
 /**
- * @brief Count readiness edges and wake the worker, with no conversion or logging in ISR.
+ * @brief Handle the digitizer's signal that a new sample is ready.
+ * @param argument The acquisition object supplied when the interrupt was attached.
+ *
+ * An edge is a voltage-level change. We attach this function only to FALLING
+ * edges: DRDY changing from high to low. This interrupt briefly interrupts
+ * normal task execution; it must stay short. It does not read SPI or print.
+ * IRAM_ATTR places this function in the S3's internal instruction RAM.
  */
 void IRAM_ATTR acquisition::readyInterrupt(void* argument)
 {
+    // Recover our object and count this event. collect() compares this count
+    // before/after reading to detect another sample arriving during the read.
     acquisition* self = static_cast<acquisition*>(argument);
     ++self->readyEdges;
+    // A task notification is a wake-up signal, not the sample itself. Use the
+    // FromISR version because we are inside an interrupt service routine (ISR).
+    // FreeRTOS sets wake if a higher-priority task should run immediately.
     BaseType_t wake = pdFALSE;
     vTaskNotifyGiveFromISR(self->worker, &wake);
+    // Ask the scheduler to run that task as we leave the interrupt.
     if (wake == pdTRUE)
     {
         portYIELD_FROM_ISR();
@@ -80,12 +151,21 @@ void IRAM_ATTR acquisition::readyInterrupt(void* argument)
 }
 
 /**
- * @brief Stop software acquisition after lost DRDY or an ambiguous read; retain evidence.
+ * @brief Stop acquisition after a read failure and make the error visible in status.
+ * @param error Status error code: 2 for no ready sample within the timeout,
+ * or 3 for a failed/possibly inconsistent sample read.
+ *
+ * Preserve the previous accepted sample, count, and detailed fault evidence.
+ * Clear ready so another Start is rejected; reboot is the recovery path.
  */
 void acquisition::fault(uint32_t error)
 {
+    // Stop new wake-up interrupts, then ask the digitizer to stop. Keep the
+    // original error even if that stop attempt also fails.
     detachInterrupt(ads1256::readyPin);
     adc.stop();
+    // Report that software collection has stopped; this does not guarantee
+    // an unresponsive digitizer actually entered standby.
     current.running = false;
     current.ready = false;
     current.measuredRate = 0;
@@ -94,12 +174,20 @@ void acquisition::fault(uint32_t error)
 }
 
 /**
- * @brief Apply a queued request, acknowledging only after hardware work completes.
+ * @brief Execute one validated command taken from the queue by run().
+ * @param command Start, Stop, or Reboot request, with its rate and request ID.
+ *
+ * The acquisition task alone calls this function, so commands cannot operate
+ * SPI at the same time as collect(). ackId identifies the request answered;
+ * ackResult is 1 for accepted or 2 for rejected. These fields are published
+ * for communications to send back; this function does not send the reply.
  */
 void acquisition::execute(const acquisitionCommand& command)
 {
-    // The Feather allows one outstanding command and never automatically retries.
-    // Retain recent results so a delayed Start after Stop cannot restart a run.
+    // Check the bounded history of recent requests before touching hardware.
+    // A duplicate should get its recorded answer, not execute twice. In
+    // particular, a repeated old Start must not undo a subsequent Stop while
+    // that request is still in history. History is not retained across reboot.
     uint32_t savedResult = 0;
     if (history.lookup(command, savedResult))
     {
@@ -111,34 +199,48 @@ void acquisition::execute(const acquisitionCommand& command)
         bool accepted = false;
         if (command.action == acquisitionCommand::Action::start)
         {
+            // While running, accept Start only if it asks for the same rate.
+            // Changing rate requires Stop then Start; do not reconfigure mid-read.
             if (current.running)
             {
                 accepted = current.rate == command.rate;
             }
+            // A stopped digitizer must have initialized successfully and have
+            // no outstanding fault. Otherwise leave this request rejected.
             else if (current.ready)
             {
+                // Configure/calibrate the actual chip before saying Start worked.
                 accepted = adc.start(command.rate);
                 if (accepted)
                 {
+                    // Record applied settings and clear old read diagnostics.
+                    // Keep cumulative sampleCount and the previous sample;
+                    // Start does not erase measurements from earlier runs.
                     current.rate = command.rate;
                     current.running = true;
                     current.error = 0;
                     current.readFault = 0;
                     current.readDetail = 0;
                     current.measuredRate = 0;
-                    // Discard stale notification counts from the previous run.
+                    // Remove wake-up signals left from the previous run (true
+                    // clears the notification count; zero means do not wait).
+                    // Reset edge tracking, then enable the high-to-low DRDY
+                    // interrupt. Pass this object to readyInterrupt().
                     ulTaskNotifyTake(pdTRUE, 0);
                     readyEdges = 0;
                     previousEdge = 0;
                     attachInterruptArg(ads1256::readyPin, readyInterrupt, this, FALLING);
-                    // DRDY can already be low on attachment. The worker tests its
-                    // level as well as notifications, so it won't lose the first result.
+                    // Start the no-sample timeout and measured-rate window now.
+                    // DRDY may already be low when the interrupt is attached;
+                    // collect() checks the pin itself as well as wake-ups, so
+                    // that already-ready sample does not require a new edge.
                     lastReadMs = millis();
                     rateWindowMs = lastReadMs;
                     rateWindowCount = current.sampleCount;
                 }
                 else
                 {
+                    // Chip setup failed. Reject Start and require recovery.
                     current.ready = false;
                     current.error = 3;
                 }
@@ -146,20 +248,25 @@ void acquisition::execute(const acquisitionCommand& command)
         }
         else
         {
+            // Both Stop and Reboot first stop sample collection. This else
+            // handles those two actions because the parser rejects unknown ones.
             detachInterrupt(ads1256::readyPin);
             const bool stopped = adc.stop();
             current.running = false;
             current.measuredRate = 0;
+            // Keep a hardware timeout visible even though software has stopped.
             if (!stopped)
             {
                 current.ready = false;
                 current.error = 2;
             }
-            // Stop means the S3 no longer reads samples, even if hardware has
-            // failed. Keep ADC faults visible; reboot remains a recovery action.
+            // Accept the software Stop even if the chip did not answer. For
+            // Reboot, set a flag: communications sends the reply before actually
+            // restarting the S3. Do not reboot here and lose that confirmation.
             accepted = true;
             current.reboot = command.action == acquisitionCommand::Action::reboot;
         }
+        // Save this request's result for status reporting and duplicate detection.
         current.ackId = command.id;
         current.ackResult = accepted ? 1 : 2;
         history.remember(command, current.ackResult);
@@ -168,59 +275,90 @@ void acquisition::execute(const acquisitionCommand& command)
 }
 
 /**
- * @brief Service the ADC independently of USB/UART; count only complete fresh reads.
+ * @brief Initialize the digitizer, then repeatedly handle commands and collect samples.
+ *
+ * This is the background task's permanent loop, entered through taskEntry().
+ * Initialization leaves the digitizer in standby. Only a successful Start
+ * command sets current.running and enables collection.
  */
 void acquisition::run()
 {
+    // Hardware setup happens here, after acquisition::begin() creates the task.
+    // Report its result separately from whether task creation itself succeeded.
     current.ready = adc.begin();
     current.error = current.ready ? 0 : 1;
     publish();
     for (;;)
     {
+        // Check for one queued command without waiting (final argument zero).
+        // Do this before the next sample so Stop can be serviced promptly.
+        // Once Reboot is accepted, leave further commands for the restart.
         acquisitionCommand command;
         if (!current.reboot && xQueueReceive(commands, &command, 0) == pdTRUE)
         {
             execute(command);
         }
+        // collect() handles at most one sample per call and bounds its wait.
+        // Returning here allows another command check between read attempts.
         if (current.running)
         {
             collect();
         }
         else
         {
-            // Stopped acquisition consumes no SPI bandwidth and yields its core.
+            // While stopped, sleep five milliseconds rather than spinning through
+            // an empty queue. Other tasks can use the CPU during this sleep.
             vTaskDelay(pdMS_TO_TICKS(5));
         }
     }
 }
 
 /**
- * @brief Handle one readiness event and update measured throughput; called only by the worker.
+ * @brief Wait briefly for one sample, read it, and update counts and status.
+ *
+ * Called only by run() in the acquisition task. The DRDY interrupt wakes us;
+ * adc.read() in ads1256.cpp performs the actual SPI transfer. We check the
+ * interrupt count around that transfer to detect a new sample becoming ready
+ * before the previous read finishes. Such a read is rejected as uncertain.
+ * This function retains only the latest accepted sample, not a sample history.
  */
 void acquisition::collect()
 {
     if (current.running)
     {
+        // DRDY low means a sample is already waiting, so read without sleeping.
+        // Otherwise sleep until notified, or until the 20-millisecond wait ends.
         if (digitalRead(ads1256::readyPin) != LOW)
         {
-            // Sleep until data is ready; a bounded wait also services Stop
-            // and detects an unplugged/stuck-high DRDY wire within 100 ms.
+            // Clear accumulated notifications on wake. A notification only says
+            // "check the device"; recheck the pin below before reading. The
+            // timeout lets run() check commands even if no more samples arrive.
             ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(20));
         }
         if (digitalRead(ads1256::readyPin) == LOW)
         {
+            // Save how many ready interrupts have occurred. The difference from
+            // the last accepted read reveals observed events we did not service.
+            // unsigned subtraction also handles the 32-bit counter wrapping.
             const uint32_t edgeBefore = readyEdges;
             const uint32_t elapsedEdges = edgeBefore - previousEdge;
+            // Count ready events already missed BEFORE this read, even if this
+            // read subsequently fails. Do not mix them with rejected read attempts.
+            if (elapsedEdges > 1)
+            {
+                current.missedEdges += elapsedEdges - 1;
+            }
             int32_t sample = 0;
             const bool complete = adc.read(sample);
-            // A new result arriving during a read can corrupt its bytes.
-            // Stop on ambiguity instead of counting it as a good conversion.
-            if (complete && readyEdges == edgeBefore)
+            // Save this observation once so the decision and reason counters agree.
+            const bool overlapped = readyEdges != edgeBefore;
+            // Accept only if the driver succeeded AND no new ready interrupt
+            // occurred during the read. Otherwise the three received bytes might
+            // not belong to one sample, so stop rather than record suspect data.
+            if (complete && !overlapped)
             {
-                if (elapsedEdges > 1)
-                {
-                    current.missedEdges += elapsedEdges - 1;
-                }
+                // Count this accepted sample, replace the displayed raw number,
+                // and remember when it arrived for freshness/timeout reporting.
                 previousEdge = edgeBefore;
                 ++current.sampleCount;
                 current.latestRaw = sample;
@@ -230,17 +368,38 @@ void acquisition::collect()
             }
             else
             {
-                current.readFault = (complete ? 0U : 1U) | (readyEdges == edgeBefore ? 0U : 2U);
+                // Preserve evidence before stopping: bit 0 (value 1) means the
+                // driver failed; bit 1 (value 2) means another ready interrupt
+                // occurred during the read. Both together give value 3.
+                // The driver's separate diagnostic includes its stage and time.
+                // Count one rejected attempt, then each reason that applied.
+                // One read can fail both checks; adding the reason counts would
+                // double-count it. None of these estimates total samples lost.
+                ++current.rejectedReads;
+                if (!complete)
+                {
+                    ++current.readFailures;
+                }
+                if (overlapped)
+                {
+                    ++current.overlapReads;
+                }
+                current.readFault = (complete ? 0U : 1U) | (overlapped ? 2U : 0U);
                 current.readDetail = adc.readDiagnostic();
                 fault(3);
             }
         }
         else if (millis() - lastReadMs >= 100)
         {
+            // No ready sample for at least 100 milliseconds: stop and report
+            // timeout. This catches a silent digitizer or stuck-high DRDY wire.
+            // Count one timeout incident, not an invented number of lost samples.
+            ++current.readyTimeouts;
             fault(2);
         }
-        // Measure successful reads over actual elapsed time. Requested rate
-        // is never substituted for measured throughput or conversion count.
+        // About once a second, calculate actual successful reads per second:
+        // samples added since the last measurement * 1000 / elapsed milliseconds.
+        // This reports what we received, not merely the rate we asked the chip for.
         const uint32_t elapsedMs = millis() - rateWindowMs;
         if (current.running && elapsedMs >= 1000)
         {
@@ -249,6 +408,8 @@ void acquisition::collect()
             rateWindowCount = current.sampleCount;
             rateWindowMs += elapsedMs;
         }
+        // Refresh shared status about every 10 milliseconds, avoiding a cross-core
+        // copy for every sample. Actual transmission is handled elsewhere.
         if (millis() - lastPublishMs >= 10)
         {
             publish();

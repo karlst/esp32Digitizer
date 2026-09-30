@@ -1,9 +1,13 @@
-# S3 acquisition status and commands, version 2
+# S3 acquisition status version 3; commands version 2
 
-One short report per second; acquisition stays on S3. Both firmware projects now
-implement this protocol. S3 upload on COM4 and startup/configuration checks passed
-on 2026-09-29; live acquisition and the Feather link remain untested. Commands also
-trigger immediate replies.
+One status report per second, plus immediate command acknowledgements. Version 3
+adds diagnostic counters. Acquisition remains on the S3. The 1,000 samples/second
+hardware path and bidirectional Feather link worked on 2026-09-29; the new counter
+reporting needs both firmware updates and a hardware check.
+
+Upload Feather firmware and its web files first: it accepts both status versions
+2 and 3. Then upload the S3. The older Feather rejects version-3 reports.
+Commands remain `CMD,2` because their format and meaning have not changed.
 
 ## Wiring
 
@@ -27,10 +31,11 @@ USB cable on S3. Remove that 5V link before reconnecting USB power to Feather.
 
 ## Frame
 
-ASCII CSV, exactly thirteen fields, LF or CRLF terminated, at most 159 characters:
+ASCII CSV, exactly nineteen fields, LF or CRLF terminated. Both implementations
+reserve 384 bytes per frame (including its terminator).
 
 ```text
-S3,2,uptimeMs,adcReady,sampleCount,samplesPerSecond,latestRaw,sampleAgeMs,errorCode,running,appliedRate,ackId,ackResult
+S3,3,uptimeMs,adcReady,sampleCount,samplesPerSecond,latestRaw,sampleAgeMs,errorCode,running,appliedRate,ackId,ackResult,missedEdges,rejectedReads,readFailures,overlapReads,readyTimeouts,readFault
 ```
 
 - uptimeMs: unsigned 32-bit S3 millis().
@@ -54,9 +59,9 @@ S3,2,uptimeMs,adcReady,sampleCount,samplesPerSecond,latestRaw,sampleAgeMs,errorC
 - ackResult: 0 no command, 1 successfully applied, 2 rejected. Repeat this pair in
   status reports until another command is processed; a dropped report must not lose it.
 
-Heartbeat without initialized ADC: `S3,2,1000,0,0,0,0,4294967295,0,0,1000,0,0`
+Heartbeat without initialized ADC: `S3,3,1000,0,0,0,0,4294967295,0,0,1000,0,0,0,0,0,0,0,0`
 
-Acquisition example: `S3,2,5000,1,15000,1000,123456,1,0,1,1000,42,1`
+Acquisition example: `S3,3,5000,1,15000,1000,123456,1,0,1,1000,42,1,0,0,0,0,0,0`
 
 ## Commands: Feather to S3
 
@@ -81,9 +86,9 @@ Randomized id sequence per Feather boot reduces stale-ack collisions. Status sti
 reports actual device state even after timeout; a browser reload cannot erase a
 pending command because command state lives on Feather.
 
-This is a coordinated protocol upgrade. Version-1 status is rejected and cannot
-enable controls. Both boards now have matching firmware; the inter-board link
-still needs wiring and testing.
+The new Feather also accepts the exact thirteen-field version-2 status format.
+Missing diagnostics become JSON null and display as Unavailable, never zero.
+Version-1 and malformed reports cannot establish a connection or enable controls.
 
 Use plain decimal integers and keep debug prose on USB Serial. No checksum in this
 initial short-wire protocol: tag/version/field/range checks reject malformed frames
@@ -97,7 +102,9 @@ expired partial lines are discarded without blocking or dynamic allocation.
 conversion. A frozen count with a fresh heartbeat does not prove acquisition. A
 steady ADC voltage is legitimate; the reading itself need not change.
 Link timeout clears measurements to unknown instead of showing stale data as live.
-The JSON API sends sampleCount as decimal text to preserve 64-bit precision.
+The JSON API sends sampleCount and all diagnostic totals as decimal text to
+preserve 64-bit precision. Disconnection makes these fields null; the browser
+clears them if it loses contact with Feather as well.
 
 Raw counts are not volts. S3 uses AIN0 minus AIN1, gain one, input buffer off, and
 explicit self-calibration. The module's reference voltage and 7.68 MHz oscillator
@@ -118,8 +125,26 @@ read stops collection and clears adcReady. Reboot S3 is the recovery path. Stop
 still succeeds as a software stop if the digitizer is unresponsive; an ADC error
 remains visible because hardware standby could not be confirmed.
 
-USB diagnostics include missedEdges, a lower-bound indication of observed DRDY
-events overwritten before reading. This is not an exact lost-sample counter: edges
-can themselves be missed. The Feather v2 frame remains thirteen fields and shows
-actual successful reads/second. Sampling throughput, scheduling/watchdog behavior,
-and loss at 30000 samples/s must be measured on the real hardware.
+## Diagnostic counters
+
+All five new totals are unsigned 64-bit numbers, cumulative since S3 reboot.
+Stop and Start preserve them. They describe what software observed, not an exact
+count of all samples lost. There is no invented overall loss total or percentage.
+
+| Field | Meaning |
+| --- | --- |
+| missedEdges | Extra observed Data Ready events between read attempts. Events preceding a rejected read are also counted. These indicate missed samples but can undercount loss if interrupts themselves are missed. |
+| rejectedReads | Read attempts discarded because the driver failed its checks, another sample became ready during the read, or both. Each attempt counts once. |
+| readFailures | Rejected attempts where the digitizer driver returned false. |
+| overlapReads | Rejected attempts with a new Data Ready event observed during the read. |
+| readyTimeouts | Incidents where no sample was ready for at least 100 ms and collection stopped. Counts incidents, not guessed missing samples. |
+| readFault | Last rejection flags: 0 none since Start, 1 driver failed, 2 new ready event during read, 3 both. Start clears this detail, not the totals. |
+
+readFailures and overlapReads are overlapping reasons for rejectedReads, not
+additional losses. Never add those reason counts to each other or to rejectedReads
+and present the result as lost samples. Rejected reads still stop acquisition.
+
+The Feather's Acquisition Diagnostics panel displays these fields with plain
+labels and explains the counting limits. Samples accepted and successful reads
+per second remain in Digitizer Monitor. Unknown or stale measurements never show
+as zero. Sampling throughput and loss at 30000 samples/s remain unverified.

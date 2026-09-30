@@ -1,3 +1,7 @@
+/* Feather dashboard layout and state styling. HTML supplies panel/control IDs;
+   JavaScript sets disabled, aria-invalid and data-error from actual state.
+   CSS changes appearance only: it does not decide whether a command is allowed.
+   Sizing uses border-box so borders/padding stay within each declared width. */
 * {
     box-sizing: border-box;
 }
@@ -36,10 +40,13 @@ body {
     font-size: 12px;
 }
 
+/* Two columns on desktop. Keep the graph/status row steady; let diagnostic
+   explanations and control rows grow so wrapped text is not clipped. minmax(0,...)
+   permits columns to shrink instead of long text forcing horizontal overflow. */
 .page-grid {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    grid-template-rows: repeat(2, 250px) auto;
+    grid-template-rows: 250px minmax(250px, auto) auto;
     gap: 6px;
     margin-top: 6px;
 }
@@ -67,6 +74,8 @@ body {
     min-height: 60px;
 }
 
+/* Canvas fills the remaining graph space. waveformGraph.js sizes its internal
+   pixel buffer to match this CSS size and the screen's pixel density. */
 .waveform-panel { display: flex; flex-direction: column; flex: 1; min-height: 0; gap: 4px; }
 .graph-legend { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 12px; }
 .command-legend { color: #1859b5; }
@@ -77,11 +86,15 @@ body {
 #dac-graph { position: absolute; width: 100%; height: 100%; }
 #graph-status, .form-note { font-size: 12px; color: #444; overflow-wrap: anywhere; }
 .monitor-message { padding: 0 8px 8px; font-size: 12px; overflow-wrap: anywhere; }
+/* Shared form layout: label on the left, editor on the right; explanations
+   span both columns. Field width can shrink to fit the phone layout. */
 .dac-form { display: grid; grid-template-columns: minmax(0, 1fr) minmax(70px, 150px); gap: 6px 10px; width: 100%; min-width: 0; }
 .dac-form select { width: 100%; min-width: 0; min-height: 30px; }
 .running-settings { font-size: 13px; font-weight: 600; padding: 8px 0; overflow-wrap: anywhere; }
 .dac-form label { align-self: center; font-size: 13px; }
 .dac-form input { width: 100%; min-height: 30px; padding: 4px; }
+/* Always-visible minus/plus buttons surround the text editor. These do not
+   rely on browser-specific number-input arrows, which may disappear on phones. */
 .numeric-control {
     display: grid;
     grid-template-columns: 30px minmax(0, 1fr) 30px;
@@ -114,6 +127,8 @@ button:not(:disabled) { cursor: pointer; }
 #dac-validation:empty { display: none; }
 .dac-form input[aria-invalid="true"] { border: 2px solid #aa2222; }
 
+/* Alternating label/value children form rows. Counters stay text so displaying
+   a large 64-bit total does not lose digits to JavaScript number rounding. */
 .status-grid {
     display: grid;
     grid-template-columns: max-content minmax(0, 1fr);
@@ -162,6 +177,8 @@ button:not(:disabled) { cursor: pointer; }
 .control-unavailable { color: #8b2929; }
 .control-unavailable:empty { display: none; }
 
+/* Bound the visible event area and scroll its contents; the JavaScript log
+   still retains its entries until page reload (scrolling does not delete them). */
 .event-log {
     flex: 1 1 auto;
     min-height: 0;
@@ -175,9 +192,14 @@ button:not(:disabled) { cursor: pointer; }
     line-height: 1.35;
 }
 
+/* A phone uses one column. Diagnostics may grow with wrapped explanations;
+   the graph and event viewport keep their fixed heights. */
 @media (max-width: 600px) {
     .page-grid {
         grid-template-columns: 1fr;
-        grid-template-rows: repeat(4, 250px) auto auto;
+        grid-template-rows: 250px 250px minmax(250px, auto) 250px auto auto;
     }
 }
+
+/* Let long diagnostic labels and full-width counter values wrap on narrow screens. */
+.diagnostic-grid { grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); }

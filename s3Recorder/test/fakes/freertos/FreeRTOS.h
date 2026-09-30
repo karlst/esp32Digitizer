@@ -1,5 +1,10 @@
-/** @file FreeRTOS.h
- * @brief Single-thread test substitutes; concurrency remains a hardware check.
+/**
+ * @file FreeRTOS.h
+ * @brief Minimal FreeRTOS names needed to compile acquisition code on a PC.
+ * Task/queue operations are implemented by nativeChecks.cpp using ordinary memory.
+ * Critical-section and yield macros below do nothing because tests run one thread.
+ * Passing these tests cannot prove cross-core locking or scheduler behavior.
+ * pdMS_TO_TICKS treats a fake tick as one millisecond for deterministic timeouts.
  */
 #pragma once
 #include <cstdint>
