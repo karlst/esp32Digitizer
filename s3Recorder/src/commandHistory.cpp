@@ -24,7 +24,8 @@ bool commandHistory::lookup(const acquisitionCommand& command, uint32_t& result)
     {
         if (results[index] && entries[index].id == command.id)
         {
-            result = entries[index].action == command.action && entries[index].rate == command.rate ?
+            result = entries[index].action == command.action && entries[index].rate == command.rate &&
+                entries[index].record == command.record ?
                 results[index] : 2;
             retVal = true;
         }

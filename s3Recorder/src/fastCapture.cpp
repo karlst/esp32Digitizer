@@ -109,6 +109,12 @@ void IRAM_ATTR fastCapture::onReady()
                     ++state.count;
                     state.raw = sample;
                     state.sampleUs = started;
+                    // Preserve EACH accepted value before the next interrupt. The
+                    // formatter only copies four bytes; disk I/O runs on core 1.
+                    if (destination)
+                    {
+                        sampleFormatter::submit(*destination, sample);
+                    }
                 }
             }
         }
@@ -138,4 +144,13 @@ fastCapture::captureSnapshot fastCapture::snapshot()
     const captureSnapshot retVal = state;
     portEXIT_CRITICAL(&copyLock);
     return retVal;
+}
+
+/**
+ * @brief Attach/detach recording while the GPIO interrupt is disabled.
+ * A null destination keeps ordinary monitoring without writing any samples.
+ */
+void fastCapture::setWriter(bufferedWriter* writer)
+{
+    destination = writer;
 }

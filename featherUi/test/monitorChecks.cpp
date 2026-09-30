@@ -87,6 +87,28 @@ int main()
     assert(json.find("\"connected\":false") != std::string::npos);
     assert(json.find("\"rejectedReads\":null") != std::string::npos);
     assert(json.find("\"readFault\":null") != std::string::npos);
-    std::cout << "PASS: Feather v2/v3 parser, 64-bit diagnostic JSON, invalid frames, reset and disconnect.\n";
+    // Recording-capable status is atomic with acquisition status. Exact counters
+    // survive JSON; malformed positions reject the entire frame. Old versions
+    // remain usable but cannot issue recording or deletion requests.
+    HardwareSerial recordingPort;
+    s3Monitor recordingMonitor(recordingPort);
+    const std::string v4 = "S3,4,100,1,0,0,0,4294967295,0,0,1000,0,0,0,0,0,0,0,0,";
+    const std::string recordingFields = "0,1,0,0,0,0,9007199254740993,0,1000000,800000,65536,0,0,0,0,0,0,0,0,0,0,0,0,0\n";
+    deliver(recordingMonitor, recordingPort, v4 + recordingFields);
+    json = recordingMonitor.stateJson();
+    assert(json.find("\"bytesWritten\":\"9007199254740993\"") != std::string::npos);
+    assert(recordingMonitor.sendCommand("start", 30000, true));
+    assert(recordingPort.output == "CMD,3,1,start,30000,1\n");
+    // Confirming only acquisition is insufficient for a recording Start.
+    deliver(recordingMonitor, recordingPort,
+        "S3,4,200,1,1,30000,1,0,0,1,30000,1,1,0,0,0,0,0,0," + recordingFields);
+    assert(std::string(recordingMonitor.stateJson()).find("\"commandStatus\":\"rejected\"") != std::string::npos);
+    deliver(recordingMonitor, recordingPort, v4 +
+        "0,1,0,0,0,0,0,0,1000000,800000,65536,4,4,65536,0,0,0,0,0,0,0,0,0,0\n");
+    assert(std::string(recordingMonitor.stateJson()).find("\"rejectedFrames\":1") != std::string::npos);
+    deliver(recordingMonitor, recordingPort, "S3,2,300,1,0,0,0,4294967295,0,0,1000,0,0\n");
+    assert(!recordingMonitor.sendCommand("start", 1000, true));
+    assert(!recordingMonitor.sendCommand("delete", 0));
+    std::cout << "PASS: Feather v2/v3/v4 parser, recording commands, exact totals, invalid frames, reset and disconnect.\n";
     return 0;
 }

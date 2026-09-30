@@ -9,7 +9,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ESP32 Digitizer</title>
-    <link rel="stylesheet" href="/static/css/app.css?v=20260930-counters">
+    <link rel="stylesheet" href="/static/css/app.css?v=20260930-recording">
 </head>
 <body>
     <header class="top-bar">
@@ -44,7 +44,29 @@
         </section>
 
         <section class="panel" aria-labelledby="panel3-title">
-            <div class="panel-header" id="panel3-title">Acquisition Diagnostics</div>
+            <div class="panel-header" id="panel3-title">P3: Recording Status</div>
+            <div class="panel-body recording-panel">
+                <div id="recording-message" role="status">Waiting for S3 recording status.</div>
+                <div class="status-grid recording-grid">
+                    <div>Recording / elapsed</div><div id="rec-state">—</div>
+                    <div>File</div><div id="rec-file">—</div>
+                    <div>Card / space</div><div id="rec-card">—</div>
+                    <div>Bytes written</div><div id="rec-bytes">—</div>
+                    <div>Samples written</div><div id="rec-samples">—</div>
+                    <div>Write rate</div><div id="rec-rate">—</div>
+                    <div>Latest disk delay</div><div id="rec-delay">—</div>
+                    <div>Maximum disk delay</div><div id="rec-max-delay">—</div>
+                </div>
+                <div class="buffer-track" role="meter" aria-label="Ring buffer occupancy" aria-valuemin="0" aria-valuemax="100" id="rec-meter">
+                    <div id="rec-fill"></div><div id="rec-wrap"></div><span id="rec-write-marker" title="Next write position">W</span><span id="rec-read-marker" title="Next read position">R</span>
+                </div>
+                <div id="rec-buffer" class="form-note">Ring buffer: unavailable</div>
+                <div id="rec-pointers" class="form-note">Write / read positions: —</div>
+                <div id="rec-errors" class="form-note">Recording errors: —</div>
+                <canvas id="recording-history" height="80" role="img" aria-label="Recent buffer occupancy and disk write delay">Recording history</canvas>
+                <div class="form-note">Last 2 minutes · <span class="buffer-legend">blue: buffer %</span> · <span class="delay-legend">orange: disk delay</span> <span id="rec-chart-scale"></span></div>
+            </div>
+            <details class="acquisition-details"><summary>Acquisition diagnostics</summary>
             <div class="panel-body status-grid diagnostic-grid" aria-live="polite">
                 <div>Detected missed samples</div><div id="s3-missed">&mdash;</div>
                 <div>Rejected reads</div><div id="s3-rejected">&mdash;</div>
@@ -54,6 +76,7 @@
                 <div>Last read rejection</div><div id="s3-read-fault">Unknown</div>
             </div>
             <div id="s3-counter-note" class="monitor-message">Counters are totals since S3 reboot; Stop/Start preserves them. Detected misses may undercount losses. A rejected read can fail both checks, so do not add its reason counts together.</div>
+            </details>
         </section>
 
         <section class="panel" aria-labelledby="events-title">
@@ -124,17 +147,20 @@
                         <option value="15000">15,000</option>
                         <option value="30000">30,000</option>
                     </select>
+                    <label class="record-choice"><input id="s3-record" type="checkbox" disabled> Record to SD card</label>
+                    <div id="recording-unavailable" class="form-note">Waiting for S3 recording support.</div>
                     <div class="form-note">Settings take effect on Start. Stop before changing the rate.</div>
                     <div class="control-actions"><button id="s3-acquisition-button" type="submit" disabled>Start Acquisition</button></div>
                 </form>
                 <div id="s3-unavailable" class="form-note control-unavailable" role="status">Waiting for S3 status.</div>
                 <button id="s3-reboot-button" type="button" disabled>Reboot S3</button>
+                <button id="s3-delete-button" class="danger-button" type="button" disabled>Delete all recordings…</button>
                 <div id="s3-running" class="running-settings" role="status">Acquisition state unknown &mdash; S3 disconnected.</div>
                 <div id="s3-command-message" class="form-note" role="status">Waiting for S3 connection.</div>
             </div>
         </section>
     </main>
 
-    <script type="module" src="/static/js/app.js?v=20260930-counters"></script>
+    <script type="module" src="/static/js/app.js?v=20260930-recording"></script>
 </body>
 </html>

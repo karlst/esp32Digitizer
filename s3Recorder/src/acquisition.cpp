@@ -24,7 +24,8 @@
  *
  * current is the acquisition task's working status. publish() copies it into
  * published, and snapshot() gives communications a protected copy of published.
- * We keep the latest sample and a count, not a recording of all samples.
+ * Monitoring keeps the latest value/count. Optional recording sends EVERY accepted
+ * sample through sampleFormatter to the RAM buffer, then the storage task writes it.
  */
 #include "acquisition.h"
 
@@ -41,6 +42,7 @@ bool acquisition::begin()
     // Allocate space for one command, copied by value. The queue safely moves
     // commands from the communications task to this task, even across CPU cores.
     // A null handle means allocation failed.
+    storage.begin(); // Card failure must not prevent acquisition-only operation.
     commands = xQueueCreate(1, sizeof(acquisitionCommand));
     // Only try to create the task if the queue exists (the && enforces this).
     // Arguments: entry function; debugging name; 4096-byte stack for calls and
@@ -91,8 +93,10 @@ acquisitionStatus acquisition::snapshot()
     // lock lets only one core copy published at a time. It is not a sample/SPI
     // lock and is released before any formatting, transmission, or waiting.
     portENTER_CRITICAL(&snapshotLock);
-    const acquisitionStatus retVal = published;
+    acquisitionStatus retVal = published;
     portEXIT_CRITICAL(&snapshotLock);
+    retVal.recording = storage.snapshot();
+    retVal.recording.values[recordingStatus::enabled] = retVal.recordingRequested ? 1 : 0;
     return retVal;
 }
 
@@ -188,6 +192,15 @@ void acquisition::fault(uint32_t error)
     current.ready = false;
     current.measuredRate = 0;
     current.error = error;
+    // Stop the producer before draining. Preserve good queued samples, but mark
+    // the file incomplete because acquisition ended with a hardware error.
+    capture.setWriter(nullptr);
+    if (recordingBuffer)
+    {
+        recordingBuffer = nullptr;
+        publish();
+        storage.finish(false);
+    }
     publish();
 }
 
@@ -215,20 +228,28 @@ void acquisition::execute(const acquisitionCommand& command)
     else
     {
         bool accepted = false;
+        // Publish a pending acknowledgement before potentially slow file work.
+        // Communications remains alive while this task waits for storage.
+        current.ackId = command.id;
+        current.ackResult = 0;
+        publish();
         if (command.action == acquisitionCommand::Action::start)
         {
             // While running, accept Start only if it asks for the same rate.
             // Changing rate requires Stop then Start; do not reconfigure mid-read.
             if (current.running)
             {
-                accepted = current.rate == command.rate;
+                accepted = current.rate == command.rate && command.record == (recordingBuffer != nullptr);
             }
             // A stopped digitizer must have initialized successfully and have
             // no outstanding fault. Otherwise leave this request rejected.
             else if (current.ready)
             {
                 // Configure/calibrate the actual chip before saying Start worked.
-                accepted = adc.start(command.rate);
+                current.recordingRequested = command.record;
+                publish();
+                const bool fileReady = !command.record || storage.prepare(command.rate);
+                accepted = fileReady && adc.start(command.rate);
                 if (accepted)
                 {
                     // Record applied settings and clear old read diagnostics.
@@ -255,6 +276,8 @@ void acquisition::execute(const acquisitionCommand& command)
                     readyUs = 0;
                     awaitingFirstEdge = command.rate > 2000;
                     fastMode = command.rate == 30000;
+                    recordingBuffer = command.record ? &storage.buffer() : nullptr;
+                    capture.setWriter(recordingBuffer);
                     capture.reset();
                     lastFastCount = 0;
                     previousEdge = 0;
@@ -270,10 +293,23 @@ void acquisition::execute(const acquisitionCommand& command)
                 else
                 {
                     // Chip setup failed. Reject Start and require recovery.
-                    current.ready = false;
-                    current.error = 3;
+                    if (fileReady)
+                    {
+                        current.ready = false;
+                        current.error = 3;
+                        if (command.record)
+                        {
+                            storage.finish(false);
+                        }
+                    }
                 }
             }
+        }
+        else if (command.action == acquisitionCommand::Action::erase)
+        {
+            // Recheck on S3; a disabled browser button is not an authorization
+            // boundary. Never delete while the ADC or file producer is active.
+            accepted = !current.running && !recordingBuffer && storage.erase();
         }
         else
         {
@@ -298,8 +334,15 @@ void acquisition::execute(const acquisitionCommand& command)
             // Accept the software Stop even if the chip did not answer. For
             // Reboot, set a flag: communications sends the reply before actually
             // restarting the S3. Do not reboot here and lose that confirmation.
+            capture.setWriter(nullptr);
             accepted = true;
-            current.reboot = command.action == acquisitionCommand::Action::reboot;
+            if (recordingBuffer)
+            {
+                recordingBuffer = nullptr;
+                publish();
+                accepted = storage.finish(stopped && current.error == 0);
+            }
+            current.reboot = accepted && command.action == acquisitionCommand::Action::reboot;
         }
         // Save this request's result for status reporting and duplicate detection.
         current.ackId = command.id;
@@ -335,6 +378,29 @@ void acquisition::run()
         }
         // collect() handles at most one sample per call and bounds its wait.
         // Returning here allows another command check between read attempts.
+        if (current.running && recordingBuffer && storage.failed())
+        {
+            // Ring overflow or disk failure stops the producer promptly. Keep
+            // ADC readiness: storage trouble does not mean the digitizer broke.
+            detachInterrupt(ads1256::readyPin);
+            if (fastMode)
+            {
+                collectFast();
+            }
+            fastMode = false;
+            capture.setWriter(nullptr);
+            const bool stopped = adc.stop();
+            current.running = false;
+            current.measuredRate = 0;
+            if (!stopped)
+            {
+                current.ready = false;
+                current.error = 2;
+            }
+            recordingBuffer = nullptr;
+            publish();
+            storage.finish(false);
+        }
         if (current.running)
         {
             if (fastMode)
@@ -365,7 +431,7 @@ void acquisition::run()
  * adc.read() in ads1256.cpp performs the actual SPI transfer. We check the
  * interrupt count around that transfer to detect a new sample becoming ready
  * before the previous read finishes. Such a read is rejected as uncertain.
- * This function retains only the latest accepted sample, not a sample history.
+ * When recording is enabled, each accepted value is also queued in the byte writer.
  */
 void acquisition::collect()
 {
@@ -424,6 +490,10 @@ void acquisition::collect()
             {
                 // Count this accepted sample, replace the displayed raw number,
                 // and remember when it arrived for freshness/timeout reporting.
+                if (recordingBuffer)
+                {
+                    sampleFormatter::submit(*recordingBuffer, sample);
+                }
                 previousEdge = edgeBefore;
                 ++current.sampleCount;
                 current.latestRaw = sample;
@@ -489,7 +559,7 @@ void acquisition::collect()
  * capture record, accounts for all accepted reads since the last copy, and keeps
  * the same rate/freshness/fault behavior as the low-rate path. No samples are
  * lost merely because this task wakes less often: the ISR counts each accepted read.
- * This remains a monitor, not a recording buffer for all raw sample values.
+ * The ISR itself queues each recorded value; this slower snapshot is only for status.
  */
 void acquisition::collectFast()
 {

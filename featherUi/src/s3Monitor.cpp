@@ -40,7 +40,7 @@ void s3Monitor::begin()
 {
     // Buffer bursts while the same loop task is occupied serving an HTTP request.
     // RX receives S3 pin 17; TX sends commands to S3 pin 18, with common ground.
-    serialPort.setRxBufferSize(1024);
+    serialPort.setRxBufferSize(4096);
     // Set the idle pull-up before the UART owns the pin's peripheral function.
     pinMode(RX, INPUT_PULLUP);
     serialPort.begin(115200, SERIAL_8N1, RX, TX);
@@ -88,7 +88,8 @@ bool s3Monitor::readUnsigned(const char* text, uint64_t maximum, uint64_t& value
 /**
  * @brief Validate a complete S3 status report before replacing the displayed state.
  *
- * Version 3 has nineteen fields, including diagnostic totals. Older version-2
+ * Version 4 adds 24 recording fields to version 3's nineteen acquisition fields.
+ * The whole report must validate before any part becomes visible. Older version-2
  * reports have thirteen fields and remain usable while boards are updated;
  * their missing diagnostics are reported as unknown, not as zero.
  * @param nowMs Feather receipt time; S3 uptime is never compared to the Feather clock.
@@ -99,7 +100,7 @@ bool s3Monitor::readUnsigned(const char* text, uint64_t maximum, uint64_t& value
  */
 bool s3Monitor::acceptLine(uint32_t nowMs)
 {
-    char* fields[19] = {line};
+    char* fields[43] = {line};
     size_t fieldCount = 1;
     bool retVal = true;
     // Split in place, preserving empty fields so missing values are rejected.
@@ -108,7 +109,7 @@ bool s3Monitor::acceptLine(uint32_t nowMs)
         if (line[index] == ',')
         {
             line[index] = '\0';
-            if (fieldCount < 19)
+            if (fieldCount < 43)
             {
                 fields[fieldCount++] = &line[index + 1];
             }
@@ -118,10 +119,22 @@ bool s3Monitor::acceptLine(uint32_t nowMs)
             }
         }
     }
-    const bool hasDiagnostics = fieldCount == 19 && strcmp(fields[1], "3") == 0;
+    const bool hasRecording = fieldCount == 43 && strcmp(fields[1], "4") == 0;
+    const bool hasDiagnostics = hasRecording || (fieldCount == 19 && strcmp(fields[1], "3") == 0);
     retVal = retVal && strcmp(fields[0], "S3") == 0 &&
         (hasDiagnostics || (fieldCount == 13 && strcmp(fields[1], "2") == 0));
     uint64_t parsed[17] = {};
+    recordingStatus nextRecording;
+    // Validate recording fields into temporary storage. A corrupt extended field
+    // must reject the whole frame, including its acquisition values and heartbeat.
+    if (hasRecording)
+    {
+        for (size_t index = 0; index < recordingStatus::fieldCount && retVal; ++index)
+        {
+            retVal = readUnsigned(fields[19 + index], UINT64_MAX, nextRecording.values[index]);
+        }
+        retVal = retVal && nextRecording.valid();
+    }
     bool negative = false;
     if (retVal)
     {
@@ -187,13 +200,30 @@ bool s3Monitor::acceptLine(uint32_t nowMs)
         errorCode = static_cast<uint32_t>(parsed[6]);
         acquisitionRunning = parsed[7] != 0;
         appliedRate = static_cast<uint32_t>(parsed[8]);
+        recording.available = hasRecording;
+        recording.status = nextRecording;
         // A matching id alone is insufficient: a successful Start must also report
         // the requested running rate, and Stop/Reboot must report stopped acquisition.
         if (commandStatus == "pending" && parsed[9] == commandId && parsed[10] != 0)
         {
             const bool applied = commandAction == "start" ?
-                acquisitionRunning && appliedRate == requestedRate : !acquisitionRunning;
+                acquisitionRunning && appliedRate == requestedRate &&
+                (!requestedRecording || (hasRecording && nextRecording.values[recordingStatus::state] == recordingStatus::recording)) :
+                !acquisitionRunning && (!hasRecording ||
+                (nextRecording.values[recordingStatus::state] != recordingStatus::saving &&
+                 nextRecording.values[recordingStatus::state] != recordingStatus::deleting));
             commandStatus = parsed[10] == 1 && applied ? "confirmed" : "rejected";
+        }
+        // Preparing/saving/deleting may take longer than a short command. A fresh
+        // report bearing OUR pending request ID proves progress, not completion.
+        // Keep waiting while that operation reports busy; loss of reports still
+        // times out. An unrelated operation cannot extend this command's deadline.
+        if (commandStatus == "pending" && parsed[9] == commandId && parsed[10] == 0 && hasRecording &&
+            (nextRecording.values[recordingStatus::state] == recordingStatus::preparing ||
+             nextRecording.values[recordingStatus::state] == recordingStatus::saving ||
+             nextRecording.values[recordingStatus::state] == recordingStatus::deleting))
+        {
+            commandSentMs = nowMs;
         }
         lastFrameMs = nowMs;
         receivedFrame = true;
@@ -285,6 +315,7 @@ String s3Monitor::stateJson() const
     retVal += ",\"commandId\":" + String(commandId);
     retVal += ",\"commandStatus\":\"" + commandStatus + "\"";
     retVal += ",\"commandAction\":\"" + commandAction + "\"";
+    retVal += ",\"recording\":" + recording.stateJson(connected);
     // A counter is a decimal JSON string so browsers cannot round large totals.
     // Missing old-firmware diagnostics and disconnected values are explicitly null.
     const bool showDiagnostics = connected && diagnosticsAvailable;
@@ -349,8 +380,10 @@ bool s3Monitor::validRate(uint32_t rate)
 
 /**
  * @brief Send one validated command to S3 and mark it pending without waiting.
- * @param action start, stop, or reboot; all other text is rejected.
+ * @param action start, stop, reboot, or delete; all other text is rejected.
  * @param rate Samples/second for Start; Stop/Reboot always transmit zero instead.
+ * @param record Whether Start must also create a recording; false for other actions.
+ * Deletion needs recording-capable firmware, a ready card and stopped acquisition.
  * @return True if the entire command was accepted by the serial transmit buffer.
  * False means disconnected, busy, invalid settings/state, or insufficient buffer room.
  *
@@ -359,14 +392,21 @@ bool s3Monitor::validRate(uint32_t rate)
  * The five-second timeout is handled in update(); there is no automatic retransmit.
  * An already running acquisition cannot be retuned to a different rate with Start.
  */
-bool s3Monitor::sendCommand(const char* action, uint32_t rate)
+bool s3Monitor::sendCommand(const char* action, uint32_t rate, bool record)
 {
     const uint32_t nowMs = millis();
     const bool isStart = strcmp(action, "start") == 0;
-    const bool knownAction = isStart || strcmp(action, "stop") == 0 || strcmp(action, "reboot") == 0;
+    const bool isDelete = strcmp(action, "delete") == 0;
+    const bool knownAction = isStart || isDelete || strcmp(action, "stop") == 0 || strcmp(action, "reboot") == 0;
+    const auto recordingState = recording.status.values[recordingStatus::state];
+    const bool storageBusy = recording.available && (recordingState == recordingStatus::preparing ||
+        recordingState == recordingStatus::saving || recordingState == recordingStatus::deleting);
     bool retVal = false;
     if (knownAction && receivedFrame && nowMs - lastFrameMs < connectionTimeoutMs &&
-        commandStatus != "pending" && (!isStart || (adcReady && validRate(rate) &&
+        commandStatus != "pending" && !storageBusy && (!record || (isStart && recording.available)) &&
+        (!isDelete || (recording.available && !acquisitionRunning &&
+            recording.status.values[recordingStatus::card] == recordingStatus::ready)) &&
+        (!isStart || (adcReady && validRate(rate) &&
         (!acquisitionRunning || rate == appliedRate))))
     {
         // Each request gets a new ID so an old reply cannot complete this one.
@@ -376,7 +416,11 @@ bool s3Monitor::sendCommand(const char* action, uint32_t rate)
         {
             nextId = 1;
         }
-        const String command = "CMD,2," + String(nextId) + "," + action + "," + String(isStart ? rate : 0) + "\n";
+        // Older S3s keep receiving their original command format. Version 3 adds
+        // the recording flag; only a version-4 status advertises support for it.
+        const String command = "CMD," + String(recording.available ? "3," : "2,") + String(nextId) + "," +
+            action + "," + String(isStart ? rate : 0) +
+            (recording.available ? String(record ? ",1" : ",0") : String("")) + "\n";
         // Require space for the whole line before writing. Remember pending state
         // only if every character was accepted, including the ending newline.
         if (serialPort.availableForWrite() >= static_cast<int>(command.length()))
@@ -387,6 +431,7 @@ bool s3Monitor::sendCommand(const char* action, uint32_t rate)
                 commandId = nextId;
                 commandAction = action;
                 requestedRate = rate;
+                requestedRecording = record;
                 commandSentMs = nowMs;
                 commandStatus = "pending";
             }

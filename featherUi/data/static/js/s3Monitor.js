@@ -4,6 +4,7 @@
 // displays them. S3 stores cumulative acquisition counters; browser reloads do not
 // reset them. Read refreshStatus for requests, updateControls for button rules.
 import { appendEvent } from "./eventLog.js";
+import { createRecordingPanel } from "./recordingPanel.js";
 
 /**
  * Connect S3 controls and poll Feather's validated status every half-second.
@@ -38,6 +39,9 @@ export function initializeS3Monitor()
     const rateInput = document.getElementById("s3-sample-rate");
     const acquisitionButton = document.getElementById("s3-acquisition-button");
     const rebootButton = document.getElementById("s3-reboot-button");
+    const recordInput = document.getElementById("s3-record");
+    const deleteButton = document.getElementById("s3-delete-button");
+    const renderRecording = createRecordingPanel();
     const runningMessage = document.getElementById("s3-running");
     const commandMessage = document.getElementById("s3-command-message");
     const unavailableMessage = document.getElementById("s3-unavailable");
@@ -62,13 +66,28 @@ export function initializeS3Monitor()
         const available = latestState?.connected && !browserOffline;
         const pending = commandBusy || latestState?.commandStatus === "pending";
         const running = available && latestState.acquisitionRunning;
-        acquisitionButton.disabled = !available || pending || (!running && !latestState.adcReady);
+        const rec = available ? latestState.recording : null;
+        const storageBusy = rec && [1, 3, 6].includes(Number(rec.state));
+        acquisitionButton.disabled = !available || pending || storageBusy || (!running && !latestState.adcReady);
         unavailableMessage.textContent = browserOffline ? "Controls unavailable: cannot reach Feather." :
             !latestState?.connected ? "Controls unavailable: S3 is disconnected." :
             pending ? "Controls unavailable: waiting for S3 command confirmation." :
             !running && !latestState.adcReady ? "Start unavailable: digitizer is not ready." : "";
-        rebootButton.disabled = !available || pending;
-        rateInput.disabled = !available || pending || running;
+        rebootButton.disabled = !available || pending || storageBusy;
+        rateInput.disabled = !available || pending || running || storageBusy;
+        recordInput.disabled = !available || !rec || pending || running || storageBusy;
+        deleteButton.disabled = !available || !rec || pending || running || storageBusy || rec.card !== "1";
+        // Running settings always come from S3, even after a page reload. Before
+        // Start, retain the user's draft. Old firmware never gets a recording flag.
+        if (running && rec) { recordInput.checked = rec.enabled === "1"; }
+        if (available && !rec) { recordInput.checked = false; }
+        document.getElementById("recording-unavailable").textContent = !available ? "Recording status unavailable." :
+            !rec ? "Recording unavailable — S3 update required." : storageBusy ?
+            "Card operation in progress. Please wait." : rec.card !== "1" ?
+            "Card not ready. Acquisition without recording remains available." :
+            "A checked box creates a new recording on Start; existing files are kept.";
+        acquisitionButton.setAttribute("aria-busy", String(Boolean(pending || storageBusy)));
+        acquisitionButton.classList.toggle("stop-button", Boolean(running));
         acquisitionButton.textContent = running ? "Stop Acquisition" : "Start Acquisition";
         runningMessage.textContent = !available ? "Acquisition state unknown — S3 disconnected." : running ?
             `Acquisition started — ${latestState.appliedRate.toLocaleString("en-US")} samples/s` : "Acquisition stopped.";
@@ -173,6 +192,7 @@ export function initializeS3Monitor()
                 }
                 connected.textContent = state.connected ? "Yes" : "No";
                 latestState = state;
+                renderRecording(state);
                 if (state.connected)
                 {
                     adc.textContent = state.adcReady ? "Yes" : "No";
@@ -219,7 +239,8 @@ export function initializeS3Monitor()
                     const text = state.commandStatus === "confirmed" ?
                         (!state.connected ? "Last S3 command confirmed; current state unknown." :
                         state.commandAction === "start" ? `Acquisition started — ${state.appliedRate.toLocaleString("en-US")} samples/s` :
-                        state.commandAction === "stop" ? "Acquisition stopped." : "S3 reboot confirmed.") :
+                        state.commandAction === "stop" ? "Acquisition stopped; recording file closed, if active." :
+                        state.commandAction === "delete" ? "Recordings deleted." : "S3 reboot confirmed.") :
                         state.commandStatus === "timeout" ? "S3 command timed out — outcome unconfirmed." : "S3 rejected the command.";
                     commandMessage.textContent = text;
                     appendEvent(text);
@@ -234,6 +255,7 @@ export function initializeS3Monitor()
             {
                 connected.textContent = "Unknown";
                 clearMeasurements();
+                renderRecording(null);
                 message.textContent = "Cannot reach Feather monitor; reconnecting...";
                 if (!browserOffline)
                 {
@@ -276,7 +298,7 @@ export function initializeS3Monitor()
         if (!acquisitionButton.disabled)
         {
             const action = latestState.acquisitionRunning ? "stop" : "start";
-            const body = action === "start" ? new URLSearchParams({ sampleRate: rateInput.value }) : null;
+            const body = action === "start" ? new URLSearchParams({ sampleRate: rateInput.value, record: recordInput.checked ? "1" : "0" }) : null;
             refreshStatus(action, body);
         }
     });
@@ -286,6 +308,15 @@ export function initializeS3Monitor()
         if (!rebootButton.disabled && window.confirm("Reboot S3? Acquisition will stop."))
         {
             refreshStatus("reboot");
+        }
+    });
+    // Destructive card management is explicit, stopped-only, and separate from
+    // Start. Cancel sends nothing; firmware repeats the state and confirmation checks.
+    deleteButton.addEventListener("click", () =>
+    {
+        if (!deleteButton.disabled && window.confirm("Delete all files in /recordings/ on the SD card? This cannot be undone. Other folders will be kept."))
+        {
+            refreshStatus("delete", new URLSearchParams({ confirm: "delete-recordings" }));
         }
     });
     // Background status reads never manipulate local DAC controls.

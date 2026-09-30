@@ -38,7 +38,7 @@ void featherLink::begin()
 {
     Serial1.setRxBufferSize(512);
     // Worst-case 64-bit counters can make a frame longer than the hardware FIFO.
-    Serial1.setTxBufferSize(512);
+    Serial1.setTxBufferSize(2048);
     // GPIO18 is UART1's native RX pad. pinMode() selects the ordinary GPIO
     // function, so it MUST run before begin() assigns the UART IOMUX function.
     // Calling it afterward disconnects UART reception despite correct wiring.
@@ -47,17 +47,17 @@ void featherLink::begin()
 }
 
 /**
- * @brief Send one version-3 status report, including cumulative acquisition diagnostics.
+ * @brief Send a version-4 acquisition/recording report, including cumulative diagnostics.
  *
  * The first thirteen fields retain their previous meanings. Six added fields
  * carry detected misses, rejected reads, driver failures, overlapping reads,
- * ready timeouts, and the last read-fault flags. All come from the same snapshot.
+ * ready timeouts, and the last read-fault flags. The appended recording fields come from the storage task snapshot.
  * If the UART has no room, skip this report; the next contains the same totals.
  */
 bool featherLink::report(const acquisitionStatus& status)
 {
     // Room for every counter at its full 64-bit decimal width plus all other fields.
-    char frame[384];
+    char frame[1536];
     // UINT32_MAX means "no sample yet"; otherwise age is time since the last
     // accepted sample, not the age of this periodic communications report.
     const uint32_t nowMs = millis();
@@ -65,7 +65,7 @@ bool featherLink::report(const acquisitionStatus& status)
 #ifdef S3_LEGACY_STATUS
     // Bench builds can keep the currently deployed older Feather UI operational.
     // Only the UART frame changes; full diagnostics remain available over USB.
-    const int length = snprintf(frame, sizeof(frame),
+    int length = snprintf(frame, sizeof(frame),
         "S3,2,%lu,%u,%llu,%lu,%ld,%lu,%lu,%u,%lu,%lu,%lu\n",
         static_cast<unsigned long>(nowMs), status.ready ? 1 : 0,
         static_cast<unsigned long long>(status.sampleCount),
@@ -75,8 +75,8 @@ bool featherLink::report(const acquisitionStatus& status)
         static_cast<unsigned long>(status.rate), static_cast<unsigned long>(status.ackId),
         static_cast<unsigned long>(status.ackResult));
 #else
-    const int length = snprintf(frame, sizeof(frame),
-        "S3,3,%lu,%u,%llu,%lu,%ld,%lu,%lu,%u,%lu,%lu,%lu,%llu,%llu,%llu,%llu,%llu,%lu\n",
+    int length = snprintf(frame, sizeof(frame),
+        "S3,4,%lu,%u,%llu,%lu,%ld,%lu,%lu,%u,%lu,%lu,%lu,%llu,%llu,%llu,%llu,%llu,%lu",
         static_cast<unsigned long>(nowMs), status.ready ? 1 : 0,
         static_cast<unsigned long long>(status.sampleCount),
         static_cast<unsigned long>(status.running ? status.measuredRate : 0),
@@ -90,6 +90,19 @@ bool featherLink::report(const acquisitionStatus& status)
         static_cast<unsigned long long>(status.overlapReads),
         static_cast<unsigned long long>(status.readyTimeouts),
         static_cast<unsigned long>(status.readFault));
+    // Append the shared numeric recording columns; no filenames or unescaped
+    // text crosses this machine-readable link. Keep one complete newline frame.
+    for (size_t index = 0; index < recordingStatus::fieldCount && length > 0 &&
+        length < static_cast<int>(sizeof(frame)); ++index)
+    {
+        length += snprintf(frame + length, sizeof(frame) - length, ",%llu",
+            static_cast<unsigned long long>(status.recording.values[index]));
+    }
+    if (length > 0 && length + 1 < static_cast<int>(sizeof(frame)))
+    {
+        frame[length++] = '\n';
+        frame[length] = '\0';
+    }
 #endif
     // snprintf reports the length it needed. Reject truncation, and only write
     // when the whole line fits, so Feather never sees a deliberately partial report.
@@ -107,14 +120,14 @@ bool featherLink::report(const acquisitionStatus& status)
  * here forever. Commands are queued without waiting; hardware work happens in
  * acquisition.cpp. Failed queue submission does not produce a success reply.
  *
- * Send one status report per second and an earlier report for a new command
+ * Send two status reports per second and an earlier report for a new command
  * result. If transmission has no room, retry on a later call. For Reboot, wait
  * until its acknowledgement has left the UART, then restart after 100 ms.
  * USB diagnostics are separate human-readable messages, never protocol input.
  */
 void featherLink::update()
 {
-    // Local bench console accepts the same strictly validated CMD,2 frames.
+    // Local bench console accepts the same strictly validated CMD,2 and CMD,3 frames.
     // Its separate parser prevents partial USB input mixing with Feather bytes.
     // This lets diagnostics start/stop collection without rewiring or changing
     // the DAC. Normal startup remains stopped; no command is generated here.
@@ -150,7 +163,7 @@ void featherLink::update()
     // Compare both ID and result so a changed outcome is not hidden until the
     // periodic report. Update sent fields only after the UART accepted the frame.
     const bool newAck = state.ackId != sentAckId || state.ackResult != sentAckResult;
-    if (!rebootSent && (nowMs - lastReportMs >= 1000 || newAck))
+    if (!rebootSent && (nowMs - lastReportMs >= 500 || newAck))
     {
         if (report(state))
         {
@@ -176,7 +189,7 @@ void featherLink::update()
     if (nowMs - lastDebugMs >= 1000)
     {
         char text[200];
-        const int length = snprintf(text, sizeof(text),
+        int length = snprintf(text, sizeof(text),
             "ADC ready=%u running=%u target=%lu actual=%lu count=%llu raw=%ld error=%lu missedEdges=%llu readFault=%lu\n",
             state.ready ? 1 : 0, state.running ? 1 : 0, static_cast<unsigned long>(state.rate),
             static_cast<unsigned long>(state.measuredRate), static_cast<unsigned long long>(state.sampleCount),
@@ -209,6 +222,15 @@ void featherLink::update()
         if (timingLength > 0 && timingLength < static_cast<int>(sizeof(text)) && Serial.availableForWrite() >= timingLength)
         {
             Serial.write(reinterpret_cast<const uint8_t*>(text), timingLength);
+        }
+        const auto* recording = state.recording.values;
+        const int storageLength = snprintf(text, sizeof(text),
+            "SD card=%llu state=%llu file=%llu/%llu samples=%llu bytes=%llu ring=%llu/%llu peak=%llu maxUs=%llu lost=%llu errors=%llu\n",
+            recording[1], recording[0], recording[3], recording[4], recording[7], recording[6],
+            recording[11], recording[10], recording[12], recording[17], recording[21], recording[22]);
+        if (storageLength > 0 && storageLength < static_cast<int>(sizeof(text)) && Serial.availableForWrite() >= storageLength)
+        {
+            Serial.write(reinterpret_cast<const uint8_t*>(text), storageLength);
         }
         lastDebugMs = nowMs;
     }

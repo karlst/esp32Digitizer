@@ -9,6 +9,7 @@
 #include "commandHistory.h"
 #include "acquisitionStatus.h"
 #include "fastCapture.h"
+#include "recordingService.h"
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 #include <freertos/task.h>
@@ -51,6 +52,8 @@ private:
     void execute(const acquisitionCommand& command);
     void publish();
     void fault(uint32_t error);
+    recordingService storage;
+    bufferedWriter* recordingBuffer = nullptr;
     ads1256 adc;
     fastCapture capture;
     // Set before attaching ISR; clear only after detaching. At 30k the ISR owns

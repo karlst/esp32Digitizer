@@ -5,6 +5,7 @@
  */
 #pragma once
 #include <cstdint>
+#include "recordingStatus.h"
 
 /**
  * @brief Keep actual device state, cumulative counts, and the latest command result.
@@ -17,6 +18,8 @@ struct acquisitionStatus
     // ready: initialization succeeded and no blocking fault is outstanding.
     // running: software is collecting; hasSample: latestRaw has a real value.
     // reboot: communications should acknowledge first, then restart the S3.
+    recordingStatus recording; // Added by snapshot() from the storage task.
+    bool recordingRequested = false; // Current/last Start's choice, including failed opens.
     bool ready = false;
     bool running = false;
     bool hasSample = false;

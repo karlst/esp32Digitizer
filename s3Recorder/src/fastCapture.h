@@ -4,6 +4,7 @@
  */
 #pragma once
 #include <Arduino.h>
+#include "sampleFormatter.h"
 #include <freertos/FreeRTOS.h>
 
 /**
@@ -18,7 +19,8 @@
  * attaches its interrupt on core 0. While attached, only onReady() may touch SPI.
  * Detach the interrupt before a task sends any other SPI command. snapshot()
  * must run on the same core and briefly masks interrupts while copying results.
- * No sample history is retained: this preserves the existing latest/count design.
+ * When a writer is attached, every accepted sample is encoded and queued in RAM.
+ * snapshot() is only a monitor; it is never used to reconstruct recorded samples.
  */
 class fastCapture
 {
@@ -42,6 +44,7 @@ public:
         uint32_t previousEventUs = 0;
     };
     void reset();
+    void setWriter(bufferedWriter* destination);
     void IRAM_ATTR onReady();
     captureSnapshot snapshot();
 private:
@@ -49,4 +52,5 @@ private:
     // takes a task mutex, allocates memory, or calls the Arduino SPI library.
     portMUX_TYPE copyLock = portMUX_INITIALIZER_UNLOCKED;
     captureSnapshot state;
+    bufferedWriter* destination = nullptr; // Changed only while the interrupt is detached.
 };

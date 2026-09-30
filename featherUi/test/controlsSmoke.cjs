@@ -165,6 +165,7 @@ async function runChecks()
         s3 = { ...s3, connected: true, adcReady: true, receiving: false, sampleCount: "0",
             samplesPerSecond: 0, latestRaw: null, errorCode: 0, acquisitionRunning: false, appliedRate: 1000 };
         await page.waitForFunction(() => { return !document.getElementById("s3-acquisition-button").disabled; });
+        await page.locator(".acquisition-details summary").click();
         assert.equal(await page.locator("#s3-missed").innerText(), "Unavailable");
         // Show exact large decimal counters without Number rounding. Reasons
         // can overlap; total rejected reads is supplied separately by the S3.
@@ -207,6 +208,7 @@ async function runChecks()
         assert.equal(await page.locator("#dac-button").isEnabled(), true);
         assert.equal(await page.locator("#s3-unavailable").innerText(), "");
         assert.equal(await page.locator("#dac-unavailable").innerText(), "");
+        await page.mouse.move(0, 0);
         assert.equal(await page.locator("#s3-acquisition-button").evaluate((button) =>
         { return getComputedStyle(button).backgroundColor; }), "rgb(24, 89, 181)");
         page.once("dialog", (dialog) => { dialog.dismiss(); });
@@ -217,6 +219,47 @@ async function runChecks()
         await clickS3("#s3-reboot-button", "reboot");
         s3.commandStatus = "confirmed";
         await page.waitForFunction(() => { return document.getElementById("s3-command-message").textContent.includes("reboot confirmed"); });
+        // New recording capability unlocks the checkbox and stopped-only deletion.
+        // Keep exact byte totals, lock settings while running/saving, and preserve
+        // the last recording after Stop. Confirmation cancellation sends no command.
+        const rec = { state: "0", card: "1", enabled: "0", session: "0", part: "1", elapsedMs: "0",
+            bytesWritten: "0", samplesWritten: "0", cardBytes: "32000000000", freeBytes: "12000000000",
+            bufferBytes: "65536", usedBytes: "0", peakBytes: "0", writePosition: "0", readPosition: "0",
+            bytesPerSecond: "0", latestDelayUs: "4000", maxDelayUs: "187000", maxDelayAtMs: "492000",
+            maxDelayKind: "1", overflows: "0", lostSamples: "0", writeErrors: "0", deletedFiles: "0" };
+        s3.recording = rec;
+        await page.waitForFunction(() => !document.getElementById("s3-record").disabled);
+        await page.locator("#s3-record").check();
+        await clickS3("#s3-acquisition-button", "start");
+        assert.match(commands.at(-1).body, /record=1/);
+        s3 = { ...s3, commandStatus: "confirmed", acquisitionRunning: true, receiving: true,
+            recording: { ...rec, state: "2", enabled: "1", session: "123", elapsedMs: "754000",
+                bytesWritten: "9007199254740993", samplesWritten: "12345", usedBytes: "16384", peakBytes: "49152",
+                writePosition: "32768", readPosition: "16384", bytesPerSecond: "120000" } };
+        await page.waitForFunction(() => document.getElementById("rec-bytes").textContent.includes("9,007,199,254,740,993"));
+        assert.equal(await page.locator("#s3-record").isDisabled(), true);
+        assert.equal(await page.locator("#s3-delete-button").isDisabled(), true);
+        assert.match(await page.locator("#rec-max-delay").innerText(), /187.000 ms.*write.*0:08:12/);
+        await page.screenshot({ path: path.join(__dirname, "../.pio/recording-desktop.png"), fullPage: true });
+        await page.setViewportSize({ width: 375, height: 950 });
+        await page.screenshot({ path: path.join(__dirname, "../.pio/recording-mobile.png"), fullPage: true });
+        assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+        await page.setViewportSize({ width: 1100, height: 1000 });
+        await clickS3("#s3-acquisition-button", "stop");
+        s3 = { ...s3, acquisitionRunning: false, recording: { ...s3.recording, state: "3" } };
+        await page.waitForFunction(() => document.getElementById("rec-state").textContent.includes("Saving"));
+        assert.equal(await page.locator("#s3-delete-button").isDisabled(), true);
+        s3 = { ...s3, commandStatus: "confirmed", recording: { ...s3.recording, state: "4", usedBytes: "0" } };
+        await page.waitForFunction(() => !document.getElementById("s3-delete-button").disabled);
+        page.once("dialog", (dialog) => { dialog.dismiss(); });
+        const beforeDelete = commands.length;
+        await page.locator("#s3-delete-button").click();
+        assert.equal(commands.length, beforeDelete);
+        page.once("dialog", (dialog) => { dialog.accept(); });
+        await clickS3("#s3-delete-button", "delete");
+        assert.equal(commands.at(-1).body, "confirm=delete-recordings");
+        s3 = { ...s3, commandStatus: "confirmed", recording: { ...s3.recording, state: "0", deletedFiles: "3" } };
+        await page.waitForFunction(() => document.getElementById("s3-command-message").textContent.includes("Recordings deleted"));
         s3.connected = false;
         await page.waitForFunction(() => { return document.getElementById("s3-connected").textContent === "No"; });
         assert.equal(await page.locator("#s3-acquisition-button").isDisabled(), true);
@@ -231,7 +274,7 @@ async function runChecks()
         await page.screenshot({ path: path.join(__dirname, "../.pio/controls-mobile.png"), fullPage: true });
         assert.equal(await page.evaluate(() => { return document.documentElement.scrollWidth <= innerWidth; }), true);
         assert.deepEqual(errors, []);
-        console.log("PASS: strict numeric/spin controls, draft preservation, Start sends settings, Stop ignores drafts, running locks, S3 pending/confirmed/rejected/timeout/reboot, disconnect/recovery, desktop/mobile layout.");
+        console.log("PASS: DAC controls, S3 command states, recording checkbox/P3/exact totals, saving lock, delete confirmation, disconnect/recovery and desktop/mobile layout.");
     }
     finally
     {

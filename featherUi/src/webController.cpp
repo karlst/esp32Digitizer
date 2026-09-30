@@ -41,7 +41,9 @@ void webController::begin()
     // Register handlers now; handleClient() serves matching requests later in loop().
     server.on("/", HTTP_GET, [this]() { serveIndex(); });
     // Map /static/ URLs to LittleFS files, inferring MIME types from their extensions.
-    server.serveStatic("/static/", LittleFS, "/static/");
+    // Assets are replaced independently of firmware. Revalidate them after an
+    // upload so an old cached stylesheet cannot make enabled buttons look grey.
+    server.serveStatic("/static/", LittleFS, "/static/", "no-cache");
 
     // Telemetry reports link freshness separately from ADC sample progress. Both
     // this callback and monitor.update() run in loop(), so no extra mutex is needed.
@@ -73,6 +75,7 @@ void webController::begin()
     server.on("/api/s3/start", HTTP_POST, [this]() { commandS3("start"); });
     server.on("/api/s3/stop", HTTP_POST, [this]() { commandS3("stop"); });
     server.on("/api/s3/reboot", HTTP_POST, [this]() { commandS3("reboot"); });
+    server.on("/api/s3/delete", HTTP_POST, [this]() { commandS3("delete"); });
     server.on("/api/dac/stop", HTTP_POST, [this]()
     {
         // A successful response confirms that code zero has been written to the DAC.
@@ -177,9 +180,10 @@ void webController::startDac()
 
 /**
  * @brief Validate a browser request and ask the serial monitor to send it to S3.
- * @param action One of the registered actions: start, stop, or reboot.
+ * @param action One of the registered actions: start, stop, reboot, or delete.
  *
- * Only Start reads sampleRate; Stop/Reboot remain usable with an invalid draft.
+ * Only Start reads sampleRate and record; Stop/Reboot ignore invalid drafts.
+ * Delete requires the browser's explicit confirmation field and stopped S3 state.
  * The monitor checks supported rates, connection freshness, and pending commands.
  * HTTP 202 means the command was sent and is awaiting S3 confirmation. HTTP 409
  * means it was not accepted for sending. This handler never waits for the S3 reply.
@@ -187,10 +191,17 @@ void webController::startDac()
 void webController::commandS3(const char* action)
 {
     float rate = 0;
+    // A recording request must be explicit 0/1, never a loosely parsed truthy
+    // string. Deletion requires a separate confirmation field from the browser.
+    const bool isStart = strcmp(action, "start") == 0;
+    const bool record = isStart && server.hasArg("record") && server.arg("record") == "1";
+    const bool validRecord = !isStart || !server.hasArg("record") ||
+        server.arg("record") == "0" || server.arg("record") == "1";
+    const bool confirmed = strcmp(action, "delete") != 0 || server.arg("confirm") == "delete-recordings";
     const bool valid = strcmp(action, "start") != 0 ||
         (readNumber("sampleRate", rate) && rate >= 0 && rate <= 30000 && floorf(rate) == rate);
     server.sendHeader("Cache-Control", "no-store");
-    if (valid && monitor.sendCommand(action, static_cast<uint32_t>(rate)))
+    if (valid && validRecord && confirmed && monitor.sendCommand(action, static_cast<uint32_t>(rate), record))
     {
         server.send(202, "application/json", monitor.stateJson());
     }

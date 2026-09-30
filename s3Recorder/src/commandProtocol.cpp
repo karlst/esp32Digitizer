@@ -8,7 +8,7 @@
  * commands for acquisition.cpp. A separate parser is used for each serial port.
  *
  * Command example: CMD,2,42,start,1000 means version 2, request ID 42, Start at
- * 1000 samples/second. Commands remain version 2 even though status is version 3.
+ * 1000 samples/second. Version 3 adds a sixth field: 1 records, 0 monitors only.
  * This file also maps rates to chip register codes and joins three sample bytes
  * into a signed number. Those helpers have no dependency on an attached board.
  */
@@ -73,21 +73,22 @@ bool commandProtocol::rateRegister(uint32_t rate, uint8_t& value)
 }
 
 /**
- * @brief Validate one entire CMD,2,id,action,rate message without executing it.
+ * @brief Validate CMD,2,id,action,rate or CMD,3,id,action,rate,record.
  * @param line Writable, null-terminated text without its newline. Commas are
  * replaced with string terminators, so the original text is modified.
  * @param command Receives the complete request only if every check succeeds.
  * @return True for an accepted format; false leaves command unchanged.
  *
  * IDs must be nonzero. Start requires a supported rate; Stop/Reboot require zero
- * in that field. A syntactically valid command can still be rejected later by
+ * in that field. Delete requires version 3 and zero rate/record fields.
+ * A syntactically valid command can still be rejected later by
  * acquisition.cpp because the digitizer is unavailable or already running.
  */
 bool commandProtocol::parse(char* line, acquisitionCommand& command)
 {
     // Split without allocating strings. Empty fields remain visible to validation;
     // extra commas are an error rather than ignored trailing data.
-    char* fields[5] = {line};
+    char* fields[6] = {line};
     size_t count = 1;
     bool retVal = true;
     for (char* cursor = line; *cursor; ++cursor)
@@ -95,7 +96,7 @@ bool commandProtocol::parse(char* line, acquisitionCommand& command)
         if (*cursor == ',')
         {
             *cursor = '\0';
-            if (count < 5)
+            if (count < 6)
             {
                 fields[count++] = cursor + 1;
             }
@@ -108,13 +109,18 @@ bool commandProtocol::parse(char* line, acquisitionCommand& command)
     // Work on a temporary request so a valid prefix cannot partially update the
     // caller's command when a later field is invalid.
     acquisitionCommand parsed;
-    retVal = retVal && count == 5 && std::strcmp(fields[0], "CMD") == 0 &&
-        std::strcmp(fields[1], "2") == 0 && unsignedNumber(fields[2], parsed.id) &&
+    const bool version3 = count == 6 && std::strcmp(fields[1], "3") == 0;
+    const bool version2 = count == 5 && std::strcmp(fields[1], "2") == 0;
+    uint32_t recordFlag = 0;
+    retVal = retVal && (version2 || version3) && std::strcmp(fields[0], "CMD") == 0 &&
+        (!version3 || (unsignedNumber(fields[5], recordFlag) && recordFlag <= 1)) &&
+        unsignedNumber(fields[2], parsed.id) &&
         parsed.id != 0 && unsignedNumber(fields[4], parsed.rate);
     if (retVal)
     {
         // Rate lookup validates Start even though this parser does not write the
         // register. Stop/Reboot ignore settings operationally but require wire zero.
+        parsed.record = recordFlag != 0;
         uint8_t ignored = 0;
         if (std::strcmp(fields[3], "start") == 0)
         {
@@ -125,7 +131,12 @@ bool commandProtocol::parse(char* line, acquisitionCommand& command)
         {
             parsed.action = std::strcmp(fields[3], "stop") == 0 ?
                 acquisitionCommand::Action::stop : acquisitionCommand::Action::reboot;
-            retVal = parsed.rate == 0;
+            retVal = parsed.rate == 0 && !parsed.record;
+        }
+        else if (version3 && std::strcmp(fields[3], "delete") == 0)
+        {
+            parsed.action = acquisitionCommand::Action::erase;
+            retVal = parsed.rate == 0 && !parsed.record;
         }
         else
         {

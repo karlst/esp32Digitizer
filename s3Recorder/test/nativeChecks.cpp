@@ -165,6 +165,12 @@ static void checkProtocol()
         "CMD,2,1,start, 1000", "CMD,2,1,stop,1000", "CMD,2,1,reboot,1", "CMD,2,1,bogus,0",
         "CMD,2,1,stop,0,junk", "CMD,2,1,stop", "CMD,2,,stop,0", "", "CMD,2,1,stop,0 "};
     for (const char* text : invalid) { assert(!parse(text, command)); }
+    assert(parse("CMD,3,45,start,30000,1", command) && command.record);
+    assert(parse("CMD,3,46,delete,0,0", command) && command.action == acquisitionCommand::Action::erase);
+    assert(!parse("CMD,3,47,stop,0,1", command));
+    assert(!parse("CMD,3,48,start,1000,2", command));
+    assert(!parse("CMD,2,49,delete,0", command));
+    assert(!parse("CMD,3,50,start,1000", command));
     commandProtocol parser;
     assert(feed(parser, "CMD,2,2,stop,0\r\n", 1) == 1);
     assert(feed(parser, "CMD,2,3,sto\rp,0\n", 2) == 0);
@@ -308,7 +314,9 @@ void nativeChecks::checkLink()
 #ifdef S3_LEGACY_STATUS
     assert(Serial1.output == "S3,2,1000,0,0,0,0,4294967295,0,0,1000,0,0\n");
 #else
-    assert(Serial1.output == "S3,3,1000,0,0,0,0,4294967295,0,0,1000,0,0,0,0,0,0,0,0\n");
+    std::string expected = "S3,4,1000,0,0,0,0,4294967295,0,0,1000,0,0,0,0,0,0,0,0";
+    for (size_t index = 0; index < 24; ++index) { expected += ",0"; }
+    assert(Serial1.output == expected + "\n");
 #endif
     status.sampleCount = UINT64_MAX;
     status.missedEdges = UINT64_MAX;
@@ -317,6 +325,8 @@ void nativeChecks::checkLink()
     status.overlapReads = UINT64_MAX;
     status.readyTimeouts = UINT64_MAX;
     status.readFault = 3;
+    for (auto& value : status.recording.values) { value = UINT64_MAX; }
+    Serial1.capacity = 2048; // Firmware allocates this much space for complete v4 frames.
     status.latestRaw = -8388608;
     status.ackId = UINT32_MAX;
     status.hasSample = true;
@@ -327,9 +337,9 @@ void nativeChecks::checkLink()
     assert(Serial1.output.find("18446744073709551615") != std::string::npos);
     assert(Serial1.output.find("-8388608,20,") != std::string::npos);
 #ifndef S3_LEGACY_STATUS
-    assert(Serial1.output.find(",18446744073709551615,18446744073709551615,18446744073709551615,18446744073709551615,18446744073709551615,3\n") != std::string::npos);
+    assert(Serial1.output.find(",18446744073709551615,18446744073709551615,18446744073709551615,18446744073709551615,18446744073709551615,3,") != std::string::npos);
 #endif
-    assert(Serial1.output.size() < 384);
+    assert(Serial1.output.size() < 1536);
     Serial1.capacity = 0;
     assert(!link.report(status));
     Serial1.capacity = 512;
@@ -346,7 +356,7 @@ void nativeChecks::checkLink()
 #ifdef S3_LEGACY_STATUS
     assert(Serial1.flushed && Serial1.output.find(",42,1\n") != std::string::npos);
 #else
-    assert(Serial1.flushed && Serial1.output.find(",42,1,0,0,0,0,0,0\n") != std::string::npos);
+    assert(Serial1.flushed && Serial1.output.find(",42,1,0,0,0,0,0,0,") != std::string::npos);
 #endif
     assert(ESP.restarts == 0);
     testMs += 100;
@@ -363,6 +373,7 @@ int main()
     nativeChecks::checkAcquisition();
     nativeChecks::checkLink();
     nativeChecks::checkFastAcquisition();
+    nativeChecks::checkRecording();
     std::cout << "PASS: protocol, framing, signed samples, acquisition state/faults, replay protection, UART and reboot ordering.\n";
     return 0;
 }
@@ -426,4 +437,43 @@ void nativeChecks::checkFastAcquisition()
     assert(recorder.current.sampleCount == 4 && recorder.current.rejectedReads == 1);
     assert(recorder.current.readFailures == 1 && recorder.current.error == 3);
     GPSPI2 = {};
+}
+
+extern bool testStorageOpen;
+extern bool testStorageFinish;
+extern bool testStorageComplete;
+extern uint32_t testStorageDeletes;
+/**
+ * @brief Verify file-before-ADC ordering, recording-aware deduplication, safe
+ * deletion gating, every interrupt sample queued, and failure acknowledgements.
+ */
+void nativeChecks::checkRecording()
+{
+    acquisition recorder;
+    recorder.current.ready = true;
+    testStorageOpen = false;
+    const int previousStarts = startCalls;
+    recorder.execute({200, acquisitionCommand::Action::start, 30000, true});
+    assert(startCalls == previousStarts && !recorder.current.running);
+    assert(recorder.current.ready && recorder.current.ackResult == 2);
+    testStorageOpen = true; startOk = true; stopOk = true;
+    testClockHook = finishFastTransfer;
+    recorder.execute({201, acquisitionCommand::Action::start, 30000, true});
+    assert(recorder.current.running && recorder.recordingBuffer);
+    GPIO.in = 0; acquisition::readyInterrupt(&recorder);
+    GPIO.in = 0; acquisition::readyInterrupt(&recorder);
+    assert(recorder.storage.buffer().snapshot().used == 8);
+    recorder.execute({201, acquisitionCommand::Action::start, 30000, false});
+    assert(recorder.current.ackResult == 2 && recorder.current.running);
+    recorder.execute({202, acquisitionCommand::Action::erase, 0});
+    assert(recorder.current.ackResult == 2 && testStorageDeletes == 0);
+    recorder.execute({203, acquisitionCommand::Action::stop, 0});
+    assert(!recorder.current.running && testStorageComplete && recorder.current.ackResult == 1);
+    recorder.execute({204, acquisitionCommand::Action::erase, 0});
+    assert(recorder.current.ackResult == 1 && testStorageDeletes == 1);
+    recorder.execute({205, acquisitionCommand::Action::start, 1000, true});
+    testStorageFinish = false;
+    recorder.execute({206, acquisitionCommand::Action::stop, 0});
+    assert(!recorder.current.running && recorder.current.ackResult == 2);
+    testStorageFinish = true; testClockHook = nullptr;
 }

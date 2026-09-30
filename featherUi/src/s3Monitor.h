@@ -4,6 +4,7 @@
  */
 #pragma once
 #include <Arduino.h>
+#include "recordingMonitor.h"
 
 /**
  * @brief Own the UART receive buffer and last validated S3 acquisition status.
@@ -35,8 +36,9 @@ public:
     String stateJson() const;
     /**
      * @brief Send one command; its eventual result is reported by stateJson().
+     * record applies only to Start and requires recording-capable S3 firmware.
      */
-    bool sendCommand(const char* action, uint32_t rate);
+    bool sendCommand(const char* action, uint32_t rate, bool record = false);
     /**
      * @brief Accept only the supported rates exposed by the initial UI.
      */
@@ -55,7 +57,8 @@ private:
     // No dynamic receive allocation: oversize/corrupt lines are discarded through
     // their newline. Partial lines expire, preventing old fragments joining new data.
     HardwareSerial& serialPort;
-    static constexpr size_t lineCapacity = 384;
+    // Room for 43 fields even when every 64-bit number uses its full decimal width.
+    static constexpr size_t lineCapacity = 1536;
     static constexpr uint32_t connectionTimeoutMs = 3000;
     char line[lineCapacity] = {};
     size_t lineLength = 0;
@@ -96,6 +99,8 @@ private:
     uint32_t commandId = 0;
     uint32_t commandSentMs = 0;
     uint32_t requestedRate = 0;
+    bool requestedRecording = false;
+    recordingMonitor recording;
     String commandAction;
     String commandStatus = "idle";
 };

@@ -23,21 +23,25 @@ $batch = @"
 @echo off
 call "$environmentScript" >nul
 if errorlevel 1 exit /b 1
-cl /nologo /std:c++17 /EHsc /W4 $statusFlag /I"$projectRoot/test/fakes" /I"$projectRoot/src" "$projectRoot/test/nativeChecks.cpp" "$projectRoot/src/commandProtocol.cpp" "$projectRoot/src/commandHistory.cpp" "$projectRoot/src/acquisition.cpp" "$projectRoot/src/fastCapture.cpp" "$projectRoot/src/featherLink.cpp" /Fe:nativeChecks.exe
+cl /nologo /std:c++17 /EHsc /W4 $statusFlag /I"$projectRoot/test/fakes" /I"$projectRoot/src" /I"$projectRoot/../shared" /I"$projectRoot/lib/bufferedWriter/src" "$projectRoot/test/nativeChecks.cpp" "$projectRoot/src/commandProtocol.cpp" "$projectRoot/src/commandHistory.cpp" "$projectRoot/src/acquisition.cpp" "$projectRoot/src/fastCapture.cpp" "$projectRoot/src/featherLink.cpp" "$projectRoot/test/fakeRecordingService.cpp" "$projectRoot/src/sampleFormatter.cpp" "$projectRoot/lib/bufferedWriter/src/bufferedWriter.cpp" /Fe:nativeChecks.exe
 if errorlevel 1 exit /b 1
 nativeChecks.exe
 if errorlevel 1 exit /b 1
-cl /nologo /std:c++17 /EHsc /W4 /I"$projectRoot/test/fakes" /I"$projectRoot/src" "$projectRoot/test/driverChecks.cpp" "$projectRoot/src/ads1256.cpp" "$projectRoot/src/commandProtocol.cpp" /Fe:driverChecks.exe
+cl /nologo /std:c++17 /EHsc /W4 /I"$projectRoot/test/fakes" /I"$projectRoot/src" /I"$projectRoot/../shared" /I"$projectRoot/lib/bufferedWriter/src" "$projectRoot/test/driverChecks.cpp" "$projectRoot/src/ads1256.cpp" "$projectRoot/src/commandProtocol.cpp" /Fe:driverChecks.exe
 if errorlevel 1 exit /b 1
 driverChecks.exe
 if errorlevel 1 exit /b 1
-cl /nologo /std:c++17 /EHsc /W4 /I"$projectRoot/test/fakes" /I"$projectRoot/src" "$projectRoot/test/fastCaptureChecks.cpp" "$projectRoot/src/fastCapture.cpp" /Fe:fastCaptureChecks.exe
+cl /nologo /std:c++17 /EHsc /W4 /I"$projectRoot/test/fakes" /I"$projectRoot/src" /I"$projectRoot/../shared" /I"$projectRoot/lib/bufferedWriter/src" "$projectRoot/test/fastCaptureChecks.cpp" "$projectRoot/src/fastCapture.cpp" "$projectRoot/src/sampleFormatter.cpp" "$projectRoot/lib/bufferedWriter/src/bufferedWriter.cpp" /Fe:fastCaptureChecks.exe
 if errorlevel 1 exit /b 1
 fastCaptureChecks.exe
 if errorlevel 1 exit /b 1
-cl /nologo /std:c++17 /EHsc /W4 /I"$projectRoot/../featherUi/test/fakes" /I"$projectRoot/../featherUi/src" "$projectRoot/../featherUi/test/monitorChecks.cpp" "$projectRoot/../featherUi/src/s3Monitor.cpp" /Fe:monitorChecks.exe
+cl /nologo /std:c++17 /EHsc /W4 /I"$projectRoot/../featherUi/test/fakes" /I"$projectRoot/../featherUi/src" "$projectRoot/../featherUi/test/monitorChecks.cpp" "$projectRoot/../featherUi/src/s3Monitor.cpp" "$projectRoot/../featherUi/src/recordingMonitor.cpp" /Fe:monitorChecks.exe
 if errorlevel 1 exit /b 1
 monitorChecks.exe
+if errorlevel 1 exit /b 1
+cl /nologo /std:c++17 /EHsc /W4 /I"$projectRoot/src" /I"$projectRoot/lib/bufferedWriter/src" "$projectRoot/test/writerChecks.cpp" "$projectRoot/src/sampleFormatter.cpp" "$projectRoot/lib/bufferedWriter/src/bufferedWriter.cpp" /Fe:writerChecks.exe
+if errorlevel 1 exit /b 1
+writerChecks.exe
 "@
 $batchPath = Join-Path $buildDir 'run.cmd'
 Set-Content -LiteralPath $batchPath -Value $batch -Encoding ascii

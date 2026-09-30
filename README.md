@@ -135,12 +135,73 @@ Run desktop checks with `./s3Recorder/test/runNativeChecks.ps1`; add
 signed byte decoding, overlap rejection, bounded controller failure, command
 framing, status parsing, and reboot ordering. They do not replace board tests.
 
-Default S3 builds send the version-3 status frame with diagnostic counters. While
-the Feather still has the older version-2 parser installed, build/upload with
-`pio run -d s3Recorder -e legacy-feather -t upload`. This selects the same sampling
-code with the shorter status frame. Today's S3 upload used the equivalent
-`S3_LEGACY_STATUS=1` flag to keep the deployed Feather working; no Feather upload
-was performed. Use the default environment once Feather has the version-3 parser.
+Default S3 builds send version-4 status with acquisition and recording counters. The
+30k bench upload used `S3_LEGACY_STATUS=1` to work with the then-older Feather.
+The Feather has now been uploaded with support for status versions 2, 3 and 4;
+the default S3 environment is suitable for subsequent uploads. The optional
+`legacy-feather` environment remains for genuinely older Feather installations.
+
+## Recording and SD card
+
+The recording-ready Feather firmware and LittleFS web files have been uploaded
+on COM3. It adds the Record to SD checkbox, stopped-only Delete all recordings
+with confirmation, and P3 recording telemetry. Existing acquisition diagnostics
+remain in an expandable section. Numeric totals retain full 64-bit precision.
+Browser tests exercise recording, Saving, cancellation/deletion, disconnection,
+and desktop/mobile layouts. Native tests verify status 2/3/4 compatibility.
+
+The S3 implementation now connects the checkbox and deletion command to storage.
+The Adafruit MicroSD breakout uses its own SPI controller: 5V to 5V, GND to GND,
+CLK to S3 GPIO5, DO to GPIO6, DI to GPIO7, CS to GPIO4. Leave the breakout's 3V
+and CD pins unconnected. ADC and inter-board UART wiring remain as documented above.
+
+Reading path through the implementation:
+
+1. `acquisition.cpp` opens the recording before starting the ADC and stops the
+   producer before draining/closing. Every accepted sample is submitted, including
+   every 30k interrupt read, not just the periodically displayed latest sample.
+2. `sampleFormatter.cpp` encodes signed 24-bit ADC values into little-endian int32.
+3. `lib/bufferedWriter/src/` owns a 64-KiB single-producer/single-consumer ring,
+   writes 4-KiB blocks, retains in-flight bytes, and measures write/flush delay.
+   Its byte interface knows nothing about an ADC, Feather, pins, or file format.
+4. `recordingService.cpp` runs filesystem work in a core-1 task; communications
+   continues while core 0 waits for preparation/closing. During acquisition core
+   0 only submits RAM bytes; it never waits for a file write.
+5. `sdRecordingSink.cpp` uses pinned [SdFat 2.3.1](https://github.com/greiman/SdFat) to mount FAT16/FAT32 or exFAT
+   without formatting and
+   creates numbered files under `/recordings/`. It splits before 1 GiB, preserves
+   old files, and deletes only recorder-named files on an explicit Delete command.
+
+Stop shows Saving until the ring drains and the file closes. Ring overflow or
+storage error stops acquisition and marks the recording incomplete. A dropped
+Feather/browser connection does not stop recording. Maximum delay includes opening,
+writing, rollover and final flush/close, and is preserved after Stop. Free-space
+queries run periodically; their delays are reflected in ring occupancy rather than
+classified as write/flush calls. The initial 64-KiB ring holds about 0.55 seconds
+at 30,000 four-byte samples/second. It cannot cover arbitrarily long card stalls.
+
+Files begin with a 512-byte versioned header; see `shared/recordingFileFormat.md`.
+`bytesWritten` counts successful write calls including header rewrites, so it can
+exceed the sum of file lengths. `samplesWritten` excludes headers and queued data.
+Flush success is the filesystem's report, not a guarantee against sudden power loss.
+
+Each closed part is reopened for a bounded check of its header, length and final
+sample. This is not a full-file checksum; the small readback is included in
+close-time delay. The adapter uses SdFat sync/close results to detect failures.
+
+Desktop tests include recording-aware commands, failure acknowledgements, every
+interrupt sample queued, concurrent ring wrap/order, full-buffer protection,
+partial writes and failed flushes. The 64-GB card's original exFAT filesystem now mounts successfully; no
+formatting was needed. A short 1k/s recording saved and passed header/size/tail
+readback. A subsequent one-minute 30k/s test saved 1,794,989 samples (7,179,956 payload
+bytes). Accepted acquisition count matched saved sample count; no reported ADC
+faults, rejected buffer samples or write errors occurred. The ring peaked at
+24,696/65,536 bytes, maximum measured write/close delay was 17,870 us, and maximum
+ADC read time was 20 us. Stop drained the ring to zero and the file passed
+header/length/final-word readback. The two bench recordings remain on the card.
+This short test does not validate a nearly full card, 1-GiB rollover, all payload
+bytes, power-loss recovery, or unseen/coalesced ADC edges.
+The exact UART contract is in `shared/s3StatusProtocol.md`.
 
 ## Shared Code
 

@@ -42,3 +42,18 @@ These conventions apply throughout this project and may be updated as developmen
 - Wait for explicit authorization such as "Go!", "Code!", or an otherwise clear
   instruction to implement. Ask if authorization is unclear. Read-only inspection
   and explanations may proceed while discussing the queue.
+
+## Reusable recording component (requested by Karl, 2026-09-30)
+
+- Encapsulate the disk writer and its ring buffer together as a reusable library.
+  Other projects must not need the ADS1256 driver, acquisition class, Feather UART,
+  web UI, or their status protocol to use it.
+- Keep card pins, SPI controller selection and project-specific recording metadata
+  in an adapter/configuration layer. Expose a small data-submission, start/finish,
+  and statistics interface; do not expose mutable buffer pointers to callers.
+- Submitting data must not perform disk I/O or wait for a write. Retain queued
+  memory until its write completes. Report overflow, partial writes and flush
+  failures explicitly. Keep maximum write/flush latency and buffer statistics
+  inside the component; translate them to the Feather protocol outside it.
+- Test buffering and write failures independently of physical hardware. Preserve
+  existing card formatting and unrelated files; deletion is an explicit action.

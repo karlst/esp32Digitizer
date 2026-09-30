@@ -1,4 +1,82 @@
-# S3 acquisition status version 3; commands version 2
+# S3 acquisition and recording protocol
+
+## Recording extension: status 4, commands 3
+
+The recording-ready Feather accepts status 2, 3, and 4. Existing S3 firmware
+continues working with acquisition controls. Only a fully validated status-4
+frame advertises recording support; earlier versions show recording unavailable.
+This contract is implemented by both firmware projects. Hardware recording
+validation is recorded separately in README.md; support is not proof of card access.
+
+Status 4 retains the first nineteen fields of status 3 in their existing order,
+changes its version field to `4`, and appends the following 24 unsigned decimal
+fields (43 fields total). `shared/recordingStatus.h` defines the same order:
+
+```text
+state,card,enabled,session,part,elapsedMs,bytesWritten,samplesWritten,cardBytes,freeBytes,bufferBytes,usedBytes,peakBytes,writePosition,readPosition,bytesPerSecond,latestDelayUs,maxDelayUs,maxDelayAtMs,maxDelayKind,overflows,lostSamples,writeErrors,deletedFiles
+```
+
+- `state`: 0 idle, 1 preparing, 2 recording, 3 saving, 4 saved, 5 incomplete/error,
+  6 deleting. `card`: 0 unknown, 1 ready, 2 missing, 3 unsupported filesystem,
+  4 I/O failure. `enabled` is the applied recording choice for acquisition (0/1).
+- `session` and `part` identify `/recordings/recording_NNNNNN_PPP.bin`; zero
+  session means no recording yet. Numeric IDs avoid transmitting arbitrary paths.
+  Widths are minimum padding widths, not limits. Existing files are never replaced.
+- All totals and durations are unsigned 64-bit decimal values. Feather sends
+  recording JSON values as decimal strings to preserve exact numbers in browsers.
+- `bytesWritten` includes headers and successful payload writes for this session;
+  `samplesWritten` counts complete sample values. Neither includes queued bytes.
+  Successful writes are not a guarantee of survival through sudden power loss.
+- Space values are filesystem capacity/free bytes. Buffer capacity, occupancy,
+  peak and positions are bytes, aligned to four bytes. Positions wrap at capacity.
+  A full ring and an empty ring can have equal pointers; occupancy disambiguates.
+  Data being written remains occupied until that write completes successfully.
+- Delays measure elapsed S3 write/flush calls in microseconds. Maximum and its
+  recording-relative millisecond timestamp reset at a new recording and include
+  final flush. Kind: 0 no measurement, 1 write, 2 flush. Preserve final results
+  after Stop and during acquisition without recording, with `enabled=0`.
+- `overflows` counts buffer-full incidents; `lostSamples` counts known samples
+  that could not be retained. Do not substitute observed ADC missed-edge counts
+  or claim all physical losses are known. `writeErrors` counts failed storage
+  operations. `deletedFiles` reports completed deletions during the delete action.
+- Send status every 500 ms and promptly after command results. Feather accepts
+  at most 1535 characters before newline and expires unfinished frames at 500 ms.
+  S3 must size its TX buffer for a complete worst-case frame (at least 1536 bytes).
+
+Commands from a recording-aware Feather to a status-4 S3:
+
+```text
+CMD,3,id,start,rate,record
+CMD,3,id,stop,0,0
+CMD,3,id,reboot,0,0
+CMD,3,id,delete,0,0
+```
+
+`record` is exactly 0 or 1. Legacy commands remain supported with recording off.
+Reject nonzero recording flags on other actions. Replay matching includes the
+recording flag. A recording Start opens a new file before starting the ADC;
+failure leaves acquisition stopped. A repeated Start cannot change rate or
+recording mode during a run. Stop/Reboot must drain and close the recording first.
+
+Preparing, Saving and Deleting are asynchronous operations with status progress.
+While processing one, report its request ID with ackResult=0. Fresh matching busy
+reports extend Feather's five-second command wait; they do not confirm success.
+Report ackResult=1 only after completion, or 2 on failure. No automatic retries.
+On recording errors, stop acquisition and clearly mark the file incomplete.
+
+Deletion is stopped-only, after all file closing has completed. It removes only canonical `recording_NNNNNN_PPP.bin` regular files
+from `/recordings/`; unrelated files and folders remain untouched. The browser asks
+for confirmation and POSTs `confirm=delete-recordings` to `/api/s3/delete`.
+S3 independently checks its actual running/storage state before deleting.
+Never format automatically, delete on Start, or overwrite old files when full.
+
+Initial file design: signed little-endian 32-bit samples containing the ADC's
+24-bit value, a versioned header describing rate/format/session/part, and automatic
+part rollover before a file grows to 1 GiB. Card wiring, filesystem mounting and
+buffer capacity are verified during the S3 implementation. The existing filesystem
+is preserved. A Feather/browser disconnect must not stop S3 recording.
+
+## Existing acquisition protocol: status 3, commands 2
 
 One status report per second, plus immediate command acknowledgements. Version 3
 adds diagnostic counters. Acquisition remains on the S3. The 1,000 samples/second

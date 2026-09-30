@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <cstddef>
 #define FSPI 0
+#define HSPI 1
 #define MSBFIRST 1
 #define SPI_MODE1 1
 /**

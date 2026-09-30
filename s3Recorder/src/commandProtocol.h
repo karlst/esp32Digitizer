@@ -14,10 +14,11 @@
  */
 struct acquisitionCommand
 {
-    enum class Action { start, stop, reboot };
+    enum class Action { start, stop, reboot, erase };
     uint32_t id = 0;
     Action action = Action::stop;
     uint32_t rate = 0;
+    bool record = false; // Only Start may enable recording; legacy commands leave it off.
 };
 
 /**
