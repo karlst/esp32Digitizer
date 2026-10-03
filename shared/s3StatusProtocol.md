@@ -1,6 +1,28 @@
 # S3 acquisition and recording protocol
 
-## Recording extension: status 4, commands 3
+## Current recording extension: status 5, commands 3
+
+Version 5 keeps the version-4 columns below and appends `fileOpenUs,freeSpaceMode`
+(45 fields total). Feather accepts versions 2, 3, 4, and 5; missing v5 values are
+unknown. An older Feather must be updated before using a v5 S3.
+
+- `fileOpenUs` is the duration of initial file preparation, including filename
+  selection, initial header and sync. Reset on Start; reported separately from
+  recording write delays. Creating later split files remains a recording delay.
+- `freeSpaceMode`: 0 unknown/older firmware, 1 measured, 2 estimated, 3 stale after
+  a failed scan. A scan runs at startup, after initial opening but before samples
+  begin, after Stop, and after deletion. No scan runs during active recording.
+- The estimate subtracts growth in separately cluster-rounded recording file
+  lengths from the measured baseline. Header rewrites consume no extra estimated
+  space. Directory growth or library allocation ahead of length can differ;
+  clamp at zero and never use this display estimate as a write permission.
+- Recording elapsed time and maximum delay start after opening and the baseline
+  scan, immediately before the Start reply permits sample production. The maximum
+  includes payload writes, rollover, final flushing and closing, but not initial
+  opening or stopped-state free-space scans. Both maximum and opening time reset
+  for each new recording. Replayed/already-running Start commands do not reset them.
+
+## Previous recording extension: status 4, commands 3
 
 The recording-ready Feather accepts status 2, 3, and 4. Existing S3 firmware
 continues working with acquisition controls. Only a fully validated status-4

@@ -225,7 +225,7 @@ async function runChecks()
         const rec = { state: "0", card: "1", enabled: "0", session: "0", part: "1", elapsedMs: "0",
             bytesWritten: "0", samplesWritten: "0", cardBytes: "32000000000", freeBytes: "12000000000",
             bufferBytes: "65536", usedBytes: "0", peakBytes: "0", writePosition: "0", readPosition: "0",
-            bytesPerSecond: "0", latestDelayUs: "4000", maxDelayUs: "187000", maxDelayAtMs: "492000",
+            fileOpenUs: "567364", freeSpaceMode: "2", bytesPerSecond: "0", latestDelayUs: "4000", maxDelayUs: "187000", maxDelayAtMs: "492000",
             maxDelayKind: "1", overflows: "0", lostSamples: "0", writeErrors: "0", deletedFiles: "0" };
         s3.recording = rec;
         await page.waitForFunction(() => !document.getElementById("s3-record").disabled);
@@ -240,6 +240,8 @@ async function runChecks()
         assert.equal(await page.locator("#s3-record").isDisabled(), true);
         assert.equal(await page.locator("#s3-delete-button").isDisabled(), true);
         assert.match(await page.locator("#rec-max-delay").innerText(), /187.000 ms.*write.*0:08:12/);
+        assert.match(await page.locator("#rec-open-time").innerText(), /567.364 ms/);
+        assert.match(await page.locator("#rec-card").innerText(), /estimated free/);
         await page.screenshot({ path: path.join(__dirname, "../.pio/recording-desktop.png"), fullPage: true });
         await page.setViewportSize({ width: 375, height: 950 });
         await page.screenshot({ path: path.join(__dirname, "../.pio/recording-mobile.png"), fullPage: true });
@@ -249,9 +251,10 @@ async function runChecks()
         s3 = { ...s3, acquisitionRunning: false, recording: { ...s3.recording, state: "3" } };
         await page.waitForFunction(() => document.getElementById("rec-state").textContent.includes("Saving"));
         assert.equal(await page.locator("#s3-delete-button").isDisabled(), true);
-        s3 = { ...s3, commandStatus: "confirmed", recording: { ...s3.recording, state: "4", usedBytes: "0" } };
+        s3 = { ...s3, commandStatus: "confirmed", recording: { ...s3.recording, state: "4", usedBytes: "0", freeSpaceMode: "1" } };
         await page.waitForFunction(() => !document.getElementById("s3-delete-button").disabled);
         page.once("dialog", (dialog) => { dialog.dismiss(); });
+        assert.match(await page.locator("#rec-card").innerText(), /measured free/);
         const beforeDelete = commands.length;
         await page.locator("#s3-delete-button").click();
         assert.equal(commands.length, beforeDelete);

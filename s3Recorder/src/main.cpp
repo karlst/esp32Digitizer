@@ -32,7 +32,12 @@ void setup()
     controlLink.begin();
     // Do not wait for a USB terminal: external-power operation must work too.
     recorder.begin();
+#if S3_CHOKE_TEST
+    Serial.println("CHOKE TEST: digitizer unused; Start records at 750 kbps, +250 kbps every 10s; SPI 10 MHz.");
+    Serial.println("CHOKE TEST: dropdown rate ignored; P3 write speed is actual bytes/s; USB adds target/result.");
+#else
     Serial.println("S3 recorder: AIN0-AIN1, gain 1; Feather UART RX18/TX17; starts stopped.");
+#endif
 }
 
 /**

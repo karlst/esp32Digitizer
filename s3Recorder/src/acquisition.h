@@ -13,6 +13,9 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 #include <freertos/task.h>
+#if S3_CHOKE_TEST
+#include "chokeTest.h"
+#endif
 
 /**
  * @brief Give one background task exclusive responsibility for the digitizer.
@@ -52,6 +55,17 @@ private:
     void execute(const acquisitionCommand& command);
     void publish();
     void fault(uint32_t error);
+#if S3_CHOKE_TEST
+    // This build replaces ADC work with finite, testable generator steps. The
+    // storage service and its consumer thread are exactly the normal ones.
+    void runChoke();
+    void executeChoke(const acquisitionCommand& command);
+    void stepChoke();
+    bool stopChoke(chokeTest::resultCode reason);
+    void publishChoke();
+    chokeTest choke;
+    uint64_t chokeReportedSamples = 0;
+#endif
     recordingService storage;
     bufferedWriter* recordingBuffer = nullptr;
     ads1256 adc;

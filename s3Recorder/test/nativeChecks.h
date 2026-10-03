@@ -14,4 +14,5 @@ public:
     static void checkLink();
     static void checkFastAcquisition();
     static void checkRecording();
+    static void checkChoke();
 };

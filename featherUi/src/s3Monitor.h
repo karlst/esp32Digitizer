@@ -57,7 +57,7 @@ private:
     // No dynamic receive allocation: oversize/corrupt lines are discarded through
     // their newline. Partial lines expire, preventing old fragments joining new data.
     HardwareSerial& serialPort;
-    // Room for 43 fields even when every 64-bit number uses its full decimal width.
+    // Room for 45 fields even when every 64-bit number uses its full decimal width.
     static constexpr size_t lineCapacity = 1536;
     static constexpr uint32_t connectionTimeoutMs = 3000;
     char line[lineCapacity] = {};

@@ -15,6 +15,14 @@
  */
 struct acquisitionStatus
 {
+#if S3_CHOKE_TEST
+    // USB-only test diagnostics, copied under the same lock as acquisition status.
+    // The existing Feather protocol stays unchanged; its P3 write speed is actual
+    // disk throughput. In this build sample counts/raw values come from the test
+    // generator, and ready means generator ready, not verified ADC hardware.
+    uint32_t chokeTargetBps = 750000, chokeCompletedBps = 0;
+    uint32_t chokeElapsedMs = 0, chokeResult = 0;
+#endif
     // ready: initialization succeeded and no blocking fault is outstanding.
     // running: software is collecting; hasSample: latestRaw has a real value.
     // reboot: communications should acknowledge first, then restart the S3.

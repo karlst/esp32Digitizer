@@ -51,3 +51,24 @@ open header's zero payload count as proof that the file contains no samples.
 The UI's bytes-written counter measures successful write calls, including header
 rewrites, so it differs from final file size. Samples-written counts only complete
 payload records accepted by the filesystem. Flush failures leave durability unknown.
+
+## Temporary Choke test files
+
+The `choke-test` firmware uses the same numbered filenames and four-byte signed
+sample encoding, but its magic is **`S3CHK001`**. These are generated test values,
+not ADC measurements. The sample-rate field at byte 20 is zero because the rate
+changes. Three fields replace the first twelve reserved bytes:
+
+| Byte offset | Bytes | Meaning |
+| --- | --- | --- |
+| 56 | 4 | Initial stored-bit rate: 750000 bits/s |
+| 60 | 4 | Rate increment: 250000 bits/s |
+| 64 | 4 | Time per rate: 10000 milliseconds |
+
+Remaining bytes 68–511 are zero. The ramp counts all 32 stored bits per word.
+Payload starts at zero and increments through the signed 24-bit range, wrapping
+every 16,777,216 words. A new Start restarts the counter and rate ramp; part rollover
+does not. Timing fields specify the intended schedule, not measured arrival times.
+User Stop produces disposition 1 if saving succeeds; automatic choke/producer-lag
+stop produces disposition 2 even when all previously accepted words can be saved.
+The inspection script recognizes both magics and labels the source explicitly.

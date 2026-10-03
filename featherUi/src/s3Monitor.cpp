@@ -88,7 +88,9 @@ bool s3Monitor::readUnsigned(const char* text, uint64_t maximum, uint64_t& value
 /**
  * @brief Validate a complete S3 status report before replacing the displayed state.
  *
- * Version 4 adds 24 recording fields to version 3's nineteen acquisition fields.
+ * Version 5 adds initial file-opening time and free-space measurement quality.
+ * Version 4 has the original 24 recording fields; missing additions stay unknown.
+ * Version 4 adds those fields to version 3's nineteen acquisition fields.
  * The whole report must validate before any part becomes visible. Older version-2
  * reports have thirteen fields and remain usable while boards are updated;
  * their missing diagnostics are reported as unknown, not as zero.
@@ -100,7 +102,7 @@ bool s3Monitor::readUnsigned(const char* text, uint64_t maximum, uint64_t& value
  */
 bool s3Monitor::acceptLine(uint32_t nowMs)
 {
-    char* fields[43] = {line};
+    char* fields[45] = {line};
     size_t fieldCount = 1;
     bool retVal = true;
     // Split in place, preserving empty fields so missing values are rejected.
@@ -109,7 +111,7 @@ bool s3Monitor::acceptLine(uint32_t nowMs)
         if (line[index] == ',')
         {
             line[index] = '\0';
-            if (fieldCount < 43)
+            if (fieldCount < 45)
             {
                 fields[fieldCount++] = &line[index + 1];
             }
@@ -119,7 +121,8 @@ bool s3Monitor::acceptLine(uint32_t nowMs)
             }
         }
     }
-    const bool hasRecording = fieldCount == 43 && strcmp(fields[1], "4") == 0;
+    const bool hasSpaceDetails = fieldCount == 45 && strcmp(fields[1], "5") == 0;
+    const bool hasRecording = hasSpaceDetails || (fieldCount == 43 && strcmp(fields[1], "4") == 0);
     const bool hasDiagnostics = hasRecording || (fieldCount == 19 && strcmp(fields[1], "3") == 0);
     retVal = retVal && strcmp(fields[0], "S3") == 0 &&
         (hasDiagnostics || (fieldCount == 13 && strcmp(fields[1], "2") == 0));
@@ -129,7 +132,8 @@ bool s3Monitor::acceptLine(uint32_t nowMs)
     // must reject the whole frame, including its acquisition values and heartbeat.
     if (hasRecording)
     {
-        for (size_t index = 0; index < recordingStatus::fieldCount && retVal; ++index)
+        const size_t columns = hasSpaceDetails ? recordingStatus::fieldCount : recordingStatus::legacyFieldCount;
+        for (size_t index = 0; index < columns && retVal; ++index)
         {
             retVal = readUnsigned(fields[19 + index], UINT64_MAX, nextRecording.values[index]);
         }

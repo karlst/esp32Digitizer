@@ -6,6 +6,7 @@
  */
 #include <bufferedWriter.h>
 #include "sampleFormatter.h"
+#include "recordingSpace.h"
 #include "memorySink.h"
 #include <cassert>
 #include <vector>
@@ -109,5 +110,21 @@ int main()
         assert(value == index);
     }
     std::cout << "Writer checks passed: format, wraps, overflow, partial write, flush failure, concurrent order.\n";
+    // Initial scan already includes the first 512-byte header's full cluster.
+    // Rewriting that header cannot consume more allocation. New parts round
+    // independently, and a full card clamps to zero rather than unsigned wrap.
+    recordingSpace space;
+    const uint64_t firstHeader = recordingSpace::allocation(512, 4096);
+    assert(firstHeader == 4096 && recordingSpace::allocation(0, 4096) == 0);
+    assert(recordingSpace::allocation(4096, 4096) == 4096);
+    assert(recordingSpace::allocation(4097, 4096) == 8192);
+    assert(recordingSpace::allocation(512, 0) == 0);
+    space.begin(10000, firstHeader);
+    assert(space.remaining(firstHeader) == 10000);
+    assert(space.remaining(recordingSpace::allocation(4097, 4096)) == 5904);
+    assert(space.remaining(recordingSpace::allocation(4097, 4096) + firstHeader) == 1808);
+    assert(space.remaining(65536) == 0);
+    space.begin(80000000000ULL, 4096);
+    assert(space.remaining(8192) == 79999995904ULL);
     return 0;
 }

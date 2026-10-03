@@ -32,6 +32,9 @@ private:
     uint32_t sentAckResult = 0;
     uint32_t rebootSentMs = 0;
     uint32_t lastDebugMs = 0;
+#if S3_CHOKE_TEST
+    uint32_t lastChokeDebugMs = 0; // Retry after TX congestion instead of losing every test line.
+#endif
     // Once the reboot reply has been flushed, stop accepting further commands.
     bool rebootSent = false;
     // USB troubleshooting counters for the Feather input path only: physical

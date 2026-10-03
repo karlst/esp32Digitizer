@@ -1,8 +1,10 @@
-# Build four PC executables, using MSVC instead of the ESP32 cross-compiler:
+# Build PC test executables, using MSVC instead of the ESP32 cross-compiler:
 # nativeChecks: actual S3 command/acquisition/link logic with a fake ADC and RTOS.
 # driverChecks: actual ADS1256 driver with a simulated SPI controller.
 # monitorChecks: actual Feather status parser/JSON with a fake Arduino interface.
 # fastCaptureChecks: actual interrupt reader with simulated hardware registers.
+# writerChecks: reusable ring-buffer ordering, wraparound, overflow and I/O faults.
+# chokeChecks/chokeCommandChecks: timed generator, real ring and temporary commands.
 # Include-path order selects test substitutes; firmware source is not rewritten.
 # No upload or physical serial access occurs. A failed assertion stops the runner.
 param([switch]$LegacyStatus)
@@ -42,6 +44,14 @@ if errorlevel 1 exit /b 1
 cl /nologo /std:c++17 /EHsc /W4 /I"$projectRoot/src" /I"$projectRoot/lib/bufferedWriter/src" "$projectRoot/test/writerChecks.cpp" "$projectRoot/src/sampleFormatter.cpp" "$projectRoot/lib/bufferedWriter/src/bufferedWriter.cpp" /Fe:writerChecks.exe
 if errorlevel 1 exit /b 1
 writerChecks.exe
+if errorlevel 1 exit /b 1
+cl /nologo /std:c++17 /O2 /EHsc /W4 /I"$projectRoot/src" /I"$projectRoot/lib/bufferedWriter/src" "$projectRoot/test/chokeChecks.cpp" "$projectRoot/src/chokeTest.cpp" "$projectRoot/lib/bufferedWriter/src/bufferedWriter.cpp" /Fe:chokeChecks.exe
+if errorlevel 1 exit /b 1
+chokeChecks.exe
+if errorlevel 1 exit /b 1
+cl /nologo /std:c++17 /EHsc /W4 /DS3_CHOKE_TEST=1 /I"$projectRoot/test/fakes" /I"$projectRoot/src" /I"$projectRoot/../shared" /I"$projectRoot/lib/bufferedWriter/src" "$projectRoot/test/nativeChecks.cpp" "$projectRoot/src/commandProtocol.cpp" "$projectRoot/src/commandHistory.cpp" "$projectRoot/src/acquisition.cpp" "$projectRoot/src/acquisitionChoke.cpp" "$projectRoot/src/chokeEvents.cpp" "$projectRoot/src/chokeTest.cpp" "$projectRoot/src/fastCapture.cpp" "$projectRoot/src/featherLink.cpp" "$projectRoot/test/fakeRecordingService.cpp" "$projectRoot/src/sampleFormatter.cpp" "$projectRoot/lib/bufferedWriter/src/bufferedWriter.cpp" /Fe:chokeCommandChecks.exe
+if errorlevel 1 exit /b 1
+chokeCommandChecks.exe
 "@
 $batchPath = Join-Path $buildDir 'run.cmd'
 Set-Content -LiteralPath $batchPath -Value $batch -Encoding ascii

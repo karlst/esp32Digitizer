@@ -26,6 +26,8 @@
  * published, and snapshot() gives communications a protected copy of published.
  * Monitoring keeps the latest value/count. Optional recording sends EVERY accepted
  * sample through sampleFormatter to the RAM buffer, then the storage task writes it.
+ * The temporary S3_CHOKE_TEST build substitutes acquisitionChoke.cpp for run()
+ * and execute(): synthetic samples enter the same ring, with no digitizer calls.
  */
 #include "acquisition.h"
 
@@ -212,9 +214,15 @@ void acquisition::fault(uint32_t error)
  * SPI at the same time as collect(). ackId identifies the request answered;
  * ackResult is 1 for accepted or 2 for rejected. These fields are published
  * for communications to send back; this function does not send the reply.
+ * Choke-test builds delegate to executeChoke(), which preserves command IDs but
+ * replaces ADC operation with a timed synthetic source. See acquisitionChoke.cpp.
  */
 void acquisition::execute(const acquisitionCommand& command)
 {
+#if S3_CHOKE_TEST
+    // The temporary throughput build never initializes, reads or stops the ADC.
+    executeChoke(command);
+#else
     // Check the bounded history of recent requests before touching hardware.
     // A duplicate should get its recorded answer, not execute twice. In
     // particular, a repeated old Start must not undo a subsequent Stop while
@@ -350,6 +358,7 @@ void acquisition::execute(const acquisitionCommand& command)
         history.remember(command, current.ackResult);
     }
     publish();
+#endif
 }
 
 /**
@@ -358,9 +367,13 @@ void acquisition::execute(const acquisitionCommand& command)
  * This is the background task's permanent loop, entered through taskEntry().
  * Initialization leaves the digitizer in standby. Only a successful Start
  * command sets current.running and enables collection.
+ * With S3_CHOKE_TEST, runChoke() replaces this loop and never initializes the ADC.
  */
 void acquisition::run()
 {
+#if S3_CHOKE_TEST
+    runChoke();
+#else
     // Hardware setup happens here, after acquisition::begin() creates the task.
     // Report its result separately from whether task creation itself succeeded.
     current.ready = adc.begin();
@@ -422,6 +435,7 @@ void acquisition::run()
             vTaskDelay(pdMS_TO_TICKS(5));
         }
     }
+#endif
 }
 
 /**

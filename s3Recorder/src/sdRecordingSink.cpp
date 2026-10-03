@@ -13,8 +13,16 @@
  * what Start/Stop do to files, follow open()/openPart() and close()/closePart().
  */
 #include "sdRecordingSink.h"
+#include "recordingSpace.h"
 #include <cstring>
 #include <cstdio>
+#if S3_CHOKE_TEST
+#include "chokeTest.h"
+// Different magic prevents synthetic samples being mistaken for measured data.
+static constexpr const char* recordingMagic = "S3CHK001";
+#else
+static constexpr const char* recordingMagic = "S3REC001";
+#endif
 
 /**
  * @brief Put an unsigned integer in the header, least significant byte first.
@@ -113,6 +121,8 @@ bool sdRecordingSink::recordingName(const char* name, uint32_t& foundSession, ui
  * recordingService calls this before allowing ADC samples into the ring.
  * A session is one Start-to-Stop recording; a part is one file within that session.
  * @param sampleRate Requested ADC measurements per second, saved in each header.
+ * In the temporary Choke build this is zero: the rate varies according to the
+ * ramp parameters stored in its distinct S3CHK001 header.
  * @return True only after the first part and its initial header are ready. False
  * leaves acquisition stopped; it does not fall back to recording nowhere.
  * Existing names determine the next number after reboot. If all recordings were
@@ -156,7 +166,7 @@ bool sdRecordingSink::open(uint32_t sampleRate)
     if (retVal && highest != UINT32_MAX)
     {
         session = highest + 1; part = 1; rate = sampleRate;
-        payloadBytes = 0; headerBytes = 0; partStart = 0;
+        payloadBytes = 0; headerBytes = 0; partStart = 0; allocatedBytes = 0;
         retVal = openPart();
     }
     else
@@ -172,6 +182,8 @@ bool sdRecordingSink::open(uint32_t sampleRate)
  * format ID u32 (1=signed int32), rate u32, word bytes u32, disposition u32
  * (0=open, 1=closed normally, 2=incomplete), part payload bytes u64,
  * first sample index u64, session u32, part u32; remaining bytes reserved zero.
+ * Choke builds instead use S3CHK001 magic, rate zero, and three additional fields
+ * at 56/60/64: initial stored bits/s, increment bits/s, and stage milliseconds.
  * Completed writes count toward bytesWritten even when rewriting this header.
  *
  * A header describes the bytes that follow it so a later reader knows how to
@@ -189,12 +201,19 @@ bool sdRecordingSink::header(uint32_t disposition)
     // Start with all reserved bytes zero. The 8-byte magic identifies this file
     // as our recording format; subsequent fields describe its version and data.
     uint8_t bytes[512] = {};
-    std::memcpy(bytes, "S3REC001", 8);
+    std::memcpy(bytes, recordingMagic, 8);
     putLittle(bytes + 8, 512, 4); putLittle(bytes + 12, 1, 4);
     putLittle(bytes + 16, 1, 4); putLittle(bytes + 20, rate, 4);
     putLittle(bytes + 24, 4, 4); putLittle(bytes + 28, disposition, 4);
     putLittle(bytes + 32, partBytes, 8); putLittle(bytes + 40, partStart / 4, 8);
     putLittle(bytes + 48, session, 4); putLittle(bytes + 52, part, 4);
+#if S3_CHOKE_TEST
+    // These are requested stored-bit rates, not an assertion of achieved timing.
+    // The synthetic counter payload remains the ordinary four-byte signed format.
+    putLittle(bytes + 56, chokeTest::initialBps, 4);
+    putLittle(bytes + 60, chokeTest::incrementBps, 4);
+    putLittle(bytes + 64, chokeTest::stageUs / 1000, 4);
+#endif
     // Move to the first byte so finalization updates the header instead of
     // appending a second header among the samples.
     bool retVal = file.seekSet(0);
@@ -204,6 +223,7 @@ bool sdRecordingSink::header(uint32_t disposition)
         if (written > 0)
         {
             headerBytes += written;
+            accountGrowth();
         }
         retVal = written == sizeof(bytes);
     }
@@ -232,6 +252,7 @@ bool sdRecordingSink::openPart()
         static_cast<unsigned long>(session), static_cast<unsigned long>(part));
     const bool opened = file.open(&filesystem, path, O_CREAT | O_EXCL | O_RDWR);
     partBytes = 0;
+    partAllocated = 0;
     bool retVal = opened && header(0) && file.sync();
     if (!retVal && file.isOpen())
     {
@@ -280,6 +301,7 @@ size_t sdRecordingSink::write(const uint8_t* data, size_t length)
         {
             retVal = static_cast<size_t>(written);
             partBytes += retVal; payloadBytes += retVal;
+            accountGrowth();
             // Remember the last four accepted bytes for the close-time readback.
             // Only normally completed parts use this as a complete-sample comparison.
             if (written >= sizeof(lastWord))
@@ -428,7 +450,7 @@ bool sdRecordingSink::verifyPart(uint32_t disposition)
     // Only the first 56 header bytes currently contain defined fields. Reserved
     // bytes are not compared here, nor is the entire payload reread.
     uint8_t actual[56] = {}, expected[56] = {};
-    std::memcpy(expected, "S3REC001", 8);
+    std::memcpy(expected, recordingMagic, 8);
     putLittle(expected + 8, 512, 4); putLittle(expected + 12, 1, 4);
     putLittle(expected + 16, 1, 4); putLittle(expected + 20, rate, 4);
     putLittle(expected + 24, 4, 4); putLittle(expected + 28, disposition, 4);
@@ -459,16 +481,17 @@ bool sdRecordingSink::verifyPart(uint32_t disposition)
 
 /**
  * @brief Read filesystem capacity and available bytes; never erase to obtain space.
- * Called only by the disk thread: at startup, after commands, and periodically
- * while recording. total/free are output references in BYTES. A cluster is the
+ * Called only by the disk thread: at startup, before sample generation, and
+ * after Stop/deletion. total/free are output references in BYTES. A cluster is the
  * filesystem's allocation unit (a group of sectors); files consume whole clusters.
  * The library counts clusters, so multiply by bytesPerCluster using 64-bit math.
  * A scan failure sets cardState to I/O failure and preserves previous numbers;
  * those retained space values must not be mistaken for a fresh successful scan.
- * This query can block and let the ring fill; it is not an ADC/sample operation.
+ * Return true only for a successful scan. Never call during active recording.
  */
-void sdRecordingSink::space(uint64_t& total, uint64_t& free)
+bool sdRecordingSink::space(uint64_t& total, uint64_t& free)
 {
+    bool retVal = false;
     // Promote BEFORE multiplication: a 64-GB card cannot fit in a 32-bit byte
     // count. Negative freeClusterCount means a read error; preserve prior values.
     if (mounted)
@@ -478,6 +501,7 @@ void sdRecordingSink::space(uint64_t& total, uint64_t& free)
         {
             total = static_cast<uint64_t>(filesystem.clusterCount()) * filesystem.bytesPerCluster();
             free = static_cast<uint64_t>(freeClusters) * filesystem.bytesPerCluster();
+            retVal = true;
         }
         else
         {
@@ -487,5 +511,23 @@ void sdRecordingSink::space(uint64_t& total, uint64_t& free)
     else
     {
         total = 0; free = 0;
+    }
+    return retVal;
+}
+
+/**
+ * @brief Account for newly occupied file clusters using cached file length only.
+ * Called by the disk task after a successful header or payload write. fileSize()
+ * reads the library's in-memory size; it does not scan the allocation bitmap.
+ * A header rewrite leaves length unchanged. On rollover, partAllocated resets
+ * while allocatedBytes retains the old parts, so cluster rounding stays per-file.
+ */
+void sdRecordingSink::accountGrowth()
+{
+    const uint64_t occupied = recordingSpace::allocation(file.fileSize(), filesystem.bytesPerCluster());
+    if (occupied > partAllocated)
+    {
+        allocatedBytes += occupied - partAllocated;
+        partAllocated = occupied;
     }
 }

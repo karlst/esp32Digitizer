@@ -113,7 +113,7 @@ export function createRecordingPanel()
     {
         const rec = state?.connected ? state.recording : null;
         const message = get("recording-message");
-        const ids = ["state", "file", "card", "bytes", "samples", "rate", "delay", "max-delay", "buffer", "pointers", "errors"];
+        const ids = ["state", "file", "card", "bytes", "samples", "rate", "delay", "max-delay", "open-time", "buffer", "pointers", "errors"];
         if (!rec)
         {
             message.textContent = state?.connected ? "Recording unavailable — S3 update required." : "Recording state unknown — disconnected.";
@@ -145,7 +145,10 @@ export function createRecordingPanel()
             // Calculate a bounded percentage AFTER exact integer arithmetic. Converting
             // that small scaled result to Number is safe for chart/display purposes.
             const cardPercent = BigInt(rec.cardBytes) ? Number((BigInt(rec.cardBytes) - BigInt(rec.freeBytes)) * 1000n / BigInt(rec.cardBytes)) / 10 : 0;
-            get("rec-card").textContent = `${cardLabels[Number(rec.card)]} · ${cardPercent}% used · ${byteSize(rec.freeBytes)} free`;
+            // Label estimates and stale scans explicitly; old firmware is unknown.
+            const spaceLabel = ["last reported free", "measured free", "estimated free", "stale free"][Number(rec.freeSpaceMode || 0)];
+            get("rec-card").textContent = `${cardLabels[Number(rec.card)]} · ${cardPercent}% used · ${byteSize(rec.freeBytes)} ${spaceLabel}`;
+            get("rec-open-time").textContent = Number(rec.fileOpenUs || 0) ? `${(Number(rec.fileOpenUs) / 1000).toFixed(3)} ms` : "—";
             get("rec-bytes").textContent = `${BigInt(rec.bytesWritten).toLocaleString("en-US")} bytes (${byteSize(rec.bytesWritten)})`;
             get("rec-samples").textContent = BigInt(rec.samplesWritten).toLocaleString("en-US");
             get("rec-rate").textContent = `${byteSize(rec.bytesPerSecond)}/s`;

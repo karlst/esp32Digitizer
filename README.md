@@ -203,6 +203,72 @@ This short test does not validate a nearly full card, 1-GiB rollover, all payloa
 bytes, power-loss recovery, or unseen/coalesced ADC edges.
 The exact UART contract is in `shared/s3StatusProtocol.md`.
 
+## Recording on a card prepared by a computer
+
+Card filling and fragmentation are performed on the computer. The temporary
+on-board preparation code and its build environments have been removed.
+Use the normal `esp32-s3-devkitc-1` build. With Record to SD checked, Start
+Acquisition opens a new recording and starts collecting samples immediately;
+there is no filler creation or automatic deletion. Existing recordings and
+computer-created filler files remain in place. P3 continues to report card
+fullness, ring-buffer occupancy/peak/positions, bytes written, and maximum
+write/flush delay for the recording.
+
+## Temporary Choke test
+
+Build the S3 environment `choke-test` for this experiment. The default
+`esp32-s3-devkitc-1` build remains the normal digitizer recorder. The Choke build
+starts stopped and does not initialize or read the digitizer.
+
+- **Start Acquisition** opens a new file, then generates dummy 24-bit values stored
+  in 32-bit words. Start always records, regardless of the Record to SD checkbox.
+  The sample-rate dropdown is ignored; its value is echoed only for compatibility
+  with the existing Feather command acknowledgement.
+- Start at **750 kbps** of stored words, then add **250 kbps every 10 seconds**:
+  750, 1000, 1250, 1500, and so on. These are decimal kilobits/s, including the
+  fourth byte per sample. 24 Mbps would be reached after 15 minutes 30 seconds.
+- **Stop** stops the source, drains queued data, and closes the file. A ring
+  overflow or returned write failure also stops the source and attempts to save
+  earlier data, marking the final file incomplete. No filling, formatting, or
+  automatic deletion takes place. Existing recordings and PC fillers are kept.
+- Each new Start resets the ramp. This is a temporary test firmware, not a
+  persistent card-preparation operation; no completion marker is involved.
+
+The synthetic source runs on core 0; the existing disk writer still pumps the
+64-KiB ring on core 1. It uses the existing 4096-byte write batches, scheduler
+delays, periodic card-space scans, and 10-MHz SPI clock. This measures the complete
+current pipeline, not the card's isolated maximum speed. At 10 MHz, 24 Mbps exceeds
+the connection's theoretical capacity; a faster SPI setting would be a separate
+comparison. The known completely-full-card hang is deliberately not fixed here,
+per Karl's instruction; prepare free space on the PC before this test.
+
+P3 already displays actual **write speed in bytes/s**, along with ring occupancy,
+peak, bytes written, maximum write/flush delay and errors. In this build the last
+measured write-speed window is retained after stopping. Multiply bytes/s by eight
+for bits/s: 93,750 bytes/s = 750 kbps, and 3,000,000 bytes/s = 24 Mbps. No Feather
+firmware or browser-file update is required. Its existing ADC labels refer to
+the synthetic source in this temporary build; they do not confirm ADC hardware.
+
+USB at 115200 adds a `CHOKE` line about once per second, with target, actual
+generated and actual written kbps, last completed ten-second stage, elapsed
+time, and result. `storage-limit` means ring/write failure (inspect P3 counters);
+`producer-behind` means the generator itself fell more than 4096 words behind
+schedule, so it stops instead of falsely blaming the card for a catch-up burst.
+`rate-limit` is a guard against numeric overflow after an unrealistically long
+run. Completed stages are ten-second observations, not endurance guarantees.
+
+Files use distinct `S3CHK001` magic and describe the ramp in their headers; see
+`shared/recordingFileFormat.md`. Start reading the implementation in
+`acquisitionChoke.cpp`, then `chokeTest.cpp` for pacing and encoding. Detailed
+comments explain the task boundaries and which counters measure accepted versus
+written data. The generic `bufferedWriter` library is unchanged.
+
+Desktop tests cover exact rate boundaries, fractional-word pacing, sample sign
+encoding, ring overflow without throttling, write/flush failure, excessive source
+lateness, Stop, duplicate commands, failed preparation, restart, and no ADC calls
+in the Choke command path. Both firmware environments compile. Actual card speed
+and physical Start/Stop behavior remain to be verified after upload is authorized.
+
 ## Shared Code
 
 Common code is stored under:
@@ -224,3 +290,72 @@ Both PlatformIO projects include the shared directory through their `build_flags
 ```text
 0.1.0
 ```
+
+### Choke test USB event log
+
+The `choke-test` build also prints `EVENT` lines on USB. The acquisition and disk
+threads queue numbers; the communications thread formats and transmits them.
+No event writes to the card or waits for serial output on the sample thread.
+
+Each line has a run number and `t` in milliseconds since that Start request,
+**including file preparation**. `generator-start` marks when the ten-second ramp
+actually starts. Bracketed field names match the comma-separated values in order.
+Rates are decimal **bits/second**, including the full 32-bit sample word; buffer
+occupancy is bytes; operation durations are microseconds.
+
+- `rate-change`: previous/new target, live queued bytes, and last published write
+  speed. That speed is a previous measurement window and can be stale during a
+  long disk call; it is not an instantaneous measurement.
+- `space-start` / `space-end`: free-space scan start, duration, buffer occupancy
+  before/after, and free bytes. Scans now run only before/after recording on the disk task; their delay is
+  separate from P3's maximum write/flush delay.
+- `file-open`: preparation time and success, separate from sample writes.
+- `slow-pump`: regular ring-to-card pumping taking at least 50 ms, with before/after
+  occupancy and failure flag. Includes time the task was descheduled, not just
+  electrical card transfer time. The timestamp is at completion; subtract duration
+  to locate the beginning.
+- `stop`: reason, target, last completed rate step, and queued bytes before draining.
+- `drain-start` / `drain-end`, `file-close`: final saving measured separately.
+  Writes inside the final drain are reported as one aggregate, not individual events.
+- `final` / `final-buffer`: saved samples, lost samples, written bytes, peak and
+  remaining buffer bytes, errors, and accepted samples. Reason codes: 0 idle,
+  1 running, 2 user Stop, 3 storage limit, 4 generator late, 5 rate limit.
+
+The 64-event queue reserves 16 slots from repetitive slow-pump messages for
+transitions. `dropped` reports total diagnostic events omitted since boot if the
+queue fills; it does **not** mean lost samples. Logging has small nonzero overhead.
+Events are live USB output, not a persistent history: capture the serial output
+while running the test to retain the timeline. Feather's interface is unchanged.
+
+### Recording space and delay reporting (status version 5)
+
+Free-space scans run before sample generation and after recording stops, never
+in the active recording loop. P3 labels the live calculation **estimated free**;
+a successful stopped-state scan changes it to **measured free**. Failed scans
+leave **stale free** instead of falsely claiming a new measurement. Estimates
+subtract newly allocated file-length blocks, rounding each part separately and
+excluding repeated header writes. Directory growth/preallocation can differ.
+No automatic low-space stop is implemented; write failure still stops recording.
+
+P3 shows **Initial file opening** separately. **Maximum recording delay** resets
+after initial opening and the baseline scan, and includes recording writes,
+part rollover, final flushing and closing. The elapsed recording clock starts
+at that same boundary. Initial opening includes filename selection/header sync.
+
+Both S3 and Feather firmware, plus Feather LittleFS browser assets, require
+updating for status version 5. New Feather still accepts old status versions;
+old Feather does not accept version 5. USB SD lines also include `openUs`,
+`spaceMode` (1 measured, 2 estimated, 3 stale), and `freeBytes` for bench checks.
+
+### Active firmware: regular acquisition (Choke test parked)
+
+The S3 default environment `esp32-s3-devkitc-1` reads the ADS1256 at the selected
+sample rate. The Feather recording checkbox controls whether those real samples
+are written to SD. Free-space scans remain outside active recording; the running
+space display is estimated, with measured values before/after recording.
+
+The synthetic test remains in `acquisitionChoke.cpp`, `chokeTest.*`, and
+`chokeEvents.*`, selected only by explicitly building/uploading `choke-test`.
+There is no automatic ramp in the regular firmware. Keep the test for validating
+the ordered SDIO breakout and later SDMMC storage implementation. Last SPI result:
+3.25 Mbps stage completed, overflow during 3.5 Mbps; no long-term rate guarantee.

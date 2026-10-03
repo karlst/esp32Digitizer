@@ -13,6 +13,7 @@
 #include "recordingService.h"
 #include <Arduino.h>
 #include <esp_timer.h>
+#include "chokeEvents.h"
 
 /**
  * @brief Supply a 64-bit microsecond clock, avoiding millis() rollover in long runs.
@@ -76,9 +77,7 @@ bool recordingService::request(operation action, uint32_t value)
         {
             // Sleep for an RTOS tick instead of occupying the CPU while disk work runs.
             // The ADC is already stopped here, so this does not drop incoming samples.
-            // Yield so the communications and idle tasks on core 1 can run. Sampling
-        // continues independently on core 0; this delay does not set sample rate.
-        vTaskDelay(pdMS_TO_TICKS(1));
+            vTaskDelay(pdMS_TO_TICKS(1));
         }
         retVal = result.load(std::memory_order_acquire);
     }
@@ -190,6 +189,13 @@ void recordingService::publish()
     auto* values = current.values;
     const auto stats = writer.snapshot();
     values[recordingStatus::card] = sink.cardState;
+    // During recording use only cached file growth. Never scan here: publish()
+    // runs while the producer can be filling the ring on the other core.
+    if (recording && spaceEstimateValid)
+    {
+        values[recordingStatus::freeBytes] = spaceEstimate.remaining(sink.allocatedBytes);
+        values[recordingStatus::freeSpaceMode] = recordingStatus::spaceEstimated;
+    }
     values[recordingStatus::session] = sink.session;
     values[recordingStatus::part] = sink.part;
     // Convert microseconds to milliseconds only for fields defined that way on
@@ -220,8 +226,18 @@ void recordingService::publish()
     const uint32_t now = millis();
     if (now - rateMs >= 500)
     {
-        values[recordingStatus::bytesPerSecond] = recording ?
-            (stats.bytes - rateBytes) * 1000 / (now - rateMs) : 0;
+        if (recording)
+        {
+            values[recordingStatus::bytesPerSecond] = (stats.bytes - rateBytes) * 1000 / (now - rateMs);
+        }
+#if !S3_CHOKE_TEST
+        else
+        {
+            values[recordingStatus::bytesPerSecond] = 0;
+        }
+#endif
+        // Choke-test builds retain the last measured write speed after Stop/failure.
+        // It is a completed measurement window, not the requested generator rate.
         rateBytes = stats.bytes; rateMs = now;
     }
     portENTER_CRITICAL(&statusLock);
@@ -240,7 +256,7 @@ void recordingService::publish()
  * 1. Try the existing card filesystem and publish readiness, while ADC stays idle.
  * 2. If a command is present, finish that operation and answer the waiting caller.
  * 3. Otherwise, if recording, pump one queued block from RAM into the file.
- * 4. Refresh card/display statistics when due and briefly yield CPU time.
+ * 4. Publish cached/estimated statistics and briefly yield CPU time; no active scan.
  *
  * The recording boolean means a recording file is active, including the short
  * interval after opening before ADC startup. It does not itself start the ADC.
@@ -254,7 +270,7 @@ void recordingService::run()
     // Startup only discovers readiness. A mount failure is visible but does not
     // prevent monitoring the ADC; a later recording Start retries mounting.
     sink.mount();
-    sink.space(current.values[recordingStatus::cardBytes], current.values[recordingStatus::freeBytes]);
+    refreshSpace();
     publish();
     for (;;)
     {
@@ -266,23 +282,42 @@ void recordingService::run()
             bool success = false;
             if (action == operation::prepare && !recording)
             {
+                current.values[recordingStatus::fileOpenUs] = 0;
+                spaceEstimateValid = false;
                 current.values[recordingStatus::enabled] = 1;
                 current.values[recordingStatus::state] = recordingStatus::preparing;
                 // Reset this recording before measuring file preparation. No producer is
                 // enabled yet, so resetting positions cannot erase queued live samples.
                 writer.start(sink, clockUs);
                 rateBytes = 0; rateMs = millis();
+                current.values[recordingStatus::bytesPerSecond] = 0;
                 publish();
                 const uint64_t began = clockUs();
                 // argument is the requested sample rate. Opening includes an initial
                 // header and synchronization. Acquisition cannot start until this succeeds.
                 success = sink.open(argument);
-                writer.measure(began, 1, success);
+                current.values[recordingStatus::fileOpenUs] = clockUs() - began;
+#if S3_CHOKE_TEST
+                chokeEvents::add("file-open", "durationUs,success,unused,unused", clockUs() - began, success);
+#endif
                 if (!success)
                 {
                     // No file is ready and no samples were submitted. Freeze the failed
                     // attempt duration without trying to flush a nonexistent recording.
+                    writer.measure(clockUs(), 1, false);
                     writer.cancel();
+                }
+                // Scan after opening so the baseline includes the initial header
+                // and directory entry. Acquisition is still waiting for our reply.
+                refreshSpace();
+                if (success)
+                {
+                    spaceEstimateValid = current.values[recordingStatus::freeSpaceMode] == recordingStatus::spaceMeasured;
+                    spaceEstimate.begin(current.values[recordingStatus::freeBytes], sink.allocatedBytes);
+                    // Start the recording clock and delay maximum AFTER opening and
+                    // scanning. No producer exists yet, so this reset discards no data.
+                    writer.start(sink, clockUs);
+                    rateBytes = 0; rateMs = millis();
                 }
                 recording = success;
                 current.values[recordingStatus::state] = success ? recordingStatus::recording : recordingStatus::failed;
@@ -296,15 +331,28 @@ void recordingService::run()
                     publish();
                     // First save queued bytes and synchronize them. Then let the file adapter
                     // write the final header, close, and check it. Both stages can fail.
+#if S3_CHOKE_TEST
+                    const uint64_t drainBegan = clockUs();
+                    chokeEvents::add("drain-start", "queuedBytes", writer.queuedBytes());
+#endif
                     const bool drained = writer.finish();
+#if S3_CHOKE_TEST
+                    chokeEvents::add("drain-end", "durationUs,remainingBytes,success,unused",
+                        clockUs() - drainBegan, writer.queuedBytes(), drained);
+#endif
                     const uint64_t began = clockUs();
                     const bool closed = sink.close(drained && argument != 0);
                     writer.measure(began, 2, closed);
+#if S3_CHOKE_TEST
+                    chokeEvents::add("file-close", "durationUs,success,unused,unused", clockUs() - began, closed);
+#endif
                     // An acquisition fault can still permit successful saving of earlier
                     // samples. Only a normal completion flag AND successful saving show Saved.
                     success = drained && closed;
                     recording = false;
+#if !S3_CHOKE_TEST
                     current.values[recordingStatus::bytesPerSecond] = 0;
+#endif
                     current.values[recordingStatus::state] = success && argument ? recordingStatus::saved : recordingStatus::failed;
                 }
             }
@@ -315,7 +363,12 @@ void recordingService::run()
                 success = sink.deleteRecordings(current.values[recordingStatus::deletedFiles]);
                 current.values[recordingStatus::state] = success ? recordingStatus::idle : recordingStatus::failed;
             }
-            sink.space(current.values[recordingStatus::cardBytes], current.values[recordingStatus::freeBytes]);
+            // Invalid commands must not trigger a scan while another recording is
+            // active. prepare already scanned before enabling production.
+            if (!recording && action != operation::prepare)
+            {
+                refreshSpace();
+            }
             publish();
             // Publish final status/result BEFORE marking the mailbox idle. The waiting
             // acquisition task then sends its final acknowledgement through featherLink.
@@ -326,20 +379,49 @@ void recordingService::run()
         {
             // This is the regular consumer call. It reads the ring and may block on
             // one disk write; ADC interrupts keep appending to other ring space.
+#if S3_CHOKE_TEST
+            const uint64_t began = clockUs();
+            const uint32_t before = writer.queuedBytes();
+#endif
             writer.pump();
-        }
-        // FAT free-space scans may be slow. Query periodically and count their
-        // effect through ring occupancy; write/flush delay measures those calls
-        // specifically, not every possible delay in the storage task.
-        if (recording && millis() - lastSpaceMs >= 5000)
-        {
-            sink.space(current.values[recordingStatus::cardBytes], current.values[recordingStatus::freeBytes]);
-            lastSpaceMs = millis();
+#if S3_CHOKE_TEST
+            // Only regular pumps over 50 ms produce detail events. finish() owns
+            // its internal writes, so final draining is timed as a whole above.
+            const uint64_t duration = clockUs() - began;
+            if (duration >= 50000)
+            {
+                chokeEvents::add("slow-pump", "durationUs,beforeBytes,afterBytes,failed",
+                    duration, before, writer.queuedBytes(), writer.failed(), false);
+            }
+#endif
         }
         if (millis() - lastPublishMs >= 100)
         {
             publish();
         }
+        // Yield so communications and idle tasks on core 1 can run. Sampling
+        // continues on core 0; this delay does not set the digitizer sample rate.
         vTaskDelay(pdMS_TO_TICKS(1));
     }
+}
+
+/**
+ * @brief Refresh free-space totals on the disk task, timing the entire scan.
+ * Called at startup, before allowing a new recording, and after Stop/deletion.
+ * Never call with a sample producer active: a scan blocks this task from pumping.
+ * A failed scan marks retained totals stale instead of presenting them as current.
+ */
+void recordingService::refreshSpace()
+{
+#if S3_CHOKE_TEST
+    const uint64_t began = clockUs();
+    const uint32_t before = writer.queuedBytes();
+    chokeEvents::add("space-start", "queuedBytes,recording,unused,unused", before, recording);
+#endif
+    const bool measured = sink.space(current.values[recordingStatus::cardBytes], current.values[recordingStatus::freeBytes]);
+    current.values[recordingStatus::freeSpaceMode] = measured ? recordingStatus::spaceMeasured : recordingStatus::spaceStale;
+#if S3_CHOKE_TEST
+    chokeEvents::add("space-end", "durationUs,beforeBytes,afterBytes,freeBytes",
+        clockUs() - began, before, writer.queuedBytes(), current.values[recordingStatus::freeBytes]);
+#endif
 }

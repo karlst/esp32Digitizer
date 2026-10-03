@@ -301,3 +301,16 @@ bufferedWriter::statistics bufferedWriter::snapshot()
     }
     return retVal;
 }
+
+/**
+ * @brief Read live occupied bytes on the producer OR consumer, without I/O.
+ * Each caller owns one position, so it cannot move during these two loads.
+ * Other tasks must use published snapshots. Do not call during start/reset.
+ * This observes occupancy; it does not reserve space for a subsequent submit.
+ */
+uint32_t bufferedWriter::queuedBytes() const
+{
+    const uint32_t written = head.load(std::memory_order_acquire);
+    const uint32_t retVal = written - tail.load(std::memory_order_acquire);
+    return retVal;
+}

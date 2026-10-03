@@ -109,6 +109,17 @@ int main()
     deliver(recordingMonitor, recordingPort, "S3,2,300,1,0,0,0,4294967295,0,0,1000,0,0\n");
     assert(!recordingMonitor.sendCommand("start", 1000, true));
     assert(!recordingMonitor.sendCommand("delete", 0));
-    std::cout << "PASS: Feather v2/v3/v4 parser, recording commands, exact totals, invalid frames, reset and disconnect.\n";
+    // V5 adds opening time and estimated/measured/stale quality atomically.
+    const std::string v5 = "S3,5,400,1,0,0,0,4294967295,0,0,1000,0,0,0,0,0,0,0,0,";
+    const std::string baseFields = recordingFields.substr(0, recordingFields.size() - 1);
+    deliver(recordingMonitor, recordingPort, v5 + baseFields + ",567364,2\n");
+    json = recordingMonitor.stateJson();
+    assert(json.find("\"fileOpenUs\":\"567364\"") != std::string::npos);
+    assert(json.find("\"freeSpaceMode\":\"2\"") != std::string::npos);
+    deliver(recordingMonitor, recordingPort, v5 + baseFields + ",10,4\n");
+    assert(std::string(recordingMonitor.stateJson()).find("\"fileOpenUs\":\"567364\"") != std::string::npos);
+    deliver(recordingMonitor, recordingPort, v4 + recordingFields);
+    assert(std::string(recordingMonitor.stateJson()).find("\"freeSpaceMode\":\"0\"") != std::string::npos);
+    std::cout << "PASS: Feather v2/v3/v4/v5 parser, recording commands, exact totals, invalid frames, reset and disconnect.\n";
     return 0;
 }

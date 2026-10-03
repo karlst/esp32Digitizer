@@ -7,6 +7,7 @@
  * worker steps through the friend class nativeChecks instead of its endless loop.
  * These assertions prove state transitions, not electrical timing or lossless sampling.
  */
+#include "chokeEvents.h"
 #include <cassert>
 #include <cstring>
 #include <iostream>
@@ -38,6 +39,7 @@ static volatile uint32_t* edgeDuringRead = nullptr;
 static bool queueFull = false;
 static acquisitionCommand queued;
 static int startCalls = 0;
+static int stopCalls = 0;
 static int32_t rawValue = -123456;
 static int abandonCalls = 0;
 
@@ -52,7 +54,7 @@ bool ads1256::start(uint32_t) { ++startCalls; return startOk; }
 /**
  * @brief Simulate either successful standby or a missing ADC.
  */
-bool ads1256::stop() { return stopOk; }
+bool ads1256::stop() { ++stopCalls; return stopOk; }
 /**
  * @brief Simulate deselection without touching a failed controller.
  */
@@ -314,8 +316,8 @@ void nativeChecks::checkLink()
 #ifdef S3_LEGACY_STATUS
     assert(Serial1.output == "S3,2,1000,0,0,0,0,4294967295,0,0,1000,0,0\n");
 #else
-    std::string expected = "S3,4,1000,0,0,0,0,4294967295,0,0,1000,0,0,0,0,0,0,0,0";
-    for (size_t index = 0; index < 24; ++index) { expected += ",0"; }
+    std::string expected = "S3,5,1000,0,0,0,0,4294967295,0,0,1000,0,0,0,0,0,0,0,0";
+    for (size_t index = 0; index < recordingStatus::fieldCount; ++index) { expected += ",0"; }
     assert(Serial1.output == expected + "\n");
 #endif
     status.sampleCount = UINT64_MAX;
@@ -370,11 +372,16 @@ void nativeChecks::checkLink()
 int main()
 {
     checkProtocol();
+#if S3_CHOKE_TEST
+    nativeChecks::checkChoke();
+    std::cout << "PASS: Choke Start/Stop, recording override, replay, failure/restart, status and zero ADC calls.\n";
+#else
     nativeChecks::checkAcquisition();
     nativeChecks::checkLink();
     nativeChecks::checkFastAcquisition();
     nativeChecks::checkRecording();
     std::cout << "PASS: protocol, framing, signed samples, acquisition state/faults, replay protection, UART and reboot ordering.\n";
+#endif
     return 0;
 }
 
@@ -477,3 +484,104 @@ void nativeChecks::checkRecording()
     assert(!recorder.current.running && recorder.current.ackResult == 2);
     testStorageFinish = true; testClockHook = nullptr;
 }
+
+#if S3_CHOKE_TEST
+/**
+ * @brief Step the real Choke command path while storage opening/closing is faked.
+ * Check the override when the browser's recording checkbox is clear, no ADC
+ * Start/Stop calls, duplicate protection, and automatic failure finalization.
+ */
+void nativeChecks::checkChoke()
+{
+    acquisition recorder;
+    recorder.current.ready = true;
+    testUs = testMs = 0;
+    testStorageOpen = false;
+    recorder.execute({300, acquisitionCommand::Action::start, 30000, false});
+    assert(!recorder.current.running && recorder.current.ackResult == 2);
+    testStorageOpen = true;
+    recorder.execute({301, acquisitionCommand::Action::start, 30000, false});
+    assert(recorder.current.running && recorder.current.recordingRequested && recorder.recordingBuffer);
+    testUs = 1000; testMs = 1;
+    recorder.stepChoke();
+    recorder.publishChoke();
+    assert(recorder.current.sampleCount == 23 && recorder.storage.buffer().snapshot().used == 92);
+    recorder.execute({301, acquisitionCommand::Action::start, 30000, false});
+    assert(recorder.current.sampleCount == 23 && recorder.choke.samples == 23);
+    recorder.execute({302, acquisitionCommand::Action::erase, 0, false});
+    assert(recorder.current.ackResult == 2 && testStorageDeletes == 0);
+    recorder.execute({303, acquisitionCommand::Action::stop, 0, false});
+    assert(!recorder.current.running && testStorageComplete && recorder.current.ackResult == 1);
+    assert(recorder.current.chokeResult == chokeTest::stopped);
+    recorder.execute({301, acquisitionCommand::Action::start, 30000, false});
+    assert(!recorder.current.running); // Replayed old Start must not launch again.
+    recorder.execute({304, acquisitionCommand::Action::start, 1000, true});
+    assert(recorder.choke.samples == 0 && recorder.current.chokeTargetBps == 750000);
+    for (uint32_t tick = 2; recorder.current.running && tick < 1000; ++tick)
+    {
+        testUs = tick * 1000; testMs = tick;
+        recorder.stepChoke(); // No pumping: overflow must cause an automatic stop.
+    }
+    assert(!recorder.current.running && !testStorageComplete && recorder.current.chokeResult == chokeTest::storageLimit);
+    assert(recorder.storage.buffer().snapshot().overflows == 1);
+    const auto previousCount = recorder.current.sampleCount;
+    recorder.execute({305, acquisitionCommand::Action::start, 1000, true});
+    testUs += 1000; ++testMs;
+    recorder.stepChoke();
+    testStorageFinish = false;
+    recorder.execute({306, acquisitionCommand::Action::stop, 0, false});
+    assert(recorder.current.ackResult == 2 && recorder.current.chokeResult == chokeTest::storageLimit);
+    assert(recorder.current.sampleCount == previousCount + 23);
+    testStorageFinish = true;
+    recorder.execute({307, acquisitionCommand::Action::reboot, 0, false});
+    assert(recorder.current.reboot && startCalls == 0 && stopCalls == 0);
+    // The ordinary v4 status contract still accepts the command's dropdown rate.
+    featherLink link(recorder);
+    link.report(recorder.snapshot());
+    assert(Serial1.output.find("S3,5,") != std::string::npos);
+    // Real command path crosses a ten-second boundary while a fast fake sink
+    // drains the real ring. Verify the transition survives until USB is drained.
+    acquisition rampRecorder;
+    const uint32_t began = testUs;
+    rampRecorder.execute({400, acquisitionCommand::Action::start, 1000, true});
+    for (uint32_t tick = 1; tick <= 10001; ++tick)
+    {
+        testUs = began + tick * 1000;
+        testMs = testUs / 1000;
+        rampRecorder.stepChoke();
+        rampRecorder.storage.buffer().pump();
+    }
+    assert(rampRecorder.current.running);
+    rampRecorder.execute({401, acquisitionCommand::Action::stop, 0, false});
+    Serial.output.clear();
+    for (int attempt = 0; attempt < 100; ++attempt)
+    {
+        chokeEvents::drain();
+    }
+    assert(Serial.output.find("rate-change [oldBps,newBps,queuedBytes,lastWriteBps]=750000,1000000,") != std::string::npos);
+    assert(Serial.output.find("t=10000ms rate-change") != std::string::npos);
+    assert(Serial.output.find("final-buffer") != std::string::npos);
+
+    // Congested USB must retain a pending event. Routine details fill only 48
+    // slots; a subsequent rate transition still gets one of the reserved slots.
+    Serial.output.clear();
+    chokeEvents::beginRun();
+    Serial.capacity = 0;
+    chokeEvents::drain();
+    assert(Serial.output.empty());
+    for (int index = 0; index < 60; ++index)
+    {
+        chokeEvents::add("detail", "unused", 0, 0, 0, 0, false);
+    }
+    chokeEvents::add("reserved-rate", "oldBps,newBps", 750000, 1000000);
+    Serial.capacity = 512;
+    for (int attempt = 0; attempt < 100; ++attempt)
+    {
+        chokeEvents::drain();
+    }
+    assert(Serial.output.find("start-request") != std::string::npos);
+    assert(Serial.output.find("reserved-rate") != std::string::npos);
+    assert(Serial.output.find("dropped=12") != std::string::npos);
+
+}
+#endif

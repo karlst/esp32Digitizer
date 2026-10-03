@@ -12,6 +12,7 @@
  * Accepting a command into a queue is not proof that the device performed it.
  */
 #include "featherLink.h"
+#include "chokeEvents.h"
 #include <cstdio>
 
 /**
@@ -47,7 +48,7 @@ void featherLink::begin()
 }
 
 /**
- * @brief Send a version-4 acquisition/recording report, including cumulative diagnostics.
+ * @brief Send a version-5 acquisition/recording report, including cumulative diagnostics.
  *
  * The first thirteen fields retain their previous meanings. Six added fields
  * carry detected misses, rejected reads, driver failures, overlapping reads,
@@ -76,7 +77,7 @@ bool featherLink::report(const acquisitionStatus& status)
         static_cast<unsigned long>(status.ackResult));
 #else
     int length = snprintf(frame, sizeof(frame),
-        "S3,4,%lu,%u,%llu,%lu,%ld,%lu,%lu,%u,%lu,%lu,%lu,%llu,%llu,%llu,%llu,%llu,%lu",
+        "S3,5,%lu,%u,%llu,%lu,%ld,%lu,%lu,%u,%lu,%lu,%lu,%llu,%llu,%llu,%llu,%llu,%lu",
         static_cast<unsigned long>(nowMs), status.ready ? 1 : 0,
         static_cast<unsigned long long>(status.sampleCount),
         static_cast<unsigned long>(status.running ? status.measuredRate : 0),
@@ -184,11 +185,16 @@ void featherLink::update()
     {
         ESP.restart();
     }
+#if S3_CHOKE_TEST
+    // Event timestamps were captured by the working task, not at this delayed print.
+    // Give transitions first chance at USB space before routine status lines.
+    chokeEvents::drain();
+#endif
     // USB diagnostics are once per second, not per conversion. Never mix them
     // into the machine-readable inter-board UART. Skip when USB TX is congested.
     if (nowMs - lastDebugMs >= 1000)
     {
-        char text[200];
+        char text[320];
         int length = snprintf(text, sizeof(text),
             "ADC ready=%u running=%u target=%lu actual=%lu count=%llu raw=%ld error=%lu missedEdges=%llu readFault=%lu\n",
             state.ready ? 1 : 0, state.running ? 1 : 0, static_cast<unsigned long>(state.rate),
@@ -225,13 +231,39 @@ void featherLink::update()
         }
         const auto* recording = state.recording.values;
         const int storageLength = snprintf(text, sizeof(text),
-            "SD card=%llu state=%llu file=%llu/%llu samples=%llu bytes=%llu ring=%llu/%llu peak=%llu maxUs=%llu lost=%llu errors=%llu\n",
+            "SD card=%llu state=%llu file=%llu/%llu samples=%llu bytes=%llu ring=%llu/%llu peak=%llu maxUs=%llu lost=%llu errors=%llu openUs=%llu spaceMode=%llu freeBytes=%llu\n",
             recording[1], recording[0], recording[3], recording[4], recording[7], recording[6],
-            recording[11], recording[10], recording[12], recording[17], recording[21], recording[22]);
+            recording[11], recording[10], recording[12], recording[17], recording[21], recording[22],
+            recording[recordingStatus::fileOpenUs], recording[recordingStatus::freeSpaceMode], recording[recordingStatus::freeBytes]);
         if (storageLength > 0 && storageLength < static_cast<int>(sizeof(text)) && Serial.availableForWrite() >= storageLength)
         {
             Serial.write(reinterpret_cast<const uint8_t*>(text), storageLength);
         }
         lastDebugMs = nowMs;
     }
+#if S3_CHOKE_TEST
+    // Existing P3 reports bytes/s; this extra USB line compares rates in decimal
+    // kilobits/s (1000 bits/s). Retain results after Stop. A storage-limit result
+    // is distinguished further by P3's ring overflow and write-error counters.
+    // Separate retry timing prevents the ordinary diagnostic lines above from
+    // using all UART buffer space and starving this line on every update.
+    if (nowMs - lastChokeDebugMs >= 1000)
+    {
+        static const char* const results[] = {"idle", "running", "stopped", "storage-limit", "producer-behind", "rate-limit"};
+        char text[224];
+        const int length = snprintf(text, sizeof(text),
+            "CHOKE target=%lu kbps generated=%lu kbps write=%llu kbps completed=%lu kbps elapsed=%lums result=%s\n",
+            static_cast<unsigned long>(state.chokeTargetBps / 1000),
+            static_cast<unsigned long>(static_cast<uint64_t>(state.measuredRate) * 32 / 1000),
+            static_cast<unsigned long long>(state.recording.values[recordingStatus::bytesPerSecond] * 8 / 1000),
+            static_cast<unsigned long>(state.chokeCompletedBps / 1000),
+            static_cast<unsigned long>(state.chokeElapsedMs),
+            state.chokeResult <= chokeTest::rateLimit ? results[state.chokeResult] : "unknown");
+        if (length > 0 && length < static_cast<int>(sizeof(text)) && Serial.availableForWrite() >= length)
+        {
+            Serial.write(reinterpret_cast<const uint8_t*>(text), length);
+            lastChokeDebugMs = nowMs;
+        }
+    }
+#endif
 }

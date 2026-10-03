@@ -15,14 +15,19 @@ def inspect(path):
     # the S3. A malformed file raises ValueError rather than returning success.
     with path.open("rb") as source:
         header = source.read(512)
-        if len(header) != 512 or header[:8] != b"S3REC001":
+        if len(header) != 512 or header[:8] not in (b"S3REC001", b"S3CHK001"):
             raise ValueError("missing recording header")
+        # Synthetic throughput files have distinct magic and a variable-rate ramp.
+        # Never present them as measurements from the digitizer.
+        is_choke = header[:8] == b"S3CHK001"
         # struct format < means little endian; I is unsigned 32-bit and Q is
         # unsigned 64-bit. Offsets match shared/recordingFileFormat.md.
         size, version, encoding, rate, width, disposition = struct.unpack_from("<6I", header, 8)
         payload, first_index, session, part = struct.unpack_from("<QQII", header, 32)
         if (size, version, encoding, width) != (512, 1, 1, 4) or disposition not in (0, 1, 2):
             raise ValueError("unsupported header/format")
+        if is_choke and (rate != 0 or struct.unpack_from("<3I", header, 56) != (750000, 250000, 10000)):
+            raise ValueError("unsupported Choke ramp")
         # Trust neither the closing header nor file length alone: a completed
         # file must agree in both places. An interrupted file may retain the
         # original open header, so its payload count can legitimately be stale.
@@ -44,7 +49,8 @@ def inspect(path):
                     first = value
                 last = value
             remaining -= len(block)
-        return dict(session=session, part=part, rate=rate, disposition=disposition,
+        return dict(source="Choke test" if is_choke else "digitizer",
+                    session=session, part=part, rate=rate, disposition=disposition,
                     samples=actual // 4, firstIndex=first_index, first=first, last=last,
                     trailingBytes=actual % 4)
 
