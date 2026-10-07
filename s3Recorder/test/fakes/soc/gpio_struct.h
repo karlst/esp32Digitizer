@@ -4,6 +4,7 @@
  */
 #pragma once
 #include <cstdint>
+
 /** @brief The three GPIO registers required by the interrupt reader. */
 struct fakeGpioRegisters
 {

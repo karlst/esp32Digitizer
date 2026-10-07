@@ -36,10 +36,12 @@ public:
      * @brief Create queue/task only; hardware readiness arrives later in status.
      */
     bool begin();
+
     /**
      * @brief Copy one request to the pending queue; false means not queued.
      */
     bool submit(const acquisitionCommand& command);
+
     /**
      * @brief Copy the last published status under a brief cross-core lock.
      */
@@ -56,6 +58,7 @@ private:
     void publish();
     void fault(uint32_t error);
 #if S3_CHOKE_TEST
+
     // This build replaces ADC work with finite, testable generator steps. The
     // storage service and its consumer thread are exactly the normal ones.
     void runChoke();
@@ -70,6 +73,7 @@ private:
     bufferedWriter* recordingBuffer = nullptr;
     ads1256 adc;
     fastCapture capture;
+
     // Set before attaching ISR; clear only after detaching. At 30k the ISR owns
     // reads, and the task merges cumulative results about once per millisecond.
     bool fastMode = false;
@@ -77,22 +81,28 @@ private:
     TaskHandle_t worker = nullptr;
     QueueHandle_t commands = nullptr;
     portMUX_TYPE snapshotLock = portMUX_INITIALIZER_UNLOCKED;
+
     // current belongs to this task; published is the copy shared with the other
     // core. Protect that copy with snapshotLock, not the entire sampling process.
     acquisitionStatus current;
     acquisitionStatus published;
+
     // One ISR writer and one same-core task reader; aligned 32-bit loads/stores
     // are indivisible on ESP32-S3. Volatile forces re-reading around SPI activity.
     volatile uint32_t readyEdges = 0;
+
     // Interrupt-entry time, not an external measurement of the physical edge.
     // Used only for diagnostics of task wake-up delay; zero before the first event.
     volatile uint32_t readyUs = 0;
+
     // A sample left by calibration predates interrupt attachment. At high rates,
     // wait for the first observed event rather than reading that aging sample.
     bool awaitingFirstEdge = false;
+
     // Previous accepted read's event count; lastReadMs drives the no-data timeout.
     uint32_t previousEdge = 0;
     uint32_t lastReadMs = 0;
+
     // The rate calculation compares successful count/time against these saved
     // values roughly once a second. The cumulative sample count does not reset.
     uint32_t rateWindowMs = 0;

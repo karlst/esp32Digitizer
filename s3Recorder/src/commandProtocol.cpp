@@ -25,6 +25,7 @@ bool commandProtocol::unsignedNumber(const char* text, uint32_t& value)
 {
     bool retVal = *text != '\0';
     uint32_t parsed = 0;
+
     // Check the limit BEFORE multiplying by ten; otherwise overflow could wrap
     // a huge input into an apparently valid small command ID or rate.
     for (size_t index = 0; text[index] && retVal; ++index)
@@ -106,6 +107,7 @@ bool commandProtocol::parse(char* line, acquisitionCommand& command)
             }
         }
     }
+
     // Work on a temporary request so a valid prefix cannot partially update the
     // caller's command when a later field is invalid.
     acquisitionCommand parsed;
@@ -165,12 +167,14 @@ bool commandProtocol::parse(char* line, acquisitionCommand& command)
 bool commandProtocol::feed(char byte, uint32_t nowMs, acquisitionCommand& command)
 {
     bool retVal = false;
+
     // Unsigned subtraction also works when millis() rolls over after about 49 days.
     if ((length || carriageReturn) && nowMs - lastByteMs > 500)
     {
         discard = true;
     }
     lastByteMs = nowMs;
+
     // A newline finishes either the message or the discard period. In both
     // cases reset the parser so the next line starts independently.
     if (byte == '\n')

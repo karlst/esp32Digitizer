@@ -16,8 +16,12 @@
 #include "recordingSpace.h"
 #include <cstring>
 #include <cstdio>
+#if S3_PREALLOCATED_PAYLOAD_BYTES
+#include <esp_timer.h>
+#endif
 #if S3_CHOKE_TEST
 #include "chokeTest.h"
+
 // Different magic prevents synthetic samples being mistaken for measured data.
 static constexpr const char* recordingMagic = "S3CHK001";
 #else
@@ -47,27 +51,32 @@ static void putLittle(uint8_t* destination, uint64_t value, size_t bytes)
  *
  * Called by the storage thread at startup and before opening/deleting files.
  * Mount means recognize the EXISTING filesystem and make its directories usable;
- * it does not format the card. SdFs handles both FAT and exFAT through one API.
- * The bus pin numbers are S3 GPIO numbers: clock 5, card-to-S3 data 6 (DO/MISO),
- * S3-to-card data 7 (DI/MOSI), select 4. SPI sends bits over those wires; it is a
- * separate controller from the digitizer's SPI so slow card work cannot use its bus.
+ * it does not format the card. FsVolume handles FAT and exFAT. The native
+ * SD controller moves four data bits per clock, independently of the ADC SPI
+ * controller. See sdmmcBlockDevice::begin() for the six signal assignments.
  * @return True means this object has mounted successfully. It is not a fresh card
  * presence test on every call; removing an already-mounted card causes later I/O
  * failures. Recovery from removal is not implemented as automatic hot swapping.
  */
 bool sdRecordingSink::mount()
 {
-    if (!busStarted)
-    {
-        bus.begin(5, 6, 7, 4); // SCLK, MISO (DO), MOSI (DI), chip select.
-        busStarted = true;
-    }
     if (!mounted)
     {
-        // This controller belongs solely to the card. USER_SPI_BEGIN keeps our
-        // explicit pin assignments rather than letting the library select defaults.
-        // begin() detects FAT/exFAT; no format function is ever called.
-        mounted = filesystem.begin(SdSpiConfig(4, DEDICATED_SPI | USER_SPI_BEGIN, SD_SCK_MHZ(10), &bus));
+        // Initialize the physical link, then interpret partition 1. Some cards
+        // store a filesystem directly at sector zero instead of in a partition;
+        // try that existing layout too. Neither attempt formats or erases data.
+        if (device.begin())
+        {
+            mounted = filesystem.begin(&device);
+            if (!mounted)
+            {
+                mounted = filesystem.begin(&device, true, 0);
+            }
+            if (!mounted)
+            {
+                device.end();
+            }
+        }
         if (mounted)
         {
             Serial.printf("SD mounted: filesystem=%s capacity=%llu bytes\n",
@@ -135,6 +144,7 @@ bool sdRecordingSink::open(uint32_t sampleRate)
     {
         retVal = filesystem.mkdir("/recordings");
     }
+
     // Inspect filenames only; do not read or alter old sample data. An existing
     // directory with a recorder-shaped name also reserves that number safely.
     uint32_t highest = 0;
@@ -153,6 +163,7 @@ bool sdRecordingSink::open(uint32_t sampleRate)
             }
             retVal = entry.close() && retVal;
         }
+
         // End-of-directory is normal; a read error must not masquerade as an
         // empty directory. O_EXCL below additionally protects existing names.
         retVal = directory.getError() == 0 && retVal;
@@ -161,6 +172,7 @@ bool sdRecordingSink::open(uint32_t sampleRate)
     {
         retVal = directory.close() && retVal;
     }
+
     // Avoid wrapping the last possible 32-bit session number back to zero.
     // Reset byte accounting only when beginning a new session, not on part rollover.
     if (retVal && highest != UINT32_MAX)
@@ -208,12 +220,14 @@ bool sdRecordingSink::header(uint32_t disposition)
     putLittle(bytes + 32, partBytes, 8); putLittle(bytes + 40, partStart / 4, 8);
     putLittle(bytes + 48, session, 4); putLittle(bytes + 52, part, 4);
 #if S3_CHOKE_TEST
+
     // These are requested stored-bit rates, not an assertion of achieved timing.
     // The synthetic counter payload remains the ordinary four-byte signed format.
     putLittle(bytes + 56, chokeTest::initialBps, 4);
-    putLittle(bytes + 60, chokeTest::incrementBps, 4);
+    putLittle(bytes + 60, chokeTest::fixedRate ? 0 : chokeTest::incrementBps, 4);
     putLittle(bytes + 64, chokeTest::stageUs / 1000, 4);
 #endif
+
     // Move to the first byte so finalization updates the header instead of
     // appending a second header among the samples.
     bool retVal = file.seekSet(0);
@@ -244,6 +258,10 @@ bool sdRecordingSink::header(uint32_t disposition)
  * The 512-byte initial header is synchronized before returning success. If that
  * fails, close any opened handle; a partial file may remain for later inspection.
  * No caller may submit new recording data until the initial open has succeeded.
+ * The preallocated diagnostic reserves one contiguous exFAT file BEFORE writing
+ * its header (SdFat requires an empty file). Reservation changes allocation
+ * metadata; it does not fill gigabytes with junk. Failure rejects Start rather
+ * than falling back to allocation during capture. Its time belongs to openUs.
  */
 bool sdRecordingSink::openPart()
 {
@@ -253,9 +271,25 @@ bool sdRecordingSink::openPart()
     const bool opened = file.open(&filesystem, path, O_CREAT | O_EXCL | O_RDWR);
     partBytes = 0;
     partAllocated = 0;
-    bool retVal = opened && header(0) && file.sync();
+    bool retVal = opened;
+#if S3_PREALLOCATED_PAYLOAD_BYTES
+    const uint64_t reserveBytes = recordingConfig::reservePayloadBytes + 512ULL;
+    const int64_t began = esp_timer_get_time();
+    Serial.printf("SD reserve-start: bytes=%llu\n", static_cast<unsigned long long>(reserveBytes));
+    retVal = retVal && filesystem.fatType() == 64 && file.preAllocate(reserveBytes) &&
+        file.isContiguous() && file.fileSize() == reserveBytes;
+    Serial.printf("SD reserve-end: success=%u bytes=%llu durationUs=%llu\n", retVal,
+        static_cast<unsigned long long>(reserveBytes),
+        static_cast<unsigned long long>(esp_timer_get_time() - began));
+#endif
+    retVal = retVal && header(0) && file.sync();
     if (!retVal && file.isOpen())
     {
+        // This handle belongs only to the new, exclusively created file. Release
+        // any reservation after failed startup; never truncate an older recording.
+#if S3_PREALLOCATED_PAYLOAD_BYTES
+        file.truncate(0);
+#endif
         file.close();
     }
     return retVal;
@@ -279,14 +313,21 @@ size_t sdRecordingSink::write(const uint8_t* data, size_t length)
 {
     size_t retVal = 0;
     bool writable = file.isOpen();
+#if S3_PREALLOCATED_PAYLOAD_BYTES
+
+    // A single preallocated exFAT file covers the complete timed test. Refuse a
+    // write beyond its reservation instead of silently allocating more clusters.
+    // Ordinary builds below retain their existing approximately 1-GiB parts.
+    writable = writable && partBytes <= recordingConfig::reservePayloadBytes &&
+        length <= recordingConfig::reservePayloadBytes - partBytes;
+#else
+
     // Check the NEXT write before crossing the size limit, including the header.
     // A split must occur between complete submissions, never in the middle of one.
     if (writable && 512 + partBytes + length >= partLimit)
     {
         writable = closePart(true) && part != UINT32_MAX;
-        // Write exactly the span pump lent us. SdFat handles card commands and
-    // filesystem allocation; this adapter keeps project-level file accounting.
-    if (writable)
+        if (writable)
         {
             // Keep the same session, increment the part, and remember how much payload
             // preceded it. Its header first-sample index is partStart / four bytes.
@@ -294,6 +335,7 @@ size_t sdRecordingSink::write(const uint8_t* data, size_t length)
             writable = openPart();
         }
     }
+#endif
     if (writable)
     {
         const size_t written = file.write(data, length);
@@ -302,6 +344,7 @@ size_t sdRecordingSink::write(const uint8_t* data, size_t length)
             retVal = static_cast<size_t>(written);
             partBytes += retVal; payloadBytes += retVal;
             accountGrowth();
+
             // Remember the last four accepted bytes for the close-time readback.
             // Only normally completed parts use this as a complete-sample comparison.
             if (written >= sizeof(lastWord))
@@ -348,8 +391,17 @@ bool sdRecordingSink::closePart(bool complete)
     {
         // Synchronize earlier samples before claiming normal completion. A failed
         // sync forces an incomplete marker even if the caller requested complete=true.
-        const bool dataSaved = flush();
+        bool dataSaved = flush();
+#if S3_PREALLOCATED_PAYLOAD_BYTES
+
+        // Producer has stopped and queued data has drained. Drop only the unused
+        // reserved tail, so readers see header plus actual samples after an early
+        // Stop/failure. Failure here prevents claiming normal completion.
+        const bool trimmed = file.truncate(512 + partBytes);
+        dataSaved = trimmed && dataSaved;
+#endif
         retVal = header(complete && dataSaved ? 1 : 2) && dataSaved;
+
         // Attempt both sync and close regardless of the earlier result; only report
         // success if every required stage succeeded.
         const bool headerSaved = flush();
@@ -447,6 +499,7 @@ bool sdRecordingSink::verifyPart(uint32_t disposition)
     std::snprintf(path, sizeof(path), "/recordings/recording_%06lu_%03lu.bin",
         static_cast<unsigned long>(session), static_cast<unsigned long>(part));
     FsFile check;
+
     // Only the first 56 header bytes currently contain defined fields. Reserved
     // bytes are not compared here, nor is the entire payload reread.
     uint8_t actual[56] = {}, expected[56] = {};
@@ -456,6 +509,7 @@ bool sdRecordingSink::verifyPart(uint32_t disposition)
     putLittle(expected + 24, 4, 4); putLittle(expected + 28, disposition, 4);
     putLittle(expected + 32, partBytes, 8); putLittle(expected + 40, partStart / 4, 8);
     putLittle(expected + 48, session, 4); putLittle(expected + 52, part, 4);
+
     // Opening read-only cannot modify the saved samples. Short reads, unexpected
     // file length, or mismatched header bytes all make verification fail.
     bool retVal = check.open(&filesystem, path, O_RDONLY) && check.fileSize() == 512 + partBytes &&
@@ -492,6 +546,7 @@ bool sdRecordingSink::verifyPart(uint32_t disposition)
 bool sdRecordingSink::space(uint64_t& total, uint64_t& free)
 {
     bool retVal = false;
+
     // Promote BEFORE multiplication: a 64-GB card cannot fit in a 32-bit byte
     // count. Negative freeClusterCount means a read error; preserve prior values.
     if (mounted)
@@ -521,6 +576,9 @@ bool sdRecordingSink::space(uint64_t& total, uint64_t& free)
  * reads the library's in-memory size; it does not scan the allocation bitmap.
  * A header rewrite leaves length unchanged. On rollover, partAllocated resets
  * while allocatedBytes retains the old parts, so cluster rounding stays per-file.
+ * Preallocation sets the full reserved file length before the first header write,
+ * so this accounts for that reservation once. Final free-space scanning after
+ * close accounts for an unused tail released by truncation.
  */
 void sdRecordingSink::accountGrowth()
 {
@@ -530,4 +588,61 @@ void sdRecordingSink::accountGrowth()
         allocatedBytes += occupied - partAllocated;
         partAllocated = occupied;
     }
+}
+
+/**
+ * @brief Write, close, reopen and check every byte of a separate 64-KiB test file.
+ * Only the optional storage-check build calls this, on the disk task at startup.
+ * A new filename is reserved exclusively; existing files are never overwritten.
+ * The file remains on the card for inspection. Success verifies this one transfer,
+ * not sustained speed or immunity to future power loss. No acquisition is running.
+ */
+bool sdRecordingSink::verifyStorage()
+{
+    bool retVal = mount();
+    FsFile testFile;
+    char path[40] = {};
+    uint32_t id = 1;
+
+    // Choose an unused name without assuming an empty card or deleting old tests.
+    do
+    {
+        snprintf(path, sizeof(path), "/sdio_check_%06lu.bin", static_cast<unsigned long>(id++));
+    } while (retVal && filesystem.exists(path) && id < 1000000);
+    retVal = retVal && testFile.open(&filesystem, path, O_CREAT | O_EXCL | O_RDWR);
+    uint8_t block[512];
+
+    // Each byte depends on its absolute position, so misplaced sectors and bytes
+    // are detected. write() is the actual file transfer; sync() commits caches.
+    for (uint32_t offset = 0; retVal && offset < 65536; offset += sizeof(block))
+    {
+        for (size_t index = 0; index < sizeof(block); ++index)
+        {
+            const uint32_t position = offset + index;
+            block[index] = static_cast<uint8_t>(position * 37 + (position >> 8) * 11);
+        }
+        retVal = testFile.write(block, sizeof(block)) == sizeof(block);
+    }
+    if (retVal)
+    {
+        retVal = testFile.sync();
+    }
+    testFile.close();
+
+    // Reopen through the filesystem and check size and all payload bytes, rather
+    // than relying only on the recording header/tail check used for large files.
+    retVal = retVal && testFile.open(&filesystem, path, O_RDONLY);
+    retVal = retVal && testFile.fileSize() == 65536;
+    for (uint32_t offset = 0; retVal && offset < 65536; offset += sizeof(block))
+    {
+        retVal = testFile.read(block, sizeof(block)) == sizeof(block);
+        for (size_t index = 0; retVal && index < sizeof(block); ++index)
+        {
+            const uint32_t position = offset + index;
+            retVal = block[index] == static_cast<uint8_t>(position * 37 + (position >> 8) * 11);
+        }
+    }
+    testFile.close();
+    Serial.printf("SD full readback: %s bytes=65536 result=%s\n", path, retVal ? "PASS" : "FAIL");
+    return retVal;
 }

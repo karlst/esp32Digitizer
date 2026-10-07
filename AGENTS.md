@@ -5,6 +5,7 @@ These conventions apply throughout this project and may be updated as developmen
 - Document all C++ classes and entry points with Doxygen-style comments, beginning with `/**` and using `*` at the start of subsequent lines.
 - Place a useful descriptive comment immediately before every function or method definition, including constructors. Header declarations and comments inside the body do not replace this requirement. Use Doxygen-style comments for C++ definitions.
 - Document logical paragraphs or blocks of code with `//` comments from the start. Explain their purpose and non-obvious decisions rather than simply repeating the code.
+- Separate logical paragraphs with a blank line before standalone comment blocks.
 - Update comments whenever the corresponding code changes so they remain accurate.
 - Use camelCase for C++ and JavaScript identifiers.
 - Prefer a single return point in each function. For functions that return a value, assign the result to `retVal` and return it at the end. Multiple return points are allowed when a single return point would make the code awkward.
@@ -62,3 +63,7 @@ These conventions apply throughout this project and may be updated as developmen
   inside the component; translate them to the Feather protocol outside it.
 - Test buffering and write failures independently of physical hardware. Preserve
   existing card formatting and unrelated files; deletion is an explicit action.
+
+## Hardware verification preference (Karl, 2026-10-06)
+
+- Karl does not have and will not have an oscilloscope. Never ask him to obtain, use, or provide one. Plan verification using documentation, component markings, and software/hardware counters available on the project boards. Explain measurement limitations plainly.

@@ -31,6 +31,7 @@ void acquisition::publishChoke()
     current.chokeCompletedBps = choke.completedBps;
     current.chokeElapsedMs = choke.elapsedMs;
     current.chokeResult = choke.result;
+
     // Update actual generation rate at half-second intervals. Stop preserves this
     // last measurement for USB results; Feather already shows zero when stopped.
     const uint32_t now = millis();
@@ -46,7 +47,7 @@ void acquisition::publishChoke()
 /**
  * @brief Stop producing first, then ask the disk task to save queued data and close.
  * reason distinguishes the user's Stop from ring/disk failure or generator lag.
- * Only a user-requested normal Stop marks the file complete. Failed tests retain
+ * A user Stop or successful timed completion marks the file complete. Failed tests retain
  * their accepted samples but mark the final file incomplete. A returned false
  * means draining/finalization reported failure; the generator stays stopped.
  */
@@ -65,6 +66,7 @@ bool acquisition::stopChoke(chokeTest::resultCode reason)
         choke.stop(chokeTest::storageLimit);
     }
     publishChoke();
+
     // finish() has answered, so these published totals include final draining.
     const auto saved = storage.snapshot();
     chokeEvents::add("final", "reason,savedSamples,lostSamples,bytesWritten",
@@ -78,7 +80,7 @@ bool acquisition::stopChoke(chokeTest::resultCode reason)
 
 /**
  * @brief Handle existing Feather/USB commands without inventing a second protocol.
- * Start always records and resets the ramp to 750 kbps. The dropdown rate is
+ * Start always records and resets the selected ramp or fixed-rate diagnostic. The dropdown rate is
  * echoed ONLY to satisfy the existing command-confirmation contract; it does not
  * control generation, and the test file's rate is zero (variable). Original
  * commands remain unchanged in history, so retries cannot restart a stopped test.
@@ -107,6 +109,7 @@ void acquisition::executeChoke(const acquisitionCommand& command)
             {
                 current.recordingRequested = true;
                 publish();
+
                 // Open first; failed preparation must never generate unrecorded data.
                 // Zero rate plus the CHOKE header identifies a variable-rate test file.
                 chokeEvents::beginRun();
@@ -115,7 +118,7 @@ void acquisition::executeChoke(const acquisitionCommand& command)
                 {
                     choke.start(static_cast<uint64_t>(esp_timer_get_time()));
                     chokeEvents::add("generator-start", "targetBps,stepBps,holdMs,wordBits",
-                        choke.targetBps, 250000, 10000, 32);
+                        choke.targetBps, chokeTest::fixedRate ? 0 : 250000, 10000, 32);
                     chokeReportedSamples = 0;
                     current.rate = command.rate;
                     current.running = true;

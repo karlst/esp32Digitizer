@@ -4,6 +4,7 @@
  */
 #pragma once
 #include "Arduino.h"
+
 /**
  * @brief Allow register tests to advance time during the real reader's waits.
  */

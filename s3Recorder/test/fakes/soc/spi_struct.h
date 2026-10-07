@@ -4,6 +4,7 @@
  */
 #pragma once
 #include <cstdint>
+
 /** @brief Register storage advanced by a test clock hook, not physical hardware. */
 struct fakeSpiRegisters
 {

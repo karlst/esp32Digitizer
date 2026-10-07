@@ -46,6 +46,7 @@ bool acquisition::begin()
     // A null handle means allocation failed.
     storage.begin(); // Card failure must not prevent acquisition-only operation.
     commands = xQueueCreate(1, sizeof(acquisitionCommand));
+
     // Only try to create the task if the queue exists (the && enforces this).
     // Arguments: entry function; debugging name; 4096-byte stack for calls and
     // local variables; this object as the entry argument; scheduling priority 3;
@@ -53,6 +54,7 @@ bool acquisition::begin()
     // The new task can start executing before begin() returns.
     const bool retVal = commands && xTaskCreatePinnedToCore(taskEntry, "adcReader", 4096,
         this, 3, &worker, 0) == pdPASS;
+
     // If startup failed, release any queue we created and expose an initialization
     // error (code 1). publish() updates shared status; it sends no serial message.
     if (!retVal)
@@ -154,11 +156,13 @@ void IRAM_ATTR acquisition::readyInterrupt(void* argument)
     }
     self->readyUs = micros();
     ++self->readyEdges;
+
     // A task notification is a wake-up signal, not the sample itself. Use the
     // FromISR version because we are inside an interrupt service routine (ISR).
     // FreeRTOS sets wake if a higher-priority task should run immediately.
     BaseType_t wake = pdFALSE;
     vTaskNotifyGiveFromISR(self->worker, &wake);
+
     // Ask the scheduler to run that task as we leave the interrupt.
     if (wake == pdTRUE)
     {
@@ -188,12 +192,14 @@ void acquisition::fault(uint32_t error)
     {
         adc.stop();
     }
+
     // Report that software collection has stopped; this does not guarantee
     // an unresponsive digitizer actually entered standby.
     current.running = false;
     current.ready = false;
     current.measuredRate = 0;
     current.error = error;
+
     // Stop the producer before draining. Preserve good queued samples, but mark
     // the file incomplete because acquisition ended with a hardware error.
     capture.setWriter(nullptr);
@@ -220,9 +226,11 @@ void acquisition::fault(uint32_t error)
 void acquisition::execute(const acquisitionCommand& command)
 {
 #if S3_CHOKE_TEST
+
     // The temporary throughput build never initializes, reads or stops the ADC.
     executeChoke(command);
 #else
+
     // Check the bounded history of recent requests before touching hardware.
     // A duplicate should get its recorded answer, not execute twice. In
     // particular, a repeated old Start must not undo a subsequent Stop while
@@ -236,6 +244,7 @@ void acquisition::execute(const acquisitionCommand& command)
     else
     {
         bool accepted = false;
+
         // Publish a pending acknowledgement before potentially slow file work.
         // Communications remains alive while this task waits for storage.
         current.ackId = command.id;
@@ -249,6 +258,7 @@ void acquisition::execute(const acquisitionCommand& command)
             {
                 accepted = current.rate == command.rate && command.record == (recordingBuffer != nullptr);
             }
+
             // A stopped digitizer must have initialized successfully and have
             // no outstanding fault. Otherwise leave this request rejected.
             else if (current.ready)
@@ -275,6 +285,7 @@ void acquisition::execute(const acquisitionCommand& command)
                     current.observedEdges = 0;
                     current.maxGapUs = 0;
                     current.measuredRate = 0;
+
                     // Remove wake-up signals left from the previous run (true
                     // clears the notification count; zero means do not wait).
                     // Reset edge tracking, then enable the high-to-low DRDY
@@ -290,6 +301,7 @@ void acquisition::execute(const acquisitionCommand& command)
                     lastFastCount = 0;
                     previousEdge = 0;
                     attachInterruptArg(ads1256::readyPin, readyInterrupt, this, FALLING);
+
                     // Start the no-sample timeout and measured-rate window now.
                     // At high rates, ignore a sample that predates interrupt
                     // attachment: its remaining read window is unknown. The
@@ -333,12 +345,14 @@ void acquisition::execute(const acquisitionCommand& command)
             const bool stopped = adc.stop();
             current.running = false;
             current.measuredRate = 0;
+
             // Keep a hardware timeout visible even though software has stopped.
             if (!stopped)
             {
                 current.ready = false;
                 current.error = 2;
             }
+
             // Accept the software Stop even if the chip did not answer. For
             // Reboot, set a flag: communications sends the reply before actually
             // restarting the S3. Do not reboot here and lose that confirmation.
@@ -352,6 +366,7 @@ void acquisition::execute(const acquisitionCommand& command)
             }
             current.reboot = accepted && command.action == acquisitionCommand::Action::reboot;
         }
+
         // Save this request's result for status reporting and duplicate detection.
         current.ackId = command.id;
         current.ackResult = accepted ? 1 : 2;
@@ -374,6 +389,7 @@ void acquisition::run()
 #if S3_CHOKE_TEST
     runChoke();
 #else
+
     // Hardware setup happens here, after acquisition::begin() creates the task.
     // Report its result separately from whether task creation itself succeeded.
     current.ready = adc.begin();
@@ -389,6 +405,7 @@ void acquisition::run()
         {
             execute(command);
         }
+
         // collect() handles at most one sample per call and bounds its wait.
         // Returning here allows another command check between read attempts.
         if (current.running && recordingBuffer && storage.failed())
@@ -419,6 +436,7 @@ void acquisition::run()
             if (fastMode)
             {
                 collectFast();
+
                 // ISR capture continues during sleep. This gives idle/system tasks
                 // CPU time instead of a busy task starving the core at 30k.
                 vTaskDelay(pdMS_TO_TICKS(1));
@@ -467,11 +485,13 @@ void acquisition::collect()
         if (digitalRead(ads1256::readyPin) == LOW && (!awaitingFirstEdge || readyEdges != 0))
         {
             awaitingFirstEdge = false;
+
             // Save how many ready interrupts have occurred. The difference from
             // the last accepted read reveals observed events we did not service.
             // unsigned subtraction also handles the 32-bit counter wrapping.
             const uint32_t edgeBefore = readyEdges;
             const uint32_t elapsedEdges = edgeBefore - previousEdge;
+
             // Count ready events already missed BEFORE this read, even if this
             // read subsequently fails. Do not mix them with rejected read attempts.
             if (elapsedEdges > 1)
@@ -479,11 +499,13 @@ void acquisition::collect()
                 current.missedEdges += elapsedEdges - 1;
             }
             int32_t sample = 0;
+
             // Split the observed latency into task wake delay and driver read time.
             // No observed edge means startup already found the pin low; UINT32_MAX
             // marks an unknown delay rather than pretending it was immediate.
             current.wakeUs = edgeBefore ? micros() - readyUs : UINT32_MAX;
             const bool complete = adc.read(sample);
+
             // Save this observation once so the decision and reason counters agree.
             const bool overlapped = readyEdges != edgeBefore;
             current.observedEdges = readyEdges;
@@ -497,6 +519,7 @@ void acquisition::collect()
             {
                 current.maxReadUs = current.readDetail >> 8;
             }
+
             // Accept only if the driver succeeded AND no new ready interrupt
             // occurred during the read. Otherwise the three received bytes might
             // not belong to one sample, so stop rather than record suspect data.
@@ -546,6 +569,7 @@ void acquisition::collect()
             ++current.readyTimeouts;
             fault(2);
         }
+
         // About once a second, calculate actual successful reads per second:
         // samples added since the last measurement * 1000 / elapsed milliseconds.
         // This reports what we received, not merely the rate we asked the chip for.
@@ -557,6 +581,7 @@ void acquisition::collect()
             rateWindowCount = current.sampleCount;
             rateWindowMs += elapsedMs;
         }
+
         // Refresh shared status about every 10 milliseconds, avoiding a cross-core
         // copy for every sample. Actual transmission is handled elsewhere.
         if (millis() - lastPublishMs >= 10)
@@ -590,6 +615,7 @@ void acquisition::collectFast()
         current.lastSampleMs = millis() - (micros() - result.sampleUs) / 1000;
         lastReadMs = current.lastSampleMs;
     }
+
     // These timings describe ISR work, not a task wake or library transfer.
     // Zero wake/spi values at 30k mean those stages are absent, not free SPI.
     current.observedEdges = result.events;
@@ -615,6 +641,7 @@ void acquisition::collectFast()
         fault(2);
     }
     const uint32_t elapsedMs = millis() - rateWindowMs;
+
     // Report accepted reads per elapsed second, and publish status about every
     // 10 ms. The communications task independently controls UART transmission.
     if (current.running && elapsedMs >= 1000)

@@ -19,6 +19,48 @@
  */
 #include "bufferedWriter.h"
 #include <algorithm>
+#include <cstring>
+
+// C++11 needs storage definitions when std::min binds these constants by reference.
+constexpr uint32_t bufferedWriter::capacity;
+constexpr uint32_t bufferedWriter::blockBytes;
+
+#if BUFFERED_WRITER_EXTERNAL
+
+/**
+ * @brief Allocate owned ring memory before any producer or consumer starts.
+ * The platform adapter supplies allocate(bytes) and release(pointer). Failure
+ * leaves the writer unusable; callers must not start recording. Repeated setup
+ * reuses the successful allocation, so each Start does not allocate another ring.
+ * No ring address is exposed to callers. Desktop tests supply ordinary RAM.
+ */
+bool bufferedWriter::initializeMemory(uint8_t* (*allocate)(uint32_t), void (*release)(uint8_t*))
+{
+    bool retVal = buffer != nullptr;
+    if (!active && !buffer && allocate && release)
+    {
+        buffer = allocate(capacity);
+        if (buffer)
+        {
+            releaseMemory = release;
+            retVal = true;
+        }
+    }
+    return retVal;
+}
+
+/**
+ * @brief Release the owned allocation after all users have stopped.
+ * Destruction does not flush a file; the owner must finish recording first.
+ */
+bufferedWriter::~bufferedWriter()
+{
+    if (buffer && releaseMemory)
+    {
+        releaseMemory(buffer);
+    }
+}
+#endif
 
 /**
  * @brief Reset one recording while no producer is running.
@@ -38,10 +80,15 @@ void bufferedWriter::start(byteSink& destination, uint64_t (*clock)())
     // Keep the storage adapter and clock for later calls; allocate no per-sample memory.
     sink = &destination;
     clockUs = clock;
+
     // Both counters restart together. Neither producer nor consumer may be using
     // the previous recording when this reset happens.
     head.store(0); tail.store(0); peak.store(0); rejected.store(0);
+#if BUFFERED_WRITER_EXTERNAL
+    broken.store(buffer == nullptr);
+#else
     broken.store(false);
+#endif
     overflowed.store(false);
     partialBytes = 0;
     totals = {};
@@ -73,23 +120,37 @@ bool BUFFERED_IRAM bufferedWriter::submit(const uint8_t* data, uint32_t length)
     // has finished using it. These are atomic memory operations, not mutex locks.
     const uint32_t writeAt = head.load(std::memory_order_relaxed);
     const uint32_t occupied = writeAt - tail.load(std::memory_order_acquire);
+
     // head - tail is bytes occupied; capacity - occupied is bytes still free.
     // Seeing an older tail can make us conservative about free space, never unsafe.
     const bool retVal = !broken.load(std::memory_order_relaxed) && length <= capacity - occupied;
     if (retVal)
     {
-        // A byte loop also supports future packed formats and avoids a flash-
-        // resident memcpy call from an interrupt. Publish only after the copy.
+#if BUFFERED_WRITER_EXTERNAL
+
+        // Task-only PSRAM path: copy the span up to the array end, then any
+        // wrapped remainder at zero. For example, 12 bytes starting 4 bytes
+        // before the end become memcpy lengths 4 and 8. Publish only after both.
+        const uint32_t offset = writeAt & (capacity - 1);
+        const uint32_t first = std::min(length, capacity - offset);
+        std::memcpy(buffer + offset, data, first);
+        if (length > first)
+        {
+            std::memcpy(buffer, data + first, length - first);
+        }
+#else
+
+        // Internal-RAM ISR path avoids calling a flash-resident memcpy.
         for (uint32_t index = 0; index < length; ++index)
         {
-            // The array is circular: after byte 65535, use byte 0 again. For a
-            // power-of-two capacity, AND with 65535 is the same as modulo 65536.
             buffer[(writeAt + index) & (capacity - 1)] = data[index];
         }
+#endif
         if (occupied + length > peak.load(std::memory_order_relaxed))
         {
             peak.store(occupied + length, std::memory_order_relaxed);
         }
+
         // Only now advertise the new bytes. release ensures their contents become
         // visible to the consumer BEFORE it sees the advanced head position.
         head.store(writeAt + length, std::memory_order_release);
@@ -100,6 +161,7 @@ bool BUFFERED_IRAM bufferedWriter::submit(const uint8_t* data, uint32_t length)
         {
             overflowed.store(true, std::memory_order_relaxed);
         }
+
         // Only this producer changes rejected, so no atomic read/modify/write
         // instruction or interrupt-unsafe library helper is needed.
         rejected.store(rejected.load(std::memory_order_relaxed) + length, std::memory_order_relaxed);
@@ -124,6 +186,7 @@ bool BUFFERED_IRAM bufferedWriter::submit(const uint8_t* data, uint32_t length)
 void bufferedWriter::measure(uint64_t beganUs, uint32_t kind, bool success)
 {
     const uint64_t now = clockUs();
+
     // This is wall-clock duration, including time waiting for the card. Clamp
     // the 32-bit display value rather than letting a very long delay wrap to zero.
     const uint64_t duration = now - beganUs;
@@ -143,7 +206,7 @@ void bufferedWriter::measure(uint64_t beganUs, uint32_t kind, bool success)
 }
 
 /**
- * @brief Write up to 4096 contiguous bytes; drain also permits a short final block.
+ * @brief Write up to blockBytes contiguous bytes; drain also permits a short final block.
  * Only the storage task calls this. Short writes are counted honestly, latch an
  * error, and leave the queued block unreleased; retrying could duplicate its prefix.
  * An overflow still allows earlier queued good bytes to be drained.
@@ -158,7 +221,7 @@ void bufferedWriter::measure(uint64_t beganUs, uint32_t kind, bool success)
  * It must finish using that memory before returning. While it waits for the card,
  * submit() may add samples elsewhere in the ring, but cannot reuse this block.
  *
- * @param drain False during recording: normally wait for a 4096-byte batch to
+ * @param drain False during recording: normally wait for a blockBytes-sized batch to
  * avoid a separate filesystem call for every four-byte sample. True after Stop:
  * allow the final short batch, even if it contains only one sample.
  * @return False if a disk write failed (now or previously). True can also mean
@@ -169,25 +232,30 @@ void bufferedWriter::measure(uint64_t beganUs, uint32_t kind, bool success)
 bool bufferedWriter::pump(bool drain)
 {
     bool retVal = totals.errors == 0;
+
     // tail identifies the oldest queued byte. We own tail; head is updated by
     // the producer. acquire ensures we see the copied data behind its new head.
     const uint32_t readAt = tail.load(std::memory_order_relaxed);
     const uint32_t occupied = head.load(std::memory_order_acquire) - readAt;
-    if (active && retVal && occupied && (drain || occupied >= 4096))
+    if (active && retVal && occupied && (drain || occupied >= blockBytes))
     {
-        // Convert the running byte count to an array index. Example: tail=65532,
-        // head=65544 means 12 queued bytes: four at the end, then eight at the start.
+        // Convert the running byte count to an array index. For example, twelve
+        // bytes starting four bytes before capacity wrap eight bytes to zero.
         const uint32_t offset = readAt & (capacity - 1);
-        // Take the smallest of queued bytes, our 4096-byte batch limit, and bytes
+
+        // Take the smallest of queued bytes, our configured batch limit, and bytes
         // remaining before the array ends. A write cannot read across the array end;
         // the next pump call handles the wrapped portion at index zero.
-        const uint32_t length = std::min<uint32_t>(std::min<uint32_t>(occupied, 4096), capacity - offset);
+        const uint32_t length = std::min<uint32_t>(std::min<uint32_t>(occupied, blockBytes), capacity - offset);
+
         // Start timing immediately before the storage call, including its wait.
         const uint64_t began = clockUs();
+
         // This call reads the ring memory and writes the file. sink is a byteSink
         // interface; in this project the actual function is sdRecordingSink::write().
         // It can block on storage. Crucially, tail has NOT moved yet.
         const size_t written = sink->write(buffer + offset, length);
+
         // Count only the byte count the destination reported accepting. A short
         // write can leave part of a sample on disk; never call that a complete block.
         totals.bytes += std::min<size_t>(written, length);
@@ -229,6 +297,7 @@ bool bufferedWriter::finish()
     {
         pump(true);
     }
+
     // After draining (or a failed write), try to synchronize what did reach the
     // destination. A flush cannot recover bytes rejected by a full ring.
     const uint64_t began = clockUs();
@@ -290,9 +359,11 @@ bufferedWriter::statistics bufferedWriter::snapshot()
     retVal.writePosition = writeAt & (capacity - 1);
     retVal.rejectedBytes = rejected.load(std::memory_order_relaxed);
     retVal.overflows = overflowed.load(std::memory_order_relaxed) ? 1 : 0;
+
     // A partial-write prefix is still in occupied memory but was already counted
     // as accepted by the file. Subtract it when reporting unsaved queued bytes.
     retVal.unsavedBytes = retVal.used - partialBytes;
+
     // After finish/cancel, use the frozen elapsed time. Leaving the page open
     // after Stop must not make the completed recording appear to grow longer.
     if (active)

@@ -22,9 +22,11 @@ private:
     friend class nativeChecks;
     bool report(const acquisitionStatus& status);
     acquisition& recorder;
+
     // Independent buffers: partial text from one port cannot join the other port.
     commandProtocol parser;
     commandProtocol usbParser;
+
     // Timing and acknowledgement tracking determine whether to report now or wait.
     // sentAck fields change only after a complete report is accepted by the UART.
     uint32_t lastReportMs = 0;
@@ -35,8 +37,10 @@ private:
 #if S3_CHOKE_TEST
     uint32_t lastChokeDebugMs = 0; // Retry after TX congestion instead of losing every test line.
 #endif
+
     // Once the reboot reply has been flushed, stop accepting further commands.
     bool rebootSent = false;
+
     // USB troubleshooting counters for the Feather input path only: physical
     // bytes seen, complete valid commands, and commands accepted into the queue.
     uint32_t receivedBytes = 0;

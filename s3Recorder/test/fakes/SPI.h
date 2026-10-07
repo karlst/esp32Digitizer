@@ -12,6 +12,7 @@
 #define HSPI 1
 #define MSBFIRST 1
 #define SPI_MODE1 1
+
 /**
  * @brief Retain the driver's chosen clock and mode for assertions.
  */
@@ -20,11 +21,13 @@ struct SPISettings
     uint32_t frequency;
     int order;
     int mode;
+
     /**
      * @brief Store requested bus settings.
      */
     SPISettings(uint32_t frequency, int order, int mode) : frequency(frequency), order(order), mode(mode) {}
 };
+
 /**
  * @brief Provide the driver member's type without opening hardware.
  */

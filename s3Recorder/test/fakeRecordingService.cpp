@@ -16,14 +16,17 @@ bool testStorageOpen = true;
 bool testStorageFinish = true;
 bool testStorageComplete = false;
 uint32_t testStorageDeletes = 0;
+
 /**
  * @brief Return simulated microseconds for writer statistics.
  */
 uint64_t recordingService::clockUs() { return testUs; }
+
 /**
  * @brief Pretend a storage worker exists.
  */
 bool recordingService::begin() { return true; }
+
 /**
  * @brief Reset the real ring on a successful simulated file opening.
  */
@@ -32,6 +35,7 @@ bool recordingService::prepare(uint32_t)
     if (testStorageOpen) { writer.start(sink, clockUs); }
     return testStorageOpen;
 }
+
 /**
  * @brief Remember whether acquisition requested a complete or faulted file.
  */
@@ -40,26 +44,32 @@ bool recordingService::finish(bool complete)
     testStorageComplete = complete;
     return testStorageFinish;
 }
+
 /**
  * @brief Count deletion requests; no filesystem is touched.
  */
 bool recordingService::erase() { ++testStorageDeletes; return true; }
+
 /**
  * @brief Provide a stable empty recording status for framing tests.
  */
 recordingStatus recordingService::snapshot() { return {}; }
+
 /**
  * @brief Expose the real byte queue so acquisition tests can count submissions.
  */
 bufferedWriter& recordingService::buffer() { return writer; }
+
 /**
  * @brief Use the actual overflow flag in acquisition tests.
  */
 bool recordingService::failed() const { return writer.failed(); }
+
 /**
  * @brief Accept fake writes without hardware.
  */
 size_t sdRecordingSink::write(const uint8_t*, size_t length) { return length; }
+
 /**
  * @brief Simulate successful filesystem synchronization.
  */

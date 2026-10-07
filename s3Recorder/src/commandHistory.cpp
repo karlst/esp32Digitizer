@@ -18,6 +18,7 @@
 bool commandHistory::lookup(const acquisitionCommand& command, uint32_t& result) const
 {
     bool retVal = false;
+
     // A zero result marks an unused slot. Search all slots because next points
     // to the next replacement position, not necessarily the end of valid entries.
     for (size_t index = 0; index < 16 && !retVal; ++index)

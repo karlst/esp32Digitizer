@@ -26,10 +26,12 @@ bool BUFFERED_IRAM sampleFormatter::submit(bufferedWriter& writer, int32_t sampl
     // Convert to unsigned before shifting, preserving the two's-complement bit
     // pattern of negative values. This avoids signed-right-shift ambiguity.
     const uint32_t word = static_cast<uint32_t>(sample);
+
     // Little endian means least-significant byte FIRST. Explicit shifts make
     // the file order clear rather than depending on the computer's memory layout.
     const uint8_t bytes[4] = {static_cast<uint8_t>(word), static_cast<uint8_t>(word >> 8),
         static_cast<uint8_t>(word >> 16), static_cast<uint8_t>(word >> 24)};
+
     // submit copies these local bytes before returning; the ring does not keep
     // a pointer to this temporary stack array. Failure rejects the entire record.
     const bool retVal = writer.submit(bytes, sizeof(bytes));

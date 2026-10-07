@@ -6,6 +6,7 @@
 #if S3_CHOKE_TEST
 #include <Arduino.h>
 #include <freertos/FreeRTOS.h>
+
 /**
  * @brief Copy measurements on working tasks; format and print on the USB task.
  * Acquisition on core 0 and storage on core 1 append under a short memory-only

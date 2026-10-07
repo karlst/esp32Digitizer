@@ -57,6 +57,7 @@ bool ads1256::waitReady(uint32_t timeoutMs)
 void ads1256::command(uint8_t opcode)
 {
     bus.transfer(opcode);
+
     // The datasheet requires a delay between certain commands and the next
     // transfer. Seven microseconds covers its 50-digitizer-clock read delay
     // (called t6) and 24-clock SYNC delay (t11) at our assumed 7.68 MHz clock.
@@ -77,6 +78,7 @@ void ads1256::readRegisters(uint8_t* values)
     bus.transfer(0x10);
     bus.transfer(3);
     delayMicroseconds(7);
+
     // SPI needs outgoing clock pulses even when we only want to receive.
     // Sending harmless zero bytes supplies those clocks and collects the reply.
     uint8_t zeros[4] = {};
@@ -108,9 +110,11 @@ bool ads1256::configure(uint32_t rate)
         const uint8_t settings[] = {0x50, 3, 0x00, 0x01, 0x00, rateByte};
         bus.writeBytes(settings, sizeof(settings));
         delayMicroseconds(7);
+
         // Verify communication by reading back what we just wrote.
         uint8_t actual[4] = {};
         readRegisters(actual);
+
         // STATUS includes read-only identification and readiness bits, so mask
         // those out with 0x0e and check only the writable options. Compare the
         // other three registers in full. This also rejects replies consisting
@@ -146,11 +150,13 @@ bool ads1256::begin()
     pinMode(10, OUTPUT);
     digitalWrite(10, HIGH);
     bus.begin(12, 13, 11, 10);
+
     // Set a 1 MHz SPI clock, highest bit first, and the clock timing called
     // mode 1 required by this device. beginTransaction reserves/configures the
     // bus; it does not read a sample. Only this task uses this bus, so we keep
     // that reservation open rather than acquire/release its lock on every read.
     bus.beginTransaction(SPISettings(1000000, MSBFIRST, SPI_MODE1));
+
     // Select the chip and send WAKEUP (0x00) in case it was left in standby.
     digitalWrite(10, LOW);
     command(0x00);
@@ -165,6 +171,7 @@ bool ads1256::begin()
         delay(5);
         retVal = waitReady(1000) && configure(1000);
     }
+
     // STANDBY (0xfd) stops conversions; CS high ends our conversation with the
     // chip. Attempt this even if setup failed, but do not claim setup succeeded.
     command(0xfd);
@@ -189,6 +196,7 @@ bool ads1256::start(uint32_t rate)
     bus.endTransaction();
     bus.beginTransaction(SPISettings(rate <= 2000 ? 1000000 : 1900000, MSBFIRST, SPI_MODE1));
     digitalWrite(10, LOW);
+
     // WAKEUP (0x00) leaves standby. Only configure after the chip responds.
     command(0x00);
     bool retVal = waitReady(1000) && configure(rate);
@@ -204,6 +212,7 @@ bool ads1256::start(uint32_t rate)
         {
             command(0x03);
         }
+
         // Despite its name, continuous means "this driver is actively reading"
         // in EITHER mode. continuousRead specifically means RDATAC mode is used.
         continuous = true;
@@ -267,9 +276,11 @@ bool ads1256::stop()
                 command(0xfd);
             }
         }
+
         // Block further read() calls even if the device did not respond.
         continuous = false;
     }
+
     // Deselect the digitizer whether the stop succeeded or failed.
     digitalWrite(10, HIGH);
     return retVal;
@@ -320,6 +331,7 @@ bool ads1256::read(int32_t& sample)
             // command() also waits the required seven microseconds before data.
             command(0x01);
         }
+
         // Hardware generates 24 SPI clock pulses and receives three bytes.
         // The library waits for completion and copies them into bytes; no DMA
         // or per-bit software reads are involved. Then preserve the sample's
@@ -330,6 +342,7 @@ bool ads1256::read(int32_t& sample)
         bus.transferBytes(zeros, bytes, 3);
         transferUs = micros() - transferStartUs;
         sample = commandProtocol::signedSample(bytes);
+
         // DRDY should rise after the sample is read. Checking immediately after
         // SPI completion rejected reads during bench testing. Allow up to three
         // one-microsecond waits for the pin to read high (plus checking overhead).
@@ -339,6 +352,7 @@ bool ads1256::read(int32_t& sample)
             delayMicroseconds(1);
         }
         retVal = digitalRead(readyPin) == HIGH;
+
         // Pack elapsed read time above the lowest eight bits, which hold the
         // diagnostic code. Time includes the command, delays, SPI, and checks.
         readDetail = ((micros() - startedUs) << 8) | (retVal ? 0U : 3U);

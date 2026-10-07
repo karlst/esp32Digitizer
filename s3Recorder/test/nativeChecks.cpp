@@ -47,18 +47,22 @@ static int abandonCalls = 0;
  * @brief Simulate ADC initialization.
  */
 bool ads1256::begin() { return true; }
+
 /**
  * @brief Count actual starts to detect duplicate side effects.
  */
 bool ads1256::start(uint32_t) { ++startCalls; return startOk; }
+
 /**
  * @brief Simulate either successful standby or a missing ADC.
  */
 bool ads1256::stop() { ++stopCalls; return stopOk; }
+
 /**
  * @brief Simulate deselection without touching a failed controller.
  */
 void ads1256::abandon() { ++abandonCalls; }
+
 /**
  * @brief Simulate a complete or failed conversion transfer.
  */
@@ -72,22 +76,27 @@ bool ads1256::read(int32_t& value)
     }
     return readOk;
 }
+
 /**
  * @brief Fake an incomplete transfer diagnostic when readOk is false.
  */
 uint32_t ads1256::readDiagnostic() const { return readOk ? 0 : 3; }
+
 /**
  * @brief No SPI time elapses in the state-machine fake.
  */
 uint32_t ads1256::transferMicros() const { return 0; }
+
 /**
  * @brief Allocate a single simulated queue.
  */
 QueueHandle_t xQueueCreate(int, size_t) { queueFull = false; return &queued; }
+
 /**
  * @brief Release the simulated queue.
  */
 void vQueueDelete(QueueHandle_t) { queueFull = false; }
+
 /**
  * @brief Preserve the pending item when the one-slot queue is full.
  */
@@ -97,6 +106,7 @@ int xQueueSend(QueueHandle_t, const void* item, int)
     if (!queueFull) { queued = *static_cast<const acquisitionCommand*>(item); queueFull = true; }
     return retVal;
 }
+
 /**
  * @brief Consume the simulated request.
  */
@@ -106,19 +116,23 @@ int xQueueReceive(QueueHandle_t, void* item, int)
     if (queueFull) { *static_cast<acquisitionCommand*>(item) = queued; queueFull = false; }
     return retVal;
 }
+
 /**
  * @brief Suppress actual task creation; tests invoke finite worker steps.
  */
 int xTaskCreatePinnedToCore(void (*)(void*), const char*, int, void*, int, TaskHandle_t* task, int)
 { *task = &queued; return pdPASS; }
+
 /**
  * @brief Model a readiness timeout.
  */
 uint32_t ulTaskNotifyTake(int, uint32_t wait) { testMs += wait; return 0; }
+
 /**
  * @brief No scheduler exists in the deterministic tests.
  */
 void vTaskNotifyGiveFromISR(TaskHandle_t, BaseType_t*) {}
+
 /**
  * @brief Advance simulated scheduler time.
  */
@@ -263,6 +277,7 @@ void nativeChecks::checkAcquisition()
     assert(recorder.snapshot().missedEdges == 4); // Pre-read misses count even on failure.
     assert(recorder.snapshot().rejectedReads == 1 && recorder.snapshot().readFailures == 1);
     assert(recorder.snapshot().overlapReads == 1 && recorder.snapshot().readFault == 3);
+
     // Start resets last-fault flags but preserves every total. An overlap alone
     // is another rejected read, not another driver failure.
     readOk = true;
@@ -302,6 +317,7 @@ void nativeChecks::checkLink()
     recorder.begin();
     featherLink link(recorder);
     link.begin();
+
     // pinMode after UART begin breaks the S3's native GPIO18 receive route.
     assert(testUartRxMapped);
     const std::string usbRequest = "CMD,2,40,stop,0\n";
@@ -415,6 +431,7 @@ void nativeChecks::checkFastAcquisition()
     testClockHook = finishFastTransfer;
     recorder.execute({100, acquisitionCommand::Action::start, 30000});
     assert(recorder.fastMode);
+
     // Two interrupt reads occur before the worker copies anything. Count both,
     // retain only the latest value, and never count them again on the next copy.
     GPIO.in = 0;
@@ -433,6 +450,7 @@ void nativeChecks::checkFastAcquisition()
     acquisition::readyInterrupt(&recorder);
     recorder.collectFast();
     assert(recorder.current.sampleCount == 4);
+
     // A controller already busy at entry must bypass ordinary SPI stop calls;
     // preserve the four good readings and account for one rejected attempt.
     testClockHook = nullptr;
@@ -450,6 +468,7 @@ extern bool testStorageOpen;
 extern bool testStorageFinish;
 extern bool testStorageComplete;
 extern uint32_t testStorageDeletes;
+
 /**
  * @brief Verify file-before-ADC ordering, recording-aware deduplication, safe
  * deletion gating, every interrupt sample queued, and failure acknowledgements.
@@ -486,6 +505,7 @@ void nativeChecks::checkRecording()
 }
 
 #if S3_CHOKE_TEST
+
 /**
  * @brief Step the real Choke command path while storage opening/closing is faked.
  * Check the override when the browser's recording checkbox is clear, no ADC
@@ -535,10 +555,12 @@ void nativeChecks::checkChoke()
     testStorageFinish = true;
     recorder.execute({307, acquisitionCommand::Action::reboot, 0, false});
     assert(recorder.current.reboot && startCalls == 0 && stopCalls == 0);
+
     // The ordinary v4 status contract still accepts the command's dropdown rate.
     featherLink link(recorder);
     link.report(recorder.snapshot());
     assert(Serial1.output.find("S3,5,") != std::string::npos);
+
     // Real command path crosses a ten-second boundary while a fast fake sink
     // drains the real ring. Verify the transition survives until USB is drained.
     acquisition rampRecorder;

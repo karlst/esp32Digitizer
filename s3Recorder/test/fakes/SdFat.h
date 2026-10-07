@@ -10,10 +10,15 @@
  * here and mistake a passing fake for proof of real FAT/exFAT compatibility.
  */
 #pragma once
+
 /**
  * @brief Stand-in for the filesystem owned by the simulated recording service.
  */
-class SdFs {};
+class FsVolume {};
+
+// Desktop command tests replace the entire disk service, including its device.
+#define S3_STORAGE_TYPES_ONLY 1
+
 /**
  * @brief Stand-in for a file owned by the simulated recording service.
  */

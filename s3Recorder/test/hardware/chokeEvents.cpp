@@ -12,6 +12,7 @@ chokeEvents::event chokeEvents::queue[64] = {};
 uint32_t chokeEvents::head = 0, chokeEvents::count = 0;
 uint32_t chokeEvents::run = 0, chokeEvents::dropped = 0;
 uint64_t chokeEvents::epochUs = 0;
+
 /**
  * @brief Acquisition starts the diagnostic clock before requesting file opening.
  * Keep old queued results: a new Start must not erase an unprinted final result.
@@ -24,6 +25,7 @@ void chokeEvents::beginRun()
     portEXIT_CRITICAL(&lock);
     add("start-request", "unused");
 }
+
 /**
  * @brief Enqueue measurements without formatting, allocation, disk I/O or USB waits.
  * Before the first Start, ignore startup scans. important=false reserves slots
@@ -49,6 +51,7 @@ void chokeEvents::add(const char* name, const char* fields, uint64_t a,
     }
     portEXIT_CRITICAL(&lock);
 }
+
 /**
  * @brief Try one event per communications pass, retaining it if USB has no room.
  * Only featherLink calls this. Lock only the memory copy; format and transmit

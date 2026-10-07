@@ -79,6 +79,7 @@ int main()
         assert(result.count == 1 && result.raw == expected[index] && result.fault == 0);
         assert(GPSPI2.ms_dlen.ms_data_bitlen == 23 && result.readUs < 25);
     }
+
     // A second edge makes even a plausible completed sample untrustworthy.
     prepare(0x563412, false, false, true);
     reader.reset();
@@ -86,6 +87,7 @@ int main()
     assert(reader.snapshot().count == 0 && reader.snapshot().fault == 2);
     reader.onReady();
     assert(reader.snapshot().events == 1);
+
     // A stuck DRDY and a hung SPI controller produce distinct bounded failures.
     prepare(0, false, true);
     reader.reset();

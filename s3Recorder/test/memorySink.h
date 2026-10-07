@@ -17,6 +17,7 @@ public:
     std::vector<uint8_t> bytes;
     bool shortWrite = false, flushOk = true;
     bufferedWriter* duringWrite = nullptr;
+
     /**
      * @brief Copy accepted bytes; optionally force producer activity while blocked.
      * This fake replaces an actual filesystem. bytes records what storage accepted;
@@ -33,10 +34,12 @@ public:
         {
             const uint8_t sample[4] = {9, 8, 7, 6};
             while (duringWrite->submit(sample, 4)) {}
+
             // Buffer space must not be released until this call returns.
             assert(std::vector<uint8_t>(data, data + length) == before);
             duringWrite = nullptr;
         }
+
         // Pretend the write took 12 ms and accept either the full span or a short
         // prefix. The real writer should report exactly those simulated results.
         writerTestUs += 12000;
@@ -44,6 +47,7 @@ public:
         bytes.insert(bytes.end(), data, data + retVal);
         return retVal;
     }
+
     /**
      * @brief Make the final flush slower than writes to test retained maxima.
      * Advance simulated time, not real wall-clock time; no 45-ms sleep occurs.

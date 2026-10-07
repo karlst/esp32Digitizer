@@ -13,7 +13,60 @@
 #include "recordingService.h"
 #include <Arduino.h>
 #include <esp_timer.h>
+#if S3_CHOKE_TEST
 #include "chokeEvents.h"
+#endif
+#if BUFFERED_WRITER_EXTERNAL
+#include <esp_heap_caps.h>
+#include <soc/esp32s3/spiram.h>
+#include <soc/soc_memory_types.h>
+
+/**
+ * @brief Obtain and verify the complete ring in PSRAM, never fall back to SRAM.
+ * Called once before worker startup. Arduino initializes PSRAM before setup().
+ * Check all eight installed MiB, then touch/read the entire allocation to catch
+ * basic addressing errors. This is a startup check, not an exhaustive RAM test.
+ * Return nullptr on detection, allocation, placement or data-check failure.
+ */
+static uint8_t* allocateRing(uint32_t bytes)
+{
+    uint8_t* retVal = nullptr;
+    if (psramFound() && esp_spiram_get_size() == 8u * 1024 * 1024)
+    {
+        retVal = static_cast<uint8_t*>(heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    }
+    bool verified = retVal && esp_ptr_external_ram(retVal);
+    if (verified)
+    {
+        for (uint32_t index = 0; index < bytes; ++index)
+        {
+            retVal[index] = static_cast<uint8_t>((index * 37) ^ (index >> 8) ^ (index >> 16));
+        }
+        for (uint32_t index = 0; index < bytes; ++index)
+        {
+            if (retVal[index] != static_cast<uint8_t>((index * 37) ^ (index >> 8) ^ (index >> 16)))
+            {
+                verified = false;
+            }
+        }
+    }
+    if (!verified && retVal)
+    {
+        heap_caps_free(retVal);
+        retVal = nullptr;
+    }
+    Serial.printf("PSRAM total=%u free=%u ring=%u verified=%u block=%u internalFree=%u\n",
+        static_cast<unsigned>(esp_spiram_get_size()), ESP.getFreePsram(), bytes, verified,
+        bufferedWriter::blockBytes, ESP.getFreeHeap());
+    return retVal;
+}
+
+/** @brief Return the writer-owned PSRAM allocation after all users have stopped. */
+static void releaseRing(uint8_t* memory)
+{
+    heap_caps_free(memory);
+}
+#endif
 
 /**
  * @brief Supply a 64-bit microsecond clock, avoiding millis() rollover in long runs.
@@ -34,10 +87,17 @@ uint64_t recordingService::clockUs()
 bool recordingService::begin()
 {
     TaskHandle_t worker = nullptr;
+
     // Arguments: entry function, debug name, 6144-byte stack for local variables,
     // this object, priority 1, returned task handle, CPU core 1. The ADC thread
     // uses core 0. The temporary handle is not needed again; the task keeps running.
-    available = xTaskCreatePinnedToCore(taskEntry, "diskWriter", 6144, this, 1, &worker, 1) == pdPASS;
+    bool memoryReady = true;
+#if BUFFERED_WRITER_EXTERNAL
+    memoryReady = writer.initializeMemory(allocateRing, releaseRing);
+#endif
+    available = memoryReady && xTaskCreatePinnedToCore(taskEntry, "diskWriter",
+        recordingConfig::diskTaskStackBytes, this, recordingConfig::diskTaskPriority,
+        &worker, recordingConfig::diskTaskCore) == pdPASS;
     if (!available)
     {
         current.values[recordingStatus::state] = recordingStatus::failed;
@@ -97,6 +157,21 @@ bool recordingService::prepare(uint32_t rate)
 }
 
 /**
+ * @brief Copy one byte block into the ring from the single acquisition task.
+ * Call only after prepare() succeeds and before requesting finish(). The future
+ * DMA reader may reuse its input block as soon as this returns. True means copied
+ * to RAM, not saved to disk; false latches overflow/write failure. Never retry a
+ * rejected block or silently skip it. Stop production, then call finish(false).
+ * No filesystem work or waiting occurs here. Legacy interrupt capture keeps its
+ * direct writer binding; PSRAM submission belongs in an ordinary task.
+ */
+bool recordingService::submit(const uint8_t* data, uint32_t length)
+{
+    const bool retVal = writer.submit(data, length);
+    return retVal;
+}
+
+/**
  * @brief Drain and close after the producer stops; complete=false marks a faulted run.
  * Called after acquisition stops producing samples, on Stop/Reboot or a fault.
  * complete says whether acquisition ended normally. Even if every queued byte
@@ -124,7 +199,7 @@ bool recordingService::erase()
 
 /**
  * @brief Return the producer interface; acquisition attaches it only during recording.
- * Returns the owned byte writer by reference, not a copy of its 64-KB array.
+ * Returns the owned byte writer by reference, not a copy of its configured ring allocation.
  * Acquisition enables that reference only after prepare succeeds and disables
  * its use before finish. The producer calls submit(), not pump() or snapshot().
  */
@@ -189,6 +264,7 @@ void recordingService::publish()
     auto* values = current.values;
     const auto stats = writer.snapshot();
     values[recordingStatus::card] = sink.cardState;
+
     // During recording use only cached file growth. Never scan here: publish()
     // runs while the producer can be filling the ring on the other core.
     if (recording && spaceEstimateValid)
@@ -198,11 +274,13 @@ void recordingService::publish()
     }
     values[recordingStatus::session] = sink.session;
     values[recordingStatus::part] = sink.part;
+
     // Convert microseconds to milliseconds only for fields defined that way on
     // the wire. Byte count includes adapter headers; sample count excludes them.
     values[recordingStatus::elapsedMs] = stats.elapsedUs / 1000;
     values[recordingStatus::bytesWritten] = stats.bytes + sink.headerBytes;
-    values[recordingStatus::samplesWritten] = stats.bytes / 4;
+    values[recordingStatus::samplesWritten] = stats.bytes / recordingConfig::storedSampleBytes;
+
     // Positions and occupancy are BYTES within the RAM ring, not SD file offsets.
     // Peak comes from the producer, so brief peaks between UART reports survive.
     values[recordingStatus::bufferBytes] = bufferedWriter::capacity;
@@ -215,12 +293,14 @@ void recordingService::publish()
     values[recordingStatus::maxDelayAtMs] = stats.maxAtUs / 1000;
     values[recordingStatus::maxDelayKind] = stats.maxKind;
     values[recordingStatus::overflows] = stats.overflows;
+
     // After a write failure, include complete records that never reached the
     // filesystem, plus a possibly partial record. Flush failure alone cannot
     // tell us which accepted bytes the physical card retained.
-    values[recordingStatus::lostSamples] = stats.rejectedBytes / 4 +
-        (stats.errors ? (stats.unsavedBytes + 3) / 4 : 0);
+    values[recordingStatus::lostSamples] = stats.rejectedBytes / recordingConfig::storedSampleBytes +
+        (stats.errors ? (stats.unsavedBytes + recordingConfig::storedSampleBytes - 1) / recordingConfig::storedSampleBytes : 0);
     values[recordingStatus::writeErrors] = stats.errors;
+
     // Compute recent payload throughput over an elapsed half-second-or-longer
     // window. It is actual accepted bytes/time, not the requested ADC rate.
     const uint32_t now = millis();
@@ -236,6 +316,7 @@ void recordingService::publish()
             values[recordingStatus::bytesPerSecond] = 0;
         }
 #endif
+
         // Choke-test builds retain the last measured write speed after Stop/failure.
         // It is a completed measurement window, not the requested generator rate.
         rateBytes = stats.bytes; rateMs = now;
@@ -270,6 +351,11 @@ void recordingService::run()
     // Startup only discovers readiness. A mount failure is visible but does not
     // prevent monitoring the ADC; a later recording Start retries mounting.
     sink.mount();
+#if S3_SD_VERIFY
+
+    // One-time commissioning check; regular firmware does not create test files.
+    sink.verifyStorage();
+#endif
     refreshSpace();
     publish();
     for (;;)
@@ -286,6 +372,7 @@ void recordingService::run()
                 spaceEstimateValid = false;
                 current.values[recordingStatus::enabled] = 1;
                 current.values[recordingStatus::state] = recordingStatus::preparing;
+
                 // Reset this recording before measuring file preparation. No producer is
                 // enabled yet, so resetting positions cannot erase queued live samples.
                 writer.start(sink, clockUs);
@@ -293,6 +380,7 @@ void recordingService::run()
                 current.values[recordingStatus::bytesPerSecond] = 0;
                 publish();
                 const uint64_t began = clockUs();
+
                 // argument is the requested sample rate. Opening includes an initial
                 // header and synchronization. Acquisition cannot start until this succeeds.
                 success = sink.open(argument);
@@ -307,6 +395,7 @@ void recordingService::run()
                     writer.measure(clockUs(), 1, false);
                     writer.cancel();
                 }
+
                 // Scan after opening so the baseline includes the initial header
                 // and directory entry. Acquisition is still waiting for our reply.
                 refreshSpace();
@@ -314,6 +403,7 @@ void recordingService::run()
                 {
                     spaceEstimateValid = current.values[recordingStatus::freeSpaceMode] == recordingStatus::spaceMeasured;
                     spaceEstimate.begin(current.values[recordingStatus::freeBytes], sink.allocatedBytes);
+
                     // Start the recording clock and delay maximum AFTER opening and
                     // scanning. No producer exists yet, so this reset discards no data.
                     writer.start(sink, clockUs);
@@ -329,6 +419,7 @@ void recordingService::run()
                 {
                     current.values[recordingStatus::state] = recordingStatus::saving;
                     publish();
+
                     // First save queued bytes and synchronize them. Then let the file adapter
                     // write the final header, close, and check it. Both stages can fail.
 #if S3_CHOKE_TEST
@@ -346,6 +437,7 @@ void recordingService::run()
 #if S3_CHOKE_TEST
                     chokeEvents::add("file-close", "durationUs,success,unused,unused", clockUs() - began, closed);
 #endif
+
                     // An acquisition fault can still permit successful saving of earlier
                     // samples. Only a normal completion flag AND successful saving show Saved.
                     success = drained && closed;
@@ -363,6 +455,7 @@ void recordingService::run()
                 success = sink.deleteRecordings(current.values[recordingStatus::deletedFiles]);
                 current.values[recordingStatus::state] = success ? recordingStatus::idle : recordingStatus::failed;
             }
+
             // Invalid commands must not trigger a scan while another recording is
             // active. prepare already scanned before enabling production.
             if (!recording && action != operation::prepare)
@@ -370,6 +463,7 @@ void recordingService::run()
                 refreshSpace();
             }
             publish();
+
             // Publish final status/result BEFORE marking the mailbox idle. The waiting
             // acquisition task then sends its final acknowledgement through featherLink.
             result.store(success, std::memory_order_release);
@@ -385,6 +479,7 @@ void recordingService::run()
 #endif
             writer.pump();
 #if S3_CHOKE_TEST
+
             // Only regular pumps over 50 ms produce detail events. finish() owns
             // its internal writes, so final draining is timed as a whole above.
             const uint64_t duration = clockUs() - began;
@@ -399,9 +494,18 @@ void recordingService::run()
         {
             publish();
         }
-        // Yield so communications and idle tasks on core 1 can run. Sampling
-        // continues on core 0; this delay does not set the digitizer sample rate.
-        vTaskDelay(pdMS_TO_TICKS(1));
+
+        // Drain full blocks without an artificial tick between writes. SD calls
+        // block while hardware works; yield also lets equal-priority tasks run.
+        // Sleep when there is no full block, or after failure, to avoid spinning.
+        if (recording && !writer.failed() && writer.queuedBytes() >= bufferedWriter::blockBytes)
+        {
+            taskYIELD();
+        }
+        else
+        {
+            vTaskDelay(pdMS_TO_TICKS(1));
+        }
     }
 }
 

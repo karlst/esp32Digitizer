@@ -12,7 +12,9 @@
  * Accepting a command into a queue is not proof that the device performed it.
  */
 #include "featherLink.h"
+#if S3_CHOKE_TEST
 #include "chokeEvents.h"
+#endif
 #include <cstdio>
 
 /**
@@ -38,8 +40,10 @@ featherLink::featherLink(acquisition& recorder) : recorder(recorder)
 void featherLink::begin()
 {
     Serial1.setRxBufferSize(512);
+
     // Worst-case 64-bit counters can make a frame longer than the hardware FIFO.
     Serial1.setTxBufferSize(2048);
+
     // GPIO18 is UART1's native RX pad. pinMode() selects the ordinary GPIO
     // function, so it MUST run before begin() assigns the UART IOMUX function.
     // Calling it afterward disconnects UART reception despite correct wiring.
@@ -59,11 +63,13 @@ bool featherLink::report(const acquisitionStatus& status)
 {
     // Room for every counter at its full 64-bit decimal width plus all other fields.
     char frame[1536];
+
     // UINT32_MAX means "no sample yet"; otherwise age is time since the last
     // accepted sample, not the age of this periodic communications report.
     const uint32_t nowMs = millis();
     const uint32_t age = status.hasSample ? nowMs - status.lastSampleMs : UINT32_MAX;
 #ifdef S3_LEGACY_STATUS
+
     // Bench builds can keep the currently deployed older Feather UI operational.
     // Only the UART frame changes; full diagnostics remain available over USB.
     int length = snprintf(frame, sizeof(frame),
@@ -91,6 +97,7 @@ bool featherLink::report(const acquisitionStatus& status)
         static_cast<unsigned long long>(status.overlapReads),
         static_cast<unsigned long long>(status.readyTimeouts),
         static_cast<unsigned long>(status.readFault));
+
     // Append the shared numeric recording columns; no filenames or unescaped
     // text crosses this machine-readable link. Keep one complete newline frame.
     for (size_t index = 0; index < recordingStatus::fieldCount && length > 0 &&
@@ -105,6 +112,7 @@ bool featherLink::report(const acquisitionStatus& status)
         frame[length] = '\0';
     }
 #endif
+
     // snprintf reports the length it needed. Reject truncation, and only write
     // when the whole line fits, so Feather never sees a deliberately partial report.
     const bool retVal = length > 0 && length < static_cast<int>(sizeof(frame)) &&
@@ -140,6 +148,7 @@ void featherLink::update()
             recorder.submit(command);
         }
     }
+
     // A disconnected Feather does not stop acquisition. No link timeout changes
     // the recorder: S3 owns its run until Stop, a fault, or a reboot.
     for (size_t budget = 0; budget < 128 && Serial1.available() && !rebootSent; ++budget)
@@ -149,6 +158,7 @@ void featherLink::update()
         if (parser.feed(static_cast<char>(Serial1.read()), millis(), command))
         {
             ++validCommands;
+
             // A full queue drops the request, never a previous accepted command.
             // Feather will explicitly time out instead of receiving false success.
             if (recorder.submit(command))
@@ -157,10 +167,12 @@ void featherLink::update()
             }
         }
     }
+
     // Take one consistent copy: the other core may be collecting while we format
     // the message. No acquisition lock is held during formatting or transmission.
     const acquisitionStatus state = recorder.snapshot();
     const uint32_t nowMs = millis();
+
     // Compare both ID and result so a changed outcome is not hidden until the
     // periodic report. Update sent fields only after the UART accepted the frame.
     const bool newAck = state.ackId != sentAckId || state.ackResult != sentAckResult;
@@ -186,10 +198,12 @@ void featherLink::update()
         ESP.restart();
     }
 #if S3_CHOKE_TEST
+
     // Event timestamps were captured by the working task, not at this delayed print.
     // Give transitions first chance at USB space before routine status lines.
     chokeEvents::drain();
 #endif
+
     // USB diagnostics are once per second, not per conversion. Never mix them
     // into the machine-readable inter-board UART. Skip when USB TX is congested.
     if (nowMs - lastDebugMs >= 1000)
@@ -205,6 +219,7 @@ void featherLink::update()
         {
             Serial.write(reinterpret_cast<const uint8_t*>(text), length);
         }
+
         // Distinguish an electrically silent RX wire from invalid protocol bytes
         // and from a command accepted by the worker. This goes only to USB debug.
         const int linkLength = snprintf(text, sizeof(text),
@@ -217,6 +232,7 @@ void featherLink::update()
         {
             Serial.write(reinterpret_cast<const uint8_t*>(text), linkLength);
         }
+
         // Timing is captured by acquisition, but formatted only here on core 1.
         // Unknown first-edge latency is printed as UINT32_MAX, never as zero.
         const int timingLength = snprintf(text, sizeof(text),
@@ -242,6 +258,7 @@ void featherLink::update()
         lastDebugMs = nowMs;
     }
 #if S3_CHOKE_TEST
+
     // Existing P3 reports bytes/s; this extra USB line compares rates in decimal
     // kilobits/s (1000 bits/s). Retain results after Stop. A storage-limit result
     // is distinguished further by P3's ring overflow and write-error counters.

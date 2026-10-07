@@ -30,10 +30,15 @@ void setup()
     Serial.setTxBufferSize(512);
     Serial.begin(115200);
     controlLink.begin();
+
     // Do not wait for a USB terminal: external-power operation must work too.
     recorder.begin();
 #if S3_CHOKE_TEST
-    Serial.println("CHOKE TEST: digitizer unused; Start records at 750 kbps, +250 kbps every 10s; SPI 10 MHz.");
+#if S3_CHOKE_FIXED_RATE
+    Serial.printf("CHOKE FIXED: digitizer unused; %lu kbps; duration %lu seconds (0 = manual Stop); SDMMC width/clock reported at mount.\n", static_cast<unsigned long>(chokeTest::initialBps / 1000), static_cast<unsigned long>(chokeTest::durationUs / 1000000));
+#else
+    Serial.printf("CHOKE TEST: digitizer unused; Start records at %lu kbps, +250 kbps every 10s; SDMMC width/clock reported at mount.\n", static_cast<unsigned long>(chokeTest::initialBps / 1000));
+#endif
     Serial.println("CHOKE TEST: dropdown rate ignored; P3 write speed is actual bytes/s; USB adds target/result.");
 #else
     Serial.println("S3 recorder: AIN0-AIN1, gain 1; Feather UART RX18/TX17; starts stopped.");
@@ -50,6 +55,7 @@ void setup()
 void loop()
 {
     controlLink.update();
+
     // UART buffers incoming commands during this short scheduler yield.
     delay(1);
 }

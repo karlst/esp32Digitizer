@@ -36,15 +36,18 @@ static void clockReady()
  */
 void SPIClass::begin(int clock, int input, int output, int chipSelect)
 { assert(clock == 12 && input == 13 && output == 11 && chipSelect == 10); }
+
 /**
  * @brief Check a legal clock/mode for the assumed 7.68 MHz module.
  */
 void SPIClass::beginTransaction(SPISettings settings)
 { assert(settings.frequency <= 1920000 && settings.mode == SPI_MODE1 && settings.order == MSBFIRST); }
+
 /**
  * @brief No actual bus semaphore is needed in the single-thread driver simulator.
  */
 void SPIClass::endTransaction() {}
+
 /**
  * @brief Simulate one command byte sent by the real digitizer driver.
  *
@@ -72,6 +75,7 @@ uint8_t SPIClass::transfer(uint8_t byte)
     }
     return 0;
 }
+
 /**
  * @brief Supply a register reply or a three-byte sample to the real driver.
  *
@@ -95,11 +99,13 @@ void SPIClass::transferBytes(const uint8_t* input, uint8_t* output, uint32_t cou
     {
         assert(count == 3);
         output[0] = 0x80; output[1] = 0; output[2] = 0;
+
         // Reproduce real hardware: DRDY need not be high at controller completion.
         testReady = LOW;
         testReadyRiseAt = holdReadyLow ? UINT32_MAX : testUs + 2;
     }
 }
+
 /**
  * @brief Capture the four configuration bytes that the real driver sends.
  *
@@ -113,6 +119,7 @@ void SPIClass::writeBytes(const uint8_t* bytes, uint32_t count)
     std::memcpy(registers, bytes + 2, 4);
     registers[0] |= 0x30;
 }
+
 /**
  * @brief Run driver setup, supported-rate reads, and deliberate hardware-fault simulations.
  *
@@ -135,6 +142,7 @@ int main()
     assert(driver.begin() && testChipSelect == HIGH);
     int32_t value = 0;
     assert(!driver.read(value));
+
     // Each advertised rate must select a working command sequence. Low rates
     // request every sample; high rates enter continuous-read mode once.
     const uint32_t rates[] = {100,500,1000,2000,7500,15000,30000};
@@ -158,6 +166,7 @@ int main()
         assert(driver.stop() && commands.back() == 0xfd && testChipSelect == HIGH);
         testClockHook = nullptr;
     }
+
     // Unsupported settings and stuck ready levels must fail rather than hang.
     assert(!driver.start(250));
     assert(driver.start(1000));

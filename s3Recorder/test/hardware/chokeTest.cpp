@@ -1,6 +1,6 @@
 /**
  * @file chokeTest.cpp
- * @brief Pace a 750-kbps source, adding 250 kbps every ten seconds of generation.
+ * @brief Pace a configurable ramp or fixed-rate source, optionally time-limited.
  * Read start() then feed(): elapsed time determines how many words SHOULD have
  * arrived; only that many are offered. We never wait for ring space or silently
  * lower the requested rate when storage cannot keep up.
@@ -11,7 +11,7 @@
 /**
  * @brief Reset a new run after its recording file has opened successfully.
  * nowUs is a monotonic 64-bit microsecond clock. File-opening time is excluded
- * from the rate schedule. Every Start repeats the ramp from 750 kbps.
+ * from the rate schedule. Every Start repeats the selected diagnostic schedule.
  */
 void chokeTest::start(uint64_t nowUs)
 {
@@ -39,8 +39,14 @@ bool chokeTest::feed(uint64_t nowUs, bufferedWriter& writer)
     bool retVal = result == running;
     if (retVal)
     {
-        const uint64_t elapsedUs = nowUs - startedUs;
-        const uint64_t stage = elapsedUs / stageUs;
+        // Cap the last batch at the deadline: scheduler lateness must not add
+        // samples beyond the requested duration. Zero duration has no deadline.
+        const uint64_t actualElapsedUs = nowUs - startedUs;
+        const uint64_t elapsedUs = durationUs && actualElapsedUs > durationUs ? durationUs : actualElapsedUs;
+
+        // Fixed-rate comparison never advances the ramp; both bus widths receive
+        // the same byte rate and sample pattern, without ADC timing differences.
+        const uint64_t stage = fixedRate ? 0 : elapsedUs / stageUs;
         elapsedMs = static_cast<uint32_t>(std::min<uint64_t>(elapsedUs / 1000, UINT32_MAX));
         if (stage > (UINT32_MAX - initialBps) / incrementBps)
         {
@@ -52,18 +58,26 @@ bool chokeTest::feed(uint64_t nowUs, bufferedWriter& writer)
         else
         {
             targetBps = initialBps + static_cast<uint32_t>(stage) * incrementBps;
+
             // 250,000 bits/s divided by 32 bits/word = one word per 128 us.
-            // Complete stages use multipliers 3,4,5,...; the arithmetic-series sum
-            // below plus the current partial stage gives an exact cumulative target.
-            const uint64_t stagesWeight = stage * 3 + stage * (stage ? stage - 1 : 0) / 2;
-            const uint64_t wanted = (stageUs * stagesWeight +
-                (elapsedUs % stageUs) * (stage + 3)) / 128;
+            // Initial multiplier is 3 at 750 kbps, or 80 at 20 Mbps. Add each
+            // completed stage's multiplier plus the elapsed part of this stage.
+            // This cumulative sum retains fractional words across scheduler ticks.
+            const uint64_t initialWeight = initialBps / incrementBps;
+            const uint64_t stagesWeight = stage * initialWeight + stage * (stage ? stage - 1 : 0) / 2;
+
+            // Each 250,000 bits/s of fixed rate contributes one word per 128 us.
+            // It uses total elapsed time, so crossing ten seconds cannot reset
+            // the desired count. The ordinary ramp arithmetic stays unchanged.
+            const uint64_t wanted = fixedRate ? elapsedUs * initialWeight / 128 :
+                (stageUs * stagesWeight + (elapsedUs % stageUs) * (stage + initialWeight)) / 128;
             uint64_t due = wanted - samples;
             if (due > maxDueSamples)
             {
                 result = producerBehind;
                 retVal = false;
             }
+
             // Build deterministic words: a counter wraps through the signed 24-bit
             // range. The fourth byte is proper sign extension, exactly as in ordinary
             // recordings. Explicit shifts make the byte order independent of the CPU.
@@ -93,11 +107,22 @@ bool chokeTest::feed(uint64_t nowUs, bufferedWriter& writer)
                     result = storageLimit;
                 }
             }
+
             // A completed stage is a ten-second observation, not proof of unlimited
             // endurance. Only credit it once all samples due so far were accepted.
             if (retVal && stage != 0)
             {
                 completedBps = targetBps - incrementBps;
+            }
+
+            // Only a fully submitted final batch earns normal completion. The
+            // acquisition task sees false and drains/closes through stopChoke().
+            // Storage failure or generator lateness above keeps its own reason.
+            if (retVal && durationUs && elapsedUs >= durationUs)
+            {
+                completedBps = targetBps;
+                result = stopped;
+                retVal = false;
             }
         }
     }

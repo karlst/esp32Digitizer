@@ -7,6 +7,7 @@
 #include <cstdio>
 
 static uint64_t nowUs = 0;
+
 /**
  * @brief Let the actual byte writer measure the same simulated time as the source.
  */
@@ -47,6 +48,7 @@ static void checkRamp()
     assert(writer.finish() && sink.words == source.samples);
     assert(!source.feed(nowUs + 1000, writer));
     assert(writer.snapshot().used == 0);
+
     // Check the target reaches 24 Mbps at 930 seconds, without pretending a
     // suddenly advanced clock means the generator actually sustained that rate.
     source.start(0);
@@ -99,6 +101,7 @@ static void checkFailures()
     assert(!writer.pump() && writer.failed());
     assert(!source.feed(nowUs + 1000, writer) && source.result == chokeTest::storageLimit);
     assert(!writer.finish());
+
     // A new Start must clear the prior failure and begin at the initial target.
     sink.failWrite = false;
     writer.start(sink, clockUs);

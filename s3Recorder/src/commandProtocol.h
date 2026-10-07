@@ -37,6 +37,7 @@ public:
     static int32_t signedSample(const uint8_t* bytes);
 private:
     static bool unsignedNumber(const char* text, uint32_t& value);
+
     // At most 79 characters plus a terminating zero. discard remains set until
     // newline after a bad/oversized/expired line; carriageReturn permits CRLF only.
     char line[80] = {};

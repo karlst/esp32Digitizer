@@ -57,6 +57,7 @@ void IRAM_ATTR fastCapture::onReady()
             state.maxGapUs = started - state.previousEventUs;
         }
         state.previousEventUs = started;
+
         // The ESP GPIO dispatcher normally clears events after the callback. We
         // clear ours early so a second event can be detected during this read.
         GPIO.status_w1tc = readyMask;
@@ -93,6 +94,7 @@ void IRAM_ATTR fastCapture::onReady()
                 const uint32_t raw = ((word & 0xff) << 16) | (word & 0xff00) | ((word >> 16) & 0xff);
                 const int32_t sample = (raw & 0x800000) ? static_cast<int32_t>(raw) - 0x1000000 :
                     static_cast<int32_t>(raw);
+
                 // Allow pin propagation after the last SPI clock, bounded by both
                 // three microseconds and the overall 25-microsecond deadline.
                 const uint32_t finished = fastMicros();
@@ -109,6 +111,7 @@ void IRAM_ATTR fastCapture::onReady()
                     ++state.count;
                     state.raw = sample;
                     state.sampleUs = started;
+
                     // Preserve EACH accepted value before the next interrupt. The
                     // formatter only copies four bytes; disk I/O runs on core 1.
                     if (destination)

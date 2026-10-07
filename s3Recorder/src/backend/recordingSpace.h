@@ -4,6 +4,7 @@
  */
 #pragma once
 #include <cstdint>
+
 /**
  * @brief Keep slow free-space scans out of the recording loop.
  * The disk task measures free bytes while stopped, then subtracts the estimated
@@ -24,6 +25,7 @@ public:
         baselineFree = freeBytes;
         baselineAllocated = allocatedBytes;
     }
+
     /**
      * @brief Subtract only growth after the scan; saturate rather than underflow.
      * allocatedBytes is the sum of rounded lengths of this session's files,
@@ -35,6 +37,7 @@ public:
         const uint64_t retVal = growth < baselineFree ? baselineFree - growth : 0;
         return retVal;
     }
+
     /**
      * @brief Round one file's length up to its allocation block size, in bytes.
      * A zero block size means no mounted filesystem and yields zero, not division

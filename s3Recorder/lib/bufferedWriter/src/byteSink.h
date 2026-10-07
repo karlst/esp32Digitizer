@@ -23,11 +23,13 @@ public:
      * @brief Allow destruction through the interface after the writer stops.
      */
     virtual ~byteSink() = default;
+
     // The ring calls this from its consumer task. Read length bytes at data and
     // return how many the storage API accepted. Do not retain data after returning:
     // the ring can reuse that memory immediately. A DMA adapter must wait for DMA
     // completion here before returning (DMA = hardware transfers without CPU copying).
     virtual size_t write(const uint8_t* data, size_t length) = 0;
+
     // Finish pending storage synchronization. Return false on failure. This does
     // not mean close the file; the project adapter controls file lifetime.
     virtual bool flush() = 0;

@@ -16,6 +16,7 @@ class chokeSink : public byteSink
 public:
     uint64_t words = 0;
     bool failWrite = false, flushOk = true;
+
     /**
      * @brief Verify sequential signed 24-bit values, including sign/wrap boundaries.
      * A failed write returns zero and consumes nothing, exercising the real
@@ -40,6 +41,7 @@ public:
         }
         return retVal;
     }
+
     /**
      * @brief Return the configured synchronization result without touching hardware.
      */
