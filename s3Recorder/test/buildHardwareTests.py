@@ -25,7 +25,8 @@ chokeEnabled = any(item == 'S3_CHOKE_TEST' or
                    for item in definitions)
 if selectedSource:
     if selectedSource not in ['sdCardDiagnostic.cpp', 'sdInputDiagnostic.cpp',
-                               'sdLedDiagnostic.cpp', 'sdWriteTiming.cpp']:
+                               'sdLedDiagnostic.cpp', 'sdWriteTiming.cpp',
+                               'ads127InputDiagnostic.cpp', 'ads127CaptureDiagnostic.cpp']:
         raise ValueError('Unknown hardware test source: ' + selectedSource)
     env.BuildSources('$BUILD_DIR/hardwareTests', str(testRoot),
                      src_filter=['-<*>', '+<' + selectedSource + '>'])

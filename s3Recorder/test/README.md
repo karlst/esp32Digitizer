@@ -1,10 +1,15 @@
 # Tests and hardware diagnostics
 
-`runNativeChecks.ps1` runs eleven desktop suites. They check command handling,
+`runNativeChecks.ps1` runs twelve desktop suites. They check command handling,
 legacy acquisition, status parsing, buffer wraparound and ownership, concurrent
 byte ordering, overflow, partial writes, flush failure and synthetic rate/deadline
 arithmetic. No board, serial connection or SD card is used. `fakes/` substitutes
 platform types; it does not emulate actual card reliability.
+
+The ADS127 driver suite also checks the Feather's delayed SPI replies, register
+address restrictions, write echoes, low-rate configuration, refusal to start after
+failed configuration, and missing-device bytes. It also checks bounded UART line
+assembly. It does not emulate electrical timing or DMA hardware.
 
 Run from the repository root:
 
@@ -20,6 +25,8 @@ not compile the synthetic generator or diagnostic entry points.
 
 | Environment | Purpose / trigger |
 |---|---|
+| `ads127-input-check` | Park new ADC sample pins as inputs; USB `h` prints help; no acquisition or SD access. |
+| `ads127-dma-check` | Historical ADC capture (passed through 256k; higher rates failed), armed over UART by Feather's `ads127-capture-control`; no SD access. |
 | `choke-test*` | Synthetic rate ramp; existing Start/Stop command. |
 | `sd-reliability-26mbps` | Fixed 26 Mbps for 30 minutes; growing files. |
 | `sd-reliability-preallocated` | Same load; entire 5.85 GB reserved first. Successful backend reference. |

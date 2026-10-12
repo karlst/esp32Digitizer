@@ -17,3 +17,5 @@ backups/*.bin
 
 # Ignore this entire folder and contents
 /fpos/
+# Local research extracts and scratch images.
+/tmp/

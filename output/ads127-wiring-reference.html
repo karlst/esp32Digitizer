@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ADS127L18 wiring reference and first-power checks</title>
+<style>
+body{font:16px/1.45 system-ui,sans-serif;color:#17212b;max-width:1050px;margin:30px auto;padding:0 24px}h1{font-size:28px}h2{margin-top:30px;font-size:21px;color:#174b65}pre{font:14px/1.65 Consolas,monospace;background:#f2f6f8;padding:18px;overflow:auto;border:1px solid #ccd7dd}table{border-collapse:collapse;width:100%;margin:16px 0}th,td{padding:9px;border:1px solid #bdcbd3;text-align:left}th{background:#e9f1f5}.note{border-left:5px solid #c16a12;background:#fff5e7;padding:12px 16px}.muted{color:#53636d}li{margin:9px 0}@media print{body{font-size:11pt;margin:0;padding:0}pre{font-size:9pt;white-space:pre-wrap}h2{break-after:avoid}table,pre,.note{break-inside:avoid}a{color:inherit}.page{break-before:page}}@page{size:letter;margin:0.6in}
+</style>
+</head>
+<body>
+<p class="note"><b>Historical October 10 wiring reference.</b> Read the October 12 project handoff before resuming. This is not P4 or FPGA wiring guidance.</p>
+<h1>ADS127L18 → translator → S3</h1>
+<p class="muted">Wiring reference • October 10, 2026 • Intended connections, not confirmation of the physical assembly.</p>
+<p>The <b>Feather</b> generates the analog test signal and sends configuration commands. The <b>ADC</b> measures that signal and sends sample bits. The <b>S3</b> will receive those bits into memory. The translator changes digital voltage levels between 1.8 V and 3.3 V.</p>
+<div class="note"><b>Leave all power disconnected tonight.</b> The installed firmware is not ready for these new connections. Before operating the assembled system, we must prepare compatible firmware. Old firmware can drive S3 pins that are now intended to be inputs.</div>
+<h2>1. Power: three different voltages</h2>
+<pre>
+New regulated 6 V supply (+) ─────────── ADC +Vin
+Supply negative (−) ─────────────────── ADC GND
+                                       ADC −Vin: unused
+
+ADC board generates 1.8 V internally:
+ADC IOVDD solder pad ────────────────── Translator VCCB
+                                       Spare VCCB pin
+                                            │
+                                     Breadboard junction
+                                        ┌───┴───┐
+                                     ADC MODE  ADC RESET
+
+S3 3.3 V ────────────────────────────── Translator VCCA
+
+ADC GND ───── Translator GND ───── S3 GND
+                    │
+                Feather GND
+</pre>
+<p>Both VCCB header pins share the same connection. Use one for the IOVDD wire and the other to feed the MODE/RESET junction. <b>No additional wire needs soldering to the IOVDD pad.</b> Keep the 1.8 V junction separate from 3.3 V and 6 V.</p>
+<h2>2. Configuration: Feather talks to the ADC</h2>
+<pre>
+FEATHER ESP32 V2           TRANSLATOR                  ADC
+                          A: 3.3 V   B: 1.8 V
+SCK / GPIO5 ────────────── A2 ──────→ B2 ───────────── SCLK
+MO  / GPIO19 ───────────── A3 ──────→ B3 ───────────── SDI
+GPIO33 ────────────────── A4 ──────→ B4 ───────────── CS
+MI  / GPIO21 ───────────── A8 ←────── B8 ───────────── SDO
+</pre>
+<p>SCLK times command bits; SDI carries commands; CS selects the ADC; SDO returns replies. Each drawn A-to-B arrow is a connection <b>inside the translator chip</b>, not an extra jumper wire.</p>
+<h2>3. Samples: ADC sends data to the S3</h2>
+<pre>
+ADC                       TRANSLATOR                  S3
+                          B: 1.8 V   A: 3.3 V
+DCLK ──────────────────── B5 ──────→ A5 ───────────── GPIO9
+FSYNC ─────────────────── B6 ──────→ A6 ───────────── GPIO10
+DOUT0 ─────────────────── B7 ──────→ A7 ───────────── GPIO11
+</pre>
+<p>DCLK times the sample bits; FSYNC marks sample frames; DOUT0 carries the bits. These GPIO numbers belong to the <b>S3, not the Feather</b>. Keep the existing SD-card and Feather–S3 serial wiring. Remove old ADS1256 connections from reused pins.</p>
+<h2 class="page">4. ADC header pins: the neighboring pin is ground</h2>
+<p>On the ADC's two-column headers, <b>odd-numbered pins carry the named signals; even-numbered pins are GND</b>. They are not duplicate signal pins. Use the board labels and continuity checks to identify the columns; do not guess from viewing angle.</p>
+<table><tr><th>Header</th><th>Signal pins used here</th><th>Other column</th></tr>
+<tr><td>J4</td><td>1 RESET → 1.8 V<br>3 START → GND<br>7 MODE → 1.8 V</td><td>2, 4, 6, 8, 10, 12: GND</td></tr>
+<tr><td>J3</td><td>1 FSYNC → B6<br>3 DCLK → B5<br>19 DOUT0 → B7</td><td>2, 4, …, 20: GND</td></tr>
+<tr><td>J5</td><td>1 SDO → B8<br>3 SDI → B3<br>5 SCLK → B2<br>7 CS → B4</td><td>2, 4, 6, 8: GND</td></tr></table>
+<p>MODE high selects SPI configuration. RESET high releases the ADC from reset. START grounded allows start/stop commands through SPI. No TI PHI controller should be attached while our boards drive these connections.</p>
+<h2>5. Translator settings</h2>
+<ul><li>Use only the bottom <b>8-CHANNEL</b> section.</li><li><b>OEN8T jumper to adjacent GND:</b> enables outputs during normal operation. Remove it for the staged first-power checks below; its pull-up then disables outputs.</li><li><b>DIR8T and DIR_GND8T:</b> leave unjumpered. Factory pull-ups select A→B for channels 1–4 and B→A for channels 5–8.</li><li><b>A1/B1:</b> unused. Their header links are not populated by default.</li></ul>
+<h2>6. Analog test signal: no translator in this path</h2>
+<pre>
+Feather A1 / GPIO25 ─── Ch0p coax CENTER ─── ADC Ch0p
+Feather GND ─────────── Ch0p coax SHIELD ─── ADC ground
+
+Common GND ──────────── Ch0n coax CENTER ─── ADC Ch0n
+                       Ch0n shield lead: insulate loose end
+</pre>
+<p>Both SMA shells already share ADC ground. The Ch0n center still needs its own ground connection. The translator's A1 label is unrelated to the Feather's A1 DAC pin.</p>
+<p>ADC jumpers: <b>JP1 = EVM CLK</b> (onboard oscillator); <b>JP2 = AVSS–GND</b> (our single-supply setup).</p>
+<h2 class="page">7. Tomorrow: checks with every supply disconnected</h2>
+<ol>
+<li><b>Inspect the solder joints.</b> Look for bridges between IOVDD and GND or nearby components. Tape the wire insulation near the joint so movement does not pull the pad.</li>
+<li><b>Confirm grounds with the meter.</b> ADC GND, translator GND, S3 GND and Feather GND should be connected. On ADC J3/J4/J5, identify the grounded column before checking signal wires.</li>
+<li><b>Check each wire against the diagrams.</b> A wire's two endpoints should have near-zero resistance. Do not expect continuity through translator A2→B2, etc.; those paths contain active electronics.</li>
+<li><b>Check the 1.8 V junction.</b> IOVDD must connect to VCCB, J4 pin 1 (RESET), and J4 pin 7 (MODE). J4 pin 3 (START) goes to GND. RESET and MODE must not be wired to their neighboring ground pins.</li>
+<li><b>Check for supply shorts in resistance mode.</b> Check IOVDD-to-GND, S3 3.3 V-to-GND, and ADC +Vin-to-GND. Capacitors can cause a briefly low reading that rises. A persistent reading near zero needs investigation before power. There is no universal “correct” resistance for these assembled boards.</li>
+<li><b>Trace the separate supply wires.</b> 6 V goes only to ADC +Vin; 3.3 V goes to translator VCCA; IOVDD goes to VCCB. No direct 3.3 V GPIO wire may reach an ADC digital signal pin.</li>
+</ol>
+<p>These checks catch wrong wires and shorts. They do not establish high-speed operation or guarantee that every component is healthy.</p>
+<h2>8. First power-up: one stage at a time</h2>
+<ol>
+<li><b>Measure the new supply by itself.</b> Meter in DC-voltage mode, leads in COM and V sockets. Verify approximately +6.0 V and correct polarity before attaching it to the ADC. Never put the meter in current mode across the supply.</li>
+<li><b>Begin with the ADC alone.</b> With power off, unplug the ADC's external digital signal connections and the IOVDD feed to the translator/junction. Disconnect the DAC coax from the ADC too. Keep a record of each wire. Power only the ADC and measure its IOVDD pad to GND: approximately 1.8 V. Stop if incorrect. Turn power off again.</li>
+<li><b>Prepare the firmware separately.</b> Upload compatible Feather/S3 firmware while their new translator signal wires are disconnected. S3 GPIO9/10/11 must be inputs before they are connected to translator outputs. This firmware work remains to be done.</li>
+<li><b>Check both translator supplies with its outputs disabled.</b> With all power off, restore grounds, IOVDD/VCCB, VCCA and MODE/RESET/START straps. Remove the OEN8T jumper. Leave data wires and DAC coax disconnected for this check. Power the ADC and ESP32 boards; measure VCCA ≈ 3.3 V, VCCB ≈ 1.8 V, ADC MODE/RESET ≈ 1.8 V and START ≈ 0 V, all relative to GND.</li>
+<li><b>Only after those checks pass:</b> power everything off, restore the verified digital wires and OE jumper, and proceed to a slow SPI register-read test. Leave the analog cable disconnected until the digital checks pass. Reconnect it with power off; enable the DAC only while the ADC is powered.</li>
+</ol>
+<p>The first software test should identify the ADC and read configuration registers. High-speed capture comes after that. Do not use the old acquisition firmware as a wiring test.</p>
+<h2>Reference documents</h2>
+<p><a href="https://www.ti.com/lit/ug/sbau435/sbau435.pdf">ADC board guide</a>: Figure 2-9 for header wiring; §§2.2 and 2.12 for power.<br>
+<a href="https://www.ti.com/lit/ds/symlink/ads127l18.pdf">ADC datasheet</a>: reset, START and MODE behavior.<br>
+<a href="https://www.ti.com/lit/ug/sceu010/sceu010.pdf">Translator board guide</a>: direction jumpers and header connections.<br>
+<a href="https://www.ti.com/lit/ds/symlink/sn74axc8t245.pdf">Translator datasheet</a>: supply and enable behavior.</p>
+</body></html>

@@ -1,6 +1,8 @@
 # ESP32 Digitizer
 
-ESP32-based 24-bit data acquisition system built around an ADS1256 ADC.
+ESP32-based 24-bit recorder with a working ADS1256 path and separate ADS127L18
+capture experiments. Start with the [October 12 handoff](docs/STATUS-2026-10-12.md)
+for verified results, firmware state, and the paused P4/FPGA investigation.
 
 For the current SD backend and future DMA integration, start with
 [the backend reading guide](s3Recorder/src/backend/README.md).

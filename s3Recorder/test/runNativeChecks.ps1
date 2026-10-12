@@ -68,6 +68,10 @@ if %errorlevel% neq 0 exit /b 1
 cl /nologo /std:c++17 /EHsc /W4 /DS3_CHOKE_TEST=1 /I"$projectRoot/test/fakes" /I"$projectRoot/src" /I"$projectRoot/src/backend" /I"$projectRoot/test/hardware" /I"$projectRoot/../shared" /I"$projectRoot/lib/bufferedWriter/src" "$projectRoot/test/nativeChecks.cpp" "$projectRoot/src/commandProtocol.cpp" "$projectRoot/src/commandHistory.cpp" "$projectRoot/src/acquisition.cpp" "$projectRoot/test/hardware/acquisitionChoke.cpp" "$projectRoot/test/hardware/chokeEvents.cpp" "$projectRoot/test/hardware/chokeTest.cpp" "$projectRoot/src/fastCapture.cpp" "$projectRoot/src/featherLink.cpp" "$projectRoot/test/fakeRecordingService.cpp" "$projectRoot/src/sampleFormatter.cpp" "$projectRoot/lib/bufferedWriter/src/bufferedWriter.cpp" /Fe:chokeCommandChecks.exe
 if %errorlevel% neq 0 exit /b 1
 chokeCommandChecks.exe
+if %errorlevel% neq 0 exit /b 1
+cl /nologo /std:c++17 /EHsc /W4 /I"$projectRoot/test/fakes" /I"$projectRoot/../shared" /I"$projectRoot/../featherUi/src/adc" "$projectRoot/test/ads127DriverChecks.cpp" "$projectRoot/../featherUi/src/adc/ads127l18.cpp" "$projectRoot/../featherUi/src/adc/ads127LowRate.cpp" /Fe:ads127DriverChecks.exe
+if %errorlevel% neq 0 exit /b 1
+ads127DriverChecks.exe
 "@
 $batchPath = Join-Path $buildDir 'run.cmd'
 Set-Content -LiteralPath $batchPath -Value $batch -Encoding ascii

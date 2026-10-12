@@ -1,0 +1,24 @@
+/**
+ * @file ads127Pins.h
+ * @brief GPIO assignments for the ADS127L18 wiring agreed on October 10, 2026.
+ * Numbers are ESP32 GPIO numbers, not physical connector positions. Feather
+ * means the ESP32 V2 board; S3 means the separate recorder. All seven digital
+ * signals pass through the SN74AXC8T245 translator, A=3.3 V and B=1.8 V.
+ * This header only names wires; including it does not configure hardware.
+ */
+#pragma once
+
+namespace ads127Pins
+{
+
+    // Feather commands travel A->B; the reply travels B->A on channel 8.
+    constexpr int featherClock = 5;      // SCK -> A2/B2 -> ADC SCLK.
+    constexpr int featherMosi = 19;      // MO  -> A3/B3 -> ADC SDI.
+    constexpr int featherSelect = 33;    // GPIO33 -> A4/B4 -> ADC CS.
+    constexpr int featherMiso = 21;      // MI <- A8/B8 <- ADC SDO.
+
+    // ADC sample signals travel B->A. They must never be GPIO outputs on S3.
+    constexpr int s3DataClock = 9;       // DCLK -> B5/A5 -> S3.
+    constexpr int s3FrameSync = 10;      // FSYNC -> B6/A6 -> S3.
+    constexpr int s3Data = 11;           // DOUT0 -> B7/A7 -> S3.
+}

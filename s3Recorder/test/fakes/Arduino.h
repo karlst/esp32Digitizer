@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <string>
 #include <deque>
+#include <cstdio>
 #define IRAM_ATTR
 #define LOW 0
 #define HIGH 1
@@ -141,6 +142,17 @@ struct fakeSerial
      * @brief Capture startup debug text from the Feather monitor test.
      */
     void println(const char* text) { output += text; output += '\n'; }
+
+    /** @brief Capture formatted diagnostic output without a physical USB port. */
+    template<typename... Args>
+    size_t printf(const char* format, Args... args)
+    {
+        char text[1024];
+        const int count = std::snprintf(text, sizeof(text), format, args...);
+        const size_t retVal = count > 0 ? static_cast<size_t>(count) : 0;
+        output.append(text, retVal < sizeof(text) ? retVal : sizeof(text) - 1);
+        return retVal;
+    }
 };
 
 /**
