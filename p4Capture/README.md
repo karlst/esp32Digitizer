@@ -1,5 +1,8 @@
 # P4 ADC capture and SD recording diagnostic
 
+**Latest checkpoint: [October 17 overnight handoff](../docs/STATUS-2026-10-17-P4.md).
+The 30-minute ADC-to-SD test PASSED.** Read that handoff before resuming work.
+
 Status: initial revision passed Karl's PC tests and built/uploaded successfully.
 Five-second bench runs were clean through 256k samples/s; 512k filled the
 software queue and stopped with one dropped block. Timing-v2 also exhausted
@@ -39,8 +42,13 @@ zero reported capture/storage errors, overflow or unsaved bytes. Ring peak
 318,413/4,194,304; max write/flush 59,943 us; write-call throughput 28.978 Mbps.
 File: P4376247.BIN. This retains the capture-loss limitations described below.
 
-**SD-v5 extends ADC capture to 30 minutes and reserves 10 GB.** Tests/builds and
-hardware validation are pending Karl. Both P4 and Feather must be updated.
+**SD-v5 passed Karl's PC tests, both builds/uploads, and the 30-minute ADC-to-SD
+hardware test.** Current installed firmware is the matched 30-minute pair.
+Run 1844422070 saved 1,843,184,119 samples / 5,529,552,357 bytes to P4037876.BIN,
+with matching full-file CRC32 34e6f7ed, zero reported capture/storage errors,
+overflow or unsaved bytes. Ring peak was 355,717/4,194,304 bytes; maximum write/
+flush 72,455 us; write-call throughput 29.029 Mbps. ADC stop was confirmed.
+Earlier power-interrupted attempts failed and do not count toward this result.
 DMA, packing, status checks, SD clock, ring and transfer sizes are unchanged.
 Expected payload is 5,529,600,000 bytes (1,843,200,000 samples), approximately;
 normal capture start/stop limitations still apply. No existing files are deleted.
