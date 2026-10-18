@@ -67,3 +67,21 @@ These conventions apply throughout this project and may be updated as developmen
 ## Hardware verification preference (Karl, 2026-10-06)
 
 - Karl does not have and will not have an oscilloscope. Never ask him to obtain, use, or provide one. Plan verification using documentation, component markings, and software/hardware counters available on the project boards. Explain measurement limitations plainly.
+## Working agreement on this PC (Karl, October 17, 2026)
+
+- Karl authorizes source-file edits and firmware uploads after an explicit Go
+  or equivalent clear instruction for that work. Do not ask for a second
+  conversational confirmation for the same authorized action. Discuss proposed
+  changes first; read-only inspection may proceed without Go.
+- Karl handles all Git operations. Do not run Git commands, stage, commit, push,
+  pull, switch branches, or otherwise change Git state unless he explicitly
+  delegates a particular operation.
+- For now, Karl runs PowerShell commands himself as a learning exercise. Give
+  step-by-step commands and explain their purpose; do not independently build,
+  upload, or operate hardware. This preference may change when Karl says so.
+  Explicitly requested documentation edits may be performed directly.
+- Use plain language, explain unfamiliar terms, and give one manageable step at
+  a time. Clearly distinguish PC-side editing/building from board uploads and
+  execution. Treat this as a communication preference, not a judgment of ability.
+- Tool-enforced filesystem or device permission checks are separate from this
+  agreement. Do not claim they have been disabled or bypass them.

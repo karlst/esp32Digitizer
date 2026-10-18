@@ -1,10 +1,11 @@
 /**
  * @file ads127CaptureControl.cpp
- * @brief Manual five-second ADC/DMA bench test, controlled through Feather USB.
+ * @brief Manual finite ADC/DMA bench test, controlled through Feather USB.
  * setup() leaves DAC off and SPI inputs undriven. USB 'g' configures the ADC,
- * asks S3 to arm, waits for matching READY, then starts conversions. Five seconds
- * later (or on 's') it stops ADC then S3. UART reports are forwarded to USB so a
- * second USB cable is unnecessary. This is not the production web application.
+ * asks the receiver to arm, waits for matching READY, then starts conversions.
+ * After the shared run duration (or on 's') it stops ADC then receiver. The named
+ * P4 environment selects 60 seconds; the legacy S3 environment retains five.
+ * UART reports are forwarded to USB. This is not the production web application.
  */
 #include <Arduino.h>
 #include <driver/dac.h>
@@ -15,6 +16,7 @@
 #include "ads127Pins.h"
 #include "benchLine.h"
 #include "ads127BenchRate.h"
+#include "ads127BenchTiming.h"
 
 static ads127l18 adc(SPI, ads127Pins::featherClock, ads127Pins::featherMiso,
                      ads127Pins::featherMosi, ads127Pins::featherSelect);
@@ -30,13 +32,16 @@ static uint32_t stateMs = 0;
 static void printHelp()
 {
     Serial.println("ADS127 DMA CONTROL: DAC off; coax stays disconnected; SD untouched.");
-    Serial.println("g=16k, 1=32k, 2=64k, 3=128k, 4=256k, 5=512k, 6=1024k samples/s; 5 seconds each. s=stop; h=help.");
+    Serial.printf("g=16k, 1=32k, 2=64k, 3=128k, 4=256k, 5=512k, 6=1024k samples/s; %lu seconds each. s=stop; h=help.\n",
+                  static_cast<unsigned long>(ads127BenchTiming::runMs / 1000));
+    Serial.printf("Matching receiver firmware must allow %lu seconds from ARM.\n",
+                  static_cast<unsigned long>(ads127BenchTiming::receiverTimeoutMs / 1000));
     Serial.println("No automatic ADC commands at boot. Confirm ADC/translator power before g.");
 }
 
 /**
- * @brief Request ADC stop, then S3 stop, retaining uncertainty if SPI echo fails.
- * A stop request is not proof of stopped hardware; the echo and subsequent S3
+ * @brief Request ADC stop, then receiver stop, retaining uncertainty if SPI echo fails.
+ * A stop request is not proof of stopped hardware; the echo and subsequent
  * DONE are separate confirmations. Timer bounds waiting even if a wire fails.
  */
 static void requestStop()
@@ -51,7 +56,8 @@ static void requestStop()
 
 /**
  * @brief Configure while stopped and ask for DMA readiness using a fresh run ID.
- * Nothing starts if register readback fails or if the S3 still has older firmware.
+ * Nothing starts if register readback fails or no matching READY arrives.
+ * ARM2 does not negotiate duration: verify both firmware banners before a run.
  */
 static void requestRun(unsigned requestedStage)
 {
@@ -62,14 +68,15 @@ static void requestRun(unsigned requestedStage)
     else if (setupAdc.configure(requestedStage))
     {
         stage = requestedStage;
-        Serial.printf("TEST STAGE %u: %lu samples/s for 5 seconds.\n", stage,
-                      static_cast<unsigned long>(ads127BenchRates[stage].samplesPerSecond));
+        Serial.printf("TEST STAGE %u: %lu samples/s for %lu seconds.\n", stage,
+                      static_cast<unsigned long>(ads127BenchRates[stage].samplesPerSecond),
+                      static_cast<unsigned long>(ads127BenchTiming::runMs / 1000));
         runId = esp_random();
         if (runId == 0)
         {
             runId = 1;
         }
-        Serial.printf("ADC configured, stopped. Asking S3 to prepare DMA, run %lu.\n", runId);
+        Serial.printf("ADC configured, stopped. Asking receiver to prepare DMA, run %lu.\n", runId);
         Serial1.printf("ADC127 ARM2 %lu %u\n", runId, stage);
         state = benchState::waiting;
         stateMs = millis();
@@ -78,7 +85,7 @@ static void requestRun(unsigned requestedStage)
 
 /**
  * @brief Forward bench status and act only on a matching readiness/completion ID.
- * A ready receiver is not evidence of arriving data. S3 counters report that
+ * A ready receiver is not evidence of arriving data. Receiver counters report that
  * separately. Unexpected READY or stale replies never start the ADC.
  */
 static void acceptReply(const char* line)
@@ -97,7 +104,8 @@ static void acceptReply(const char* line)
             {
                 state = benchState::running;
                 stateMs = millis();
-                Serial.println("ADC START echo confirmed. Waiting for S3 DMA data; auto-stop in 5 seconds.");
+                Serial.printf("ADC START echo confirmed. Waiting for receiver DMA data; auto-stop in %lu seconds.\n",
+                              static_cast<unsigned long>(ads127BenchTiming::runMs / 1000));
             }
             else
             {
@@ -109,14 +117,14 @@ static void acceptReply(const char* line)
                  received == runId && state == benchState::stopping)
         {
             state = benchState::idle;
-            Serial.println("S3 stopped. Counts describe received DMA words; review bad/overrun/error counters.");
+            Serial.println("Receiver stopped. Counts describe received DMA words; review bad/overrun/error counters.");
         }
         else if ((sscanf(line, "ADC127 TIMEOUT %lu", &received) == 1 ||
                   sscanf(line, "ADC127 FAULT %lu", &received) == 1 ||
                   sscanf(line, "ADC127 FAILED %lu", &received) == 1) && received == runId &&
                  (state == benchState::waiting || state == benchState::running))
         {
-            Serial.println("S3 reported a fault, setup failure or timeout; requesting ADC stop.");
+            Serial.println("Receiver reported a fault, setup failure or timeout; requesting ADC stop.");
             requestStop();
         }
     }
@@ -148,7 +156,8 @@ void setup()
 /**
  * @brief Process manual commands, UART replies and bounded run/handshake timers.
  * Short nonblocking steps keep Stop responsive. Unplugging the PC terminal does
- * not disable the five-second automatic stop while Feather remains powered.
+ * not disable the automatic stop while Feather remains powered. The run timer
+ * starts after ADC START echo, whereas the receiver deadline starts at ARM.
  */
 void loop()
 {
@@ -184,16 +193,17 @@ void loop()
     const uint32_t elapsed = millis() - stateMs;
     if (state == benchState::waiting && elapsed >= 2000)
     {
-        Serial.println("No matching S3 READY within 2 seconds; ADC was not started.");
+        Serial.println("No matching receiver READY within 2 seconds; ADC was not started.");
         requestStop();
     }
-    else if (state == benchState::running && elapsed >= 5000)
+    else if (state == benchState::running && elapsed >= ads127BenchTiming::runMs)
     {
         requestStop();
     }
     else if (state == benchState::stopping && elapsed >= 2000)
     {
-        Serial.println("No S3 DONE reply; receiver state unconfirmed. Its local timeout is 8 seconds from ARM.");
+        Serial.printf("No receiver DONE reply; receiver state unconfirmed. Expected local timeout is %lu seconds from ARM.\n",
+                      static_cast<unsigned long>(ads127BenchTiming::receiverTimeoutMs / 1000));
         state = benchState::idle;
     }
     delay(1);

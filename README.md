@@ -17,6 +17,42 @@ ADS1256 -> ESP32-S3 -> ring buffer -> microSD
                               -> decimated/status data -> ESP32 Feather -> browser UI
 ```
 
+## P4 chip revision: development versus production (October 17, 2026)
+
+**Production planning: use revision 3.2 as the current baseline, rather than
+buying more revision 1.3 chips. Recheck availability and Espressif guidance before
+ordering production parts.** Espressif recommends migrating to revision 3.2 and
+has announced plans to discontinue revision 1.3; this is not a claim that a final
+last-order date has been established here.
+
+Our Waveshare ESP32-P4-Module-DEV-KIT contains a **revision 1.3** P4, confirmed
+with esptool on COM3. It remains useful for initial development and capture
+experiments. Reliable ADC capture on this board has not yet been demonstrated.
+Before finalizing our own board layout or production recording design, obtain
+hardware using the intended production revision and repeat capture, sustained
+recording, and data-integrity tests. Passing tests on 1.3 alone does not qualify
+3.2 hardware.
+
+The revision change affects both software and the physical circuit:
+
+- **Firmware:** revisions 1.x and 3.x cannot run the same compiled binary.
+  Reconfigure and rebuild for the actual chip; changing this setting does not
+  upgrade the physical chip. Our installed ESP-IDF is v5.5.6. For the current
+  1.3 board, enable `CONFIG_ESP32P4_SELECTS_REV_LESS_V3` and select minimum revision
+  v1.0 (which includes v1.3). For 3.x, disable that option and select the
+  appropriate minimum revision. The initial example defaulted to minimum v3.1,
+  which does not match our present board.
+- **Custom PCB:** chip pin 54 changes from unconnected on 1.3 to the VDD_HP power
+  connection on 3.2. Follow the current hardware design guide and the full change
+  notice, including associated power-circuit changes. Do not simply substitute
+  the newer bare chip into an old layout. When buying a complete module or
+  development board, check that product's own revision and pinout too.
+- **Ordering:** the notice identifies ESP32-P4NRW16X and ESP32-P4NRW32X as the
+  replacements for ESP32-P4NRW16 and ESP32-P4NRW32 respectively. Verify the actual
+  delivered silicon revision rather than relying only on a listing saying P4.
+
+Primary source: [Espressif revision 3.2 upgrade and revision 1.3 end-of-life planning notice, May 20, 2026](https://documentation.espressif.com/en/PCN202600801_ESP32-P4_Chip_Revision_v3.2_Upgrade_Chip_Revision_v1.3_Demand_Collection_and_EOL_Plan_Description.html).
+
 ## Repository Layout
 
 ```text
