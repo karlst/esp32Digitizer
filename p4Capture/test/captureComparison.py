@@ -1,3 +1,15 @@
+# Copyright (C) 2026 Karl Stock
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# This file is part of ESP32 Digitizer.
+# You may redistribute and/or modify it under the GNU General Public License
+# as published by the Free Software Foundation, either version 3 of the License,
+# or (at your option) any later version.
+#
+# Distributed WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General
+# Public License in the repository LICENSE file or <https://www.gnu.org/licenses/>.
+
 """Collect simultaneous Feather/P4 RAM images and compare waveform shape.
 
 Karl runs this with both boards and the ADC powered, A1->A2 jumper and TI coax

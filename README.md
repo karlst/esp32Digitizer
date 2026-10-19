@@ -1,5 +1,23 @@
 # ESP32 Digitizer
 
+## License
+
+Copyright (C) 2026 Karl Stock.
+
+The project-owned source code, scripts, browser assets, build files, and
+documentation are licensed under the **GNU General Public License, version 3
+or (at your option) any later version** (`GPL-3.0-or-later`). See [LICENSE](LICENSE)
+for the full terms. The software is provided without warranty, including any
+implied warranty of merchantability or fitness for a particular purpose.
+
+Third-party libraries, frameworks, SDK components, and reference material retain
+their respective copyrights and licenses. This notice does not relicense them.
+Generated build copies of dependencies must retain their upstream notices.
+Captured measurement data and logs are not source code and are not assigned a
+license by the source-file headers.
+
+## Project overview
+
 ESP32-based 24-bit recorder with a working ADS1256 path and separate ADS127L18
 capture experiments. Start with the [October 12 handoff](docs/STATUS-2026-10-12.md)
 for verified results, firmware state, and the paused P4/FPGA investigation.
