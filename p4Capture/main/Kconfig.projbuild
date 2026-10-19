@@ -1,0 +1,14 @@
+menu "P4 capture diagnostics"
+
+config P4_CAPTURE_PROFILE
+    bool "Measure CPU headroom during a 60-second capture"
+    default n
+    select FREERTOS_GENERATE_RUN_TIME_STATS
+    help
+        Development-only CPU and memory measurements. Selects 60/65-second
+        run/deadline timing; pair with Feather ads127-p4-capture-60s firmware.
+        Samples runtime counters about once per second, prints after capture.
+        Leave disabled for the normal 30-minute build. Use a separate sdkconfig
+        so FreeRTOS runtime-counter overhead also stays out of normal builds.
+
+endmenu

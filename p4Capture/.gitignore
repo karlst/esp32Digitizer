@@ -4,4 +4,6 @@
 /sdkconfig.sd
 /sdkconfig.sd.old
 /build-sd/
+/build-profile/
+/sdkconfig.profile.old
 /.pio/

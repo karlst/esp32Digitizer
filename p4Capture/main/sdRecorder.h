@@ -9,12 +9,22 @@
 #include "bufferedWriter.h"
 #include "ff.h"
 #include "sdmmc_cmd.h"
+#include "sdkconfig.h"
+#if CONFIG_P4_CAPTURE_PROFILE
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#endif
 
 /** @brief One prepared recording, with explicit asynchronous preparation and saving.
  * State publication transfers ownership: ready permits claim(), running permits
  * CPU1 submissions, finishing is published only after CPU1 has drained. Disk
  * calls never occur in either submission method. Files are created exclusively,
  * never replaced.
+ * bufferedWriter owns the ring and protects queued bytes until disk writing
+ * finishes. This adapter owns board/card configuration and file metadata.
+ * prepare()/finish() request work by changing atomic state; their return does
+ * not mean the asynchronous disk work is complete. Console READY/SAVED/FAILED
+ * is printed by the disk task after the corresponding operation finishes.
  */
 class sdRecorder : public byteSink
 {
@@ -26,7 +36,13 @@ public:
     bool submitSamples(const uint32_t* words, size_t count);
     bool failed() const;
     void finish(bool captureClean, uint32_t expectedSamples = 0);
+#if CONFIG_P4_CAPTURE_PROFILE
+    TaskHandle_t profileTask() const;
+#endif
 private:
+#if CONFIG_P4_CAPTURE_PROFILE
+    TaskHandle_t diskTask = nullptr;
+#endif
     enum class phase { idle, preparing, ready, running, finishing, complete, error, blocked };
     static void taskEntry(void* context);
     void work();

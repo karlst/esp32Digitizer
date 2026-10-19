@@ -1,58 +1,19 @@
 # P4 ADC capture and SD recording diagnostic
 
-**Latest checkpoint: [October 17 overnight handoff](../docs/STATUS-2026-10-17-P4.md).
-The 30-minute ADC-to-SD test PASSED.** Read that handoff before resuming work.
+Start with [CURRENT-SETUP.md](CURRENT-SETUP.md) for firmware choices, matching
+PC commands, current wiring and diagnostic boundaries. Results and their limits
+are recorded in [the October 19 checkpoint](../docs/STATUS-2026-10-19-P4.md).
+Open decisions are in [TODO.md](../TODO.md).
 
-Status: initial revision passed Karl's PC tests and built/uploaded successfully.
-Five-second bench runs were clean through 256k samples/s; 512k filled the
-software queue and stopped with one dropped block. Timing-v2 also exhausted
-the pool at 512k, measuring decoder throughput below the input requirement.
-Grouped-v3 subsequently passed PC tests and five-second hardware runs through
-1.024M samples/s. The **60-second memory-only run also completed**, receiving
-61,439,431 words at an estimated 1,024,020.0 samples/s, with all reported error
-counters zero. Decoder throughput was 12.792 MB/s against 8.192 MB/s required;
-queue peak was 3/16. This does not establish that every generated sample arrived.
-One earlier post-upload ARM received no READY; restarting P4 restored the link.
-That startup handshake issue has not been diagnosed or claimed fixed.
+The latest uploaded pair is Feather `ads127-p4-constant` and P4 profiling/RAM
+firmware. The constant-voltage comparison completed on October 19 with factory
+reference calibration reported by Feather. This is diagnostic firmware, not a
+production qualification. Full-rate SD recording does not average samples.
 
-**SD-v1 passed Karl's PC tests and built/uploaded after a callback-type fix.**
-Both cards then failed mounting with FatFs error 13; both were confirmed exFAT.
-SD-v2 mounted exFAT and preallocated successfully. The first combined ADC/SD
-run stopped after about 7.9 seconds: 8,062,439 decoded words, zero reported
-capture errors, recording-ring peak 4,194,300/4,194,304 bytes and one overflow.
-It saved 32,243,708 accepted bytes; draining afterward did not recover the
-rejected batch. Decoder throughput was 8.884 MB/s against 8.192 MB/s input.
-SD-v3 passed Karl's PC checks and built/uploaded, but the first SD-only start
-hit a stack protection fault in sdTest before its START message. The 4 KiB task
-stack included a 2 KiB local batch and floating-point startup formatting.
-SD-v3b moved that batch to the global object's internal RAM, reserved an 8 KiB
-task stack, and used integer startup formatting. Karl built and uploaded it.
-This crash produced no usable SD throughput result. Test rates, write sizes,
-preallocation, pacing and the recording buffer are unchanged.
-SD-only **26 Mbps passed for 60 seconds**: 195,000,000 bytes, ring peak 368,700,
-zero overflow/errors/unsaved bytes, and every generated word verified.
-Write-call throughput was 29.190 Mbps. **32.768 Mbps failed after 7.616 seconds**:
-ring overflow, 31,194,468 accepted bytes saved, zero pattern errors, write-call
-throughput 29.123 Mbps. These results concern the card currently installed;
-do not assume it is the original S3 reference card.
-
-**SD-v4 passed the combined 60-second ADC-to-SD test:** 61,439,431 samples,
-184,318,293 bytes (exactly three/sample), matching readback CRC f75cf499,
-zero reported capture/storage errors, overflow or unsaved bytes. Ring peak
-318,413/4,194,304; max write/flush 59,943 us; write-call throughput 28.978 Mbps.
-File: P4376247.BIN. This retains the capture-loss limitations described below.
-
-**SD-v5 passed Karl's PC tests, both builds/uploads, and the 30-minute ADC-to-SD
-hardware test.** Current installed firmware is the matched 30-minute pair.
-Run 1844422070 saved 1,843,184,119 samples / 5,529,552,357 bytes to P4037876.BIN,
-with matching full-file CRC32 34e6f7ed, zero reported capture/storage errors,
-overflow or unsaved bytes. Ring peak was 355,717/4,194,304 bytes; maximum write/
-flush 72,455 us; write-call throughput 29.029 Mbps. ADC stop was confirmed.
-Earlier power-interrupted attempts failed and do not count toward this result.
-DMA, packing, status checks, SD clock, ring and transfer sizes are unchanged.
-Expected payload is 5,529,600,000 bytes (1,843,200,000 samples), approximately;
-normal capture start/stop limitations still apply. No existing files are deleted.
-The original Feather/S3 environment retains its five-second run duration.
+CardP passed the earlier 30-minute SD run. See [early test history](../docs/P4-EARLY-TEST-HISTORY.md)
+and the [October 17 handoff](../docs/STATUS-2026-10-17-P4.md) for that evidence.
+Historical revision notes later in this document explain implementation changes;
+they do not describe the currently installed firmware.
 
 This standalone ESP-IDF project replaces Hello World on the P4 when uploaded.
 The goal is to investigate receiving the ADS127L18 stream through PARLIO and
@@ -388,6 +349,101 @@ Zero errors in this short test do **not** qualify sustained disk recording.
 
 ## Buffer ownership and failure behavior
 
+Optional CPU/memory headroom measurements are documented in [PROFILE.md](PROFILE.md).
+They use a separate 60-second build and are disabled by default; the normal
+30-minute build does not compile the profiler.
+
+The source now includes a tutorial reading path: start with the overview in
+`main/main.cpp`, then `receiveBlock()`, `decodeTask()`,
+`frameDecoder::feed()/finishWord()`, and
+`sdRecorder::submitSamples()/write()/finishFile()`. The shared ring implementation
+is `../s3Recorder/lib/bufferedWriter/src/bufferedWriter.cpp`; its comments cover
+both the S3 and P4 callers.
+
+### Hardware capture versus software work
+
+At stage 6 the ADC output clock DCLK is 32.768 MHz (30.52 ns/cycle, approximately
+15.26 ns each high/low half). The ADC changes DOUT0 after falling edges; PARLIO
+captures DOUT0 and FSYNC together on rising edges. FSYNC's low-to-high transition
+starts the 8-bit status header followed by the 24-bit sample. FSYNC stays high
+for half the frame period (16 clocks here), then low for the other half. Its
+falling edge does not end the sample. These timings are specified by the ADC
+datasheet, not measured waveforms from this board.
+
+Four clock instants produce one packed byte in memory: DOUT0 in bits 0,2,4,6;
+FSYNC in bits 1,3,5,7; earliest pair in bits 1:0. Therefore one 32-clock frame
+occupies eight raw bytes. PARLIO's hardware receive FIFO preserves arrival order
+while GDMA transfers the packed stream into RAM. FIFO means First In, First Out;
+the FIFO's exact capacity and internal write granularity have not been verified
+here. The byte layout does not establish that hardware writes the FIFO exactly
+once per four clocks.
+
+**Correction to the October 18 conversation:** this P4 uses **GDMA-AXI**, not
+GDMA-AHB, for PARLIO. IDF 5.5.6's ESP32-P4 `soc/gdma_channel.h` selects AXI and
+`esp_driver_parlio/src/parlio_priv.h` selects `gdma_new_axi_channel`. DMA is
+hardware that transfers bytes; the DMA buffer is RAM, not memory inside DMA.
+There is no CPU interrupt per input clock. Completed DMA chunks cause driver
+interrupt handling on Core 0, which calls our `receiveBlock()` in that context.
+Core 1's decoding and Core 0's disk writing are ordinary scheduled tasks.
+
+### Four distinct storage areas
+
+| Area | Capacity | Who fills / drains it |
+|---|---:|---|
+| PARLIO hardware FIFO | Not verified here | PARLIO / DMA hardware |
+| DMA RAM buffer | 32 KiB internal RAM | DMA / Core 0 callback copies completed chunks |
+| Private raw block pool, `blocks` | 16 x 4096 bytes plus metadata | Core 0 copies / Core 1 decodes |
+| Recording ring | 4 MiB PSRAM | Core 1 submits 3-byte samples / Core 0 writes to SD |
+
+`freeBlocks` and `readyBlocks` are queues of **addresses into the same private
+pool**, not additional data buffers. Core 0 takes a free address, copies into
+that block with `memcpy()`, and sends its address to `readyBlocks`. Core 1 takes
+the oldest ready address, decodes and submits the sample bytes to the recording
+ring, then returns the address to `freeBlocks`. Only then may Core 0 overwrite
+that block. The ready queue has 17 pointer slots: 16 real blocks plus one null
+shutdown marker. `queueHigh` counts waiting blocks, excluding one held by Core 1.
+
+The 32 KiB allocation is **not eight 4096-byte DMA chunks**. For our aligned
+buffer and 64-byte cache alignment, IDF 5.5.6's
+`parlio_rx_mount_transaction_buffer()` creates seven 4032-byte chunks followed
+by 2240 and 2304 bytes. At stage 6 those represent 16128, 8960 and 9216 DCLK
+cycles, taking 492.19, 273.44 and 281.25 microseconds respectively. There are
+nine chunk completions per 4 ms (2250 callbacks/s average); interrupt service
+may be delayed after completion. Recheck this derivation if the SDK, alignment
+or allocation changes. Chunk boundaries need not coincide with sample frames.
+
+The allocation sizes were engineering starting choices subsequently tested,
+not proven optimal sizes. At 8.192 MB/s raw input, 32 KiB spans 4 ms; 64 KiB
+nominally spans 8 ms. Partially filled/private blocks in use reduce waiting
+capacity. DMA capacity cushions response/copy delays; the private pool cushions
+decoder scheduling delays. A larger private pool cannot rescue an overwritten
+DMA chunk or make a persistently slow decoder keep up. The early slow decoder
+exhausted this same pool; later optimization passed without increasing it.
+
+### Status bits and current test policy
+
+The high byte of each decoded word is TI's STATUS_DP header:
+
+| Bits | Meaning | Current bad-header condition |
+|---|---|---|
+| 7 | Power event | Counted in header histogram, not rejected alone |
+| 6 | ADC error | 1 |
+| 5 | Modulator saturation | Counted in header histogram, not rejected alone |
+| 4 | Repeated conversion data | 1 (not merely equal numerical sample values) |
+| 3 | PWDN, with 1 meaning normal operation | 0 |
+| 2:0 | Channel ID | Anything except channel 0 |
+
+`(header & 0x5f) != 0x08` counts one bad header per affected word, preserves the
+first eight bad words for console reporting, and still submits the sample.
+Bad headers do not immediately stop capture. At finalization, any bad header
+invalidates the recording: the file is preserved with an invalid header and
+`SD FAILED`, even if disk writes/readback succeed. Power/saturation flags alone
+do not cause this failure. The histogram retains counts, not sample locations.
+Status bytes and FSYNC are omitted from the three-byte sample payload; production
+quality reporting and recovery policy remain undecided in `../TODO.md`.
+
+### Scheduling, shutdown and limits
+
 CPU0 handles commands and installs the DMA interrupt. CPU1 decodes. The driver
 uses a 32 KiB circular DMA allocation; its interrupt supplies completed
 descriptors. The callback immediately copies each descriptor into one of sixteen
@@ -408,9 +464,12 @@ also use bitwise handling without reading past the delivered buffer.
 This reduces repeated per-byte decisions even when FSYNC changes inside a
 group, and handles the 32-clock frames needed at 1.024M samples/s.
 All original header, frame period, short-word and tail checks remain enabled.
-An inability to keep up increments drops and causes FAULT. A 65-second
-receiver deadline from ARM causes TIMEOUT if STOP is lost. Feather independently
-stops its normal run after 60 seconds and reacts to FAULT/TIMEOUT. A P4 fault
+An inability to obtain a free private block increments drops and causes FAULT.
+The current endurance build has an 1805-second receiver deadline from ARM and
+an 1800-second Feather run timer from confirmed ADC START. The retained long-run
+build uses 65/60 seconds instead; both boards must use matching timing builds.
+The receiver reports TIMEOUT if its deadline expires without STOP; Feather
+reacts to FAULT/TIMEOUT by requesting an ADC stop. A P4 fault
 cannot physically stop the ADC if the command link is disconnected.
 
 ESP-IDF 5.5.6 cyclic RX uses DMA descriptors without ownership checking and
@@ -505,4 +564,4 @@ above; the older raw-byte counters have now been widened for 30 minutes.
 
 Karl built and uploaded both revisions and supplied the completed run log.
 The assistant has not independently built, uploaded, or operated hardware.
-The currently pending work is validation of the SD revision described above.
+The SD endurance run subsequently passed; current open work is listed in ../TODO.md.

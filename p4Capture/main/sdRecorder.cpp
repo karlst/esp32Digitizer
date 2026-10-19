@@ -3,6 +3,28 @@
  * A 4 MiB PSRAM ring absorbs card stalls, not sustained insufficient throughput.
  * The disk task copies each 16 KiB slice into internal RAM before f_write(),
  * avoiding a dependency on the card driver's ability to DMA from PSRAM.
+ *
+ * Reading path: submitSamples() -> submitBytes() for Core 1's data submission;
+ * work() -> bufferedWriter::pump() -> write() for Core 0's actual card writes;
+ * finish() -> finishFile() for shutdown and verification. A task is a software
+ * thread scheduled by FreeRTOS, not an interrupt handler. Both paths can run
+ * concurrently on different cores, coordinated by the writer's atomic head/tail
+ * positions (positions updated so the other core sees complete copies).
+ *
+ * Core 1 receives decoded 32-bit status+sample words, packs their low 24 bits
+ * into packedSamples, then writer.submit() COPIES those bytes to ring memory.
+ * No queued pointer refers back to the decoder batch or its raw input block.
+ * Core 0 later asks writer.pump() to write a contiguous span, normally up to
+ * 128 KiB. This calls our write(), which uses a 16 KiB temporary internal-RAM
+ * buffer and f_write(). The ring span remains unavailable for reuse until the
+ * write succeeds. PSRAM is external RAM, separate from the internal DMA and
+ * raw-block allocations in main.cpp. The 4 MiB ring holds about 1.37 seconds of
+ * stage-6 three-byte samples when empty; it cannot fix a persistently slow card.
+ *
+ * SD READY means the file was prepared, ADC DONE means capture stopped, and
+ * SD SAVED means capture checks plus drain/readback/header/close succeeded.
+ * Full readback CRC compares saved bytes with accepted bytes; it does not prove
+ * analog accuracy or that hardware delivered every ADC-generated sample.
  */
 #include "sdRecorder.h"
 #include "sdTestData.h"
@@ -58,12 +80,31 @@ static uint64_t recordingClock()
 /** @brief Allocate once and start the disk thread without mounting or starting capture. */
 bool sdRecorder::initialize()
 {
+    // Retain the task handle only in diagnostic builds. The normal build does
+    // not allocate profiling state or ask FreeRTOS to return this handle.
+#if CONFIG_P4_CAPTURE_PROFILE
+    TaskHandle_t* taskHandle = &diskTask;
+#else
+    TaskHandle_t* taskHandle = nullptr;
+#endif
     scratch = static_cast<uint8_t*>(heap_caps_aligned_alloc(
         64, scratchBytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA | MALLOC_CAP_8BIT));
     const bool retVal = scratch != nullptr && writer.initializeMemory(allocateRing, releaseRing) &&
-        xTaskCreatePinnedToCore(taskEntry, "sdWriter", 8192, this, 4, nullptr, 0) == pdPASS;
+        xTaskCreatePinnedToCore(taskEntry, "sdWriter", 8192, this, 4, taskHandle, 0) == pdPASS;
     return retVal;
 }
+
+#if CONFIG_P4_CAPTURE_PROFILE
+/**
+ * @brief Borrow the persistent writer task handle for runtime/stack diagnostics.
+ * Main calls this after initialize() succeeds. The task is never deleted, so
+ * the profiler may inspect it without owning, stopping or scheduling it.
+ */
+TaskHandle_t sdRecorder::profileTask() const
+{
+    return diskTask;
+}
+#endif
 
 /** @brief CPU0 requests preparation; only a closed previous recording may be replaced. */
 bool sdRecorder::prepare()
@@ -103,6 +144,10 @@ bool sdRecorder::submitWords(const uint32_t* words, size_t count)
  * No status checks are removed: frameDecoder checks/counts every status before
  * invoking this callback. Invalid status still invalidates the completed run.
  * A failed pack or submission returns false, latching decoder output failure.
+ * Called on Core 1 by recordWords(), not by an ISR. count is WORDS, while bytes
+ * and ring capacity are BYTES. 0x08123456 becomes 56 34 12 in the file: discard
+ * status 08 after checking it, store the least-significant sample byte first.
+ * A bad header's sample is still submitted; final captureClean will be false.
  */
 bool sdRecorder::submitSamples(const uint32_t* words, size_t count)
 {
@@ -116,6 +161,9 @@ bool sdRecorder::submitSamples(const uint32_t* words, size_t count)
 /** @brief Producer copies bytes into owned ring memory and checksums accepted bytes.
  * writer.submit is the actual copy; the source batch may be reused afterward.
  * submittedBytes and CRC are read by the disk task only after the producer stops.
+ * Here producer means the Core 1 ADC decoder (or mutually exclusive synthetic
+ * test). True promises RAM acceptance only. If no space exists, writer.submit()
+ * rejects the entire batch and latches failure; it never waits for an SD write.
  */
 bool sdRecorder::submitBytes(const uint8_t* data, uint32_t bytes)
 {
@@ -259,6 +307,11 @@ bool sdRecorder::prepareFile()
 /** @brief Disk-thread byte destination; return the exact prefix accepted by f_write.
  * memcpy copies from the PSRAM ring to internal scratch; f_write performs the
  * card transfer. Ring ownership is retained until every slice returns.
+ * bufferedWriter::pump() calls this on Core 0 with a pointer into its ring.
+ * data+retVal advances past bytes already written; amount limits each copy to
+ * scratch capacity. f_write() is a FatFs filesystem call, which reaches the
+ * SDMMC driver and SD hardware; it may wait for the card. It is not PARLIO DMA.
+ * DMA/SD interrupt handling belongs to those drivers, not this ordinary task.
  */
 size_t sdRecorder::write(const uint8_t* data, size_t length)
 {

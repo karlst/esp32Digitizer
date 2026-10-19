@@ -19,3 +19,8 @@ backups/*.bin
 /fpos/
 # Local research extracts and scratch images.
 /tmp/
+
+# Generated plots, capture sessions and scratch analysis. Curated raw evidence
+# is intentionally kept under docs/evidence instead. These rules do not untrack
+# files already committed; Karl reviews tracked files before committing.
+/work/

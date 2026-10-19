@@ -1,5 +1,24 @@
 /** @file frameDecoder.cpp
  * @brief Fixed framing; never search for a convenient header or shift bad data.
+ *
+ * Reading path: feed() -> beginFrame()/appendBits() -> finishWord() ->
+ * flushOutput(). Core 1's decodeTask calls feed() with a private raw block;
+ * desktop tests call the same functions without any chip hardware.
+ *
+ * PARLIO has already captured DOUT0 (serial ADC bits) alongside FSYNC (the
+ * separate frame-start wire) and DMA has moved them into RAM. Each byte holds
+ * four clock instants, earliest in bits 1:0. We do not read GPIO pins here.
+ * Only a captured FSYNC transition from 0 to 1 starts a frame. A continuing 1
+ * does not start more frames. At stage 6 FSYNC is high for the first 16 clocks,
+ * low for the next 16; falling halfway through does NOT end the sample.
+ * DOUT0's first 8 bits are status, the next 24 the signed measurement value.
+ * Thus 8 raw bytes reconstruct one 32-bit word; sdRecorder later retains only
+ * 3 sample bytes. A raw block may start/end partway through a frame, so decoder
+ * state persists between feed() calls. Only reset() starts a new acquisition.
+ *
+ * References: TI ADS127L18 datasheet section 5.7 (FSYNC half-period high/low),
+ * sections 7.4.10.3-7.4.10.6 (status and data timing).
+ * https://www.ti.com/lit/ds/symlink/ads127l18.pdf
  */
 #include "frameDecoder.h"
 #include <array>
@@ -100,6 +119,9 @@ void frameDecoder::reset(uint32_t clocksPerFrame)
  * even when a frame spans group boundaries. Block tails use the bitwise path.
  * Multiple rises within sixteen clocks indicate unusual input: use clockBit()
  * for the whole group so no early frame, short word or error gets hidden.
+ * data is borrowed only until this call returns; length is its valid byte count,
+ * not block capacity. feed() returns no value: results accumulate in counts and
+ * complete words go to the configured callback. No disk I/O occurs here.
  */
 void frameDecoder::feed(const uint8_t* data, size_t length)
 {
@@ -115,6 +137,9 @@ void frameDecoder::feed(const uint8_t* data, size_t length)
             (static_cast<uint32_t>(group[1]) << 8) |
             (static_cast<uint32_t>(group[2]) << 16) |
             (static_cast<uint32_t>(group[3]) << 24);
+        // 0xaaaaaaaa is alternating 1/0 bits: keep FSYNC, remove DOUT0.
+        // rising retains only positions where current FSYNC=1 and previous=0.
+        // previousHigh carries the last level across groups AND raw blocks.
         const uint32_t markers = packed & 0xaaaaaaaaU;
         const uint32_t rising = markers & ~((markers << 2) | (previousHigh ? 2U : 0U));
         if (rising == 0)
@@ -167,6 +192,9 @@ void frameDecoder::feed(const uint8_t* data, size_t length)
  * @brief Record a rising FSYNC at an absolute captured-clock position.
  * Used by both grouped and bitwise paths. An early next frame still records
  * both period and short-word errors before discarding that incomplete word.
+ * position counts captured DCLK instants since reset, not CPU cycles or bytes.
+ * frameClocks is 32 at stage 6, larger in slower configurations. Checking this
+ * spacing detects some missing/extra clocks but cannot prove none were lost.
  */
 void frameDecoder::beginFrame(uint64_t position)
 {
@@ -226,14 +254,36 @@ void frameDecoder::clockBit(unsigned pair)
 
 /**
  * @brief Count a complete received word, keeping invalid headers visible.
- * Header mask 0x5f checks error, repeated data, channel-active and channel ID.
- * Power/modulator flags are retained in the histogram, as in the S3 diagnostic.
+ * The first transmitted byte becomes word bits 31:24. TI STATUS_DP layout:
+ * bit 7 PWR_FLAG: power event since its underlying flags were cleared.
+ * bit 6 ERR_FLAG: ADC error indication (not a complete explanation of its cause).
+ * bit 5 MOD_FLAG: modulator saturation inside the ADC conversion circuitry.
+ * bit 4 RPT_DATA: repeated conversion data, not merely equal numeric samples.
+ * bit 3 PWDN: 1 means NORMAL operation; 0 means power-down/standby.
+ * bits 2:0 CH_ID: which ADC channel produced this word, numbered 0 through 7.
+ *
+ * Header mask 0x5f selects bits 6,4,3,2,1,0. Expected masked value 0x08 means
+ * no error, new data, normal operation, channel zero. Power and saturation bits
+ * are deliberately excluded from badHeaders, but included in headers[] counts.
+ * The usual clean byte is 0x08; 0x88/0x28 also pass THIS mask. That does not make
+ * a power event or saturated analog measurement harmless or correct.
+ *
+ * Current test policy: count one badHeaders per rejected header regardless of
+ * how many bits are wrong; retain the first eight complete bad words. Continue
+ * counting and forwarding their sample values: no automatic stop or filtering
+ * occurs here. stopCapture() later invalidates the recording if badHeaders!=0.
+ * The histogram records how often each byte occurred, not its sample position.
+ * Per-sample status is omitted from the SD payload. Production responses and
+ * persistent quality/event reporting are still undecided (repository TODO.md).
  * The 24-bit two's-complement sample is expanded to signed 32-bit arithmetic;
  * e.g. 0xffffff means -1, not 16777215. This does not check payload correctness.
  */
 void frameDecoder::finishWord()
 {
     const unsigned header = word >> 24;
+
+    // The 256 histogram entries cover every possible status byte. This retains
+    // excluded power/saturation flags for reporting even when badHeaders stays 0.
     ++counts.words;
     ++counts.headers[header];
     if ((header & 0x5fU) != 0x08U)
@@ -241,9 +291,15 @@ void frameDecoder::finishWord()
         if (counts.badHeaders < 8) { counts.badExamples[counts.badHeaders] = word; }
         ++counts.badHeaders;
     }
+
+    // Interpret bit 23 as the sign. These latest values are diagnostics; the
+    // output batch below carries the original status+sample word without changes.
     counts.latestWord = word;
     const int32_t value = static_cast<int32_t>(word & 0xffffffU);
     counts.latestSample = (value & 0x800000) ? value - 0x1000000 : value;
+
+    // At most 512 complete words per callback. A failure stops later submissions
+    // but not decoding/counters, so a storage problem cannot hide input errors.
     if (output != nullptr && !outputBroken)
     {
         outputWords[outputCount++] = word;
@@ -261,7 +317,13 @@ void frameDecoder::setOutput(outputCallback callback, void* context)
     outputContext = context;
 }
 
-/** @brief Submit the current batch without retaining a pointer in the receiver. */
+/**
+ * @brief Synchronously offer the completed words to the configured receiver.
+ * In the P4 program output is recordWords(), which calls submitSamples() and
+ * copies the three-byte representation into the ring before returning. Therefore
+ * this outputWords array can be reused immediately; it is not a queued pointer
+ * to the raw input block. A false result latches outputBroken until reset().
+ */
 void frameDecoder::flushOutput()
 {
     if (outputCount != 0)

@@ -2,6 +2,11 @@
  * @brief Portable sample packing and versioned P4 commissioning file headers.
  * ADC v3 stores three-byte signed samples and 64-bit sizes; synthetic v1 is unchanged.
  * These helpers do not allocate memory, perform disk I/O, or change DMA capture.
+ * This is the SECOND kind of packing in the data path. PARLIO hardware first
+ * packs pairs of pin levels into raw bytes. frameDecoder reconstructs 32-bit
+ * words. packSamples() here then removes the status byte and arranges the three
+ * sample bytes for the file. These operations must not be confused: hardware
+ * sees pin levels; this software sees already-decoded ADC values.
  */
 #pragma once
 #include <cstddef>

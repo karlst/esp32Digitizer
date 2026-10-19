@@ -6,7 +6,7 @@
 #include "ads127l18.h"
 
 /**
- * @brief Configure channel zero's internal short test and control conversions.
+ * @brief Configure channel zero's selected bench input and control conversions.
  * Called only by the Feather diagnostic's Arduino task. The ADC driver owns
  * SPI transfers; this class owns their sequence and checks configuration readback.
  * No output starts at construction or configuration time. A separate start()
@@ -16,7 +16,7 @@ class ads127LowRate
 {
 public:
     explicit ads127LowRate(ads127l18& adc);
-    bool configure(unsigned stage = 0);
+    bool configure(unsigned stage = 0, bool externalInput = false);
     bool start();
     bool stop();
     bool reportStatus(const char* phase);

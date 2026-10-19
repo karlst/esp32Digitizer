@@ -1,0 +1,1468 @@
+diff --git a/.gitignore b/.gitignore
+index 9081031..8c65097 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -19,3 +19,8 @@ backups/*.bin
+ /fpos/
+ # Local research extracts and scratch images.
+ /tmp/
++
++# Generated plots, capture sessions and scratch analysis. Curated raw evidence
++# is intentionally kept under docs/evidence instead. These rules do not untrack
++# files already committed; Karl reviews tracked files before committing.
++/work/
+diff --git a/featherUi/platformio.ini b/featherUi/platformio.ini
+index 379d9c8..8911235 100644
+--- a/featherUi/platformio.ini
++++ b/featherUi/platformio.ini
+@@ -44,3 +44,34 @@ extends = env:ads127-capture-control
+ build_flags =
+     ${env:ads127-spi-check.build_flags}
+     -DADS127_P4_ENDURANCE=1
++
++; External channel-0 analog test; keeps P4 60s profiling receiver unchanged.
++; DAC remains disabled at boot and starts only after matching receiver READY.
++[env:ads127-p4-dac-60s]
++extends = env:ads127-capture-control
++build_flags =
++    ${env:ads127-spi-check.build_flags}
++    -DADS127_P4_LONG_RUN=1
++    -DADS127_P4_DAC_TEST=1
++
++; Independent A1->A2 measurement using the same bench DAC generator; no TI control.
++[env:bench-dac-loopback]
++extends = env:ads127-spi-check
++custom_test_source = benchDacLoopback.cpp
++build_flags =
++    ${env:ads127-spi-check.build_flags}
++    -DADS127_P4_DAC_TEST=1
++
++; Simultaneously measure A1->A2 and control the ADS127/P4 RAM capture.
++[env:ads127-p4-compare]
++extends = env:ads127-p4-dac-60s
++build_flags =
++    ${env:ads127-p4-dac-60s.build_flags}
++    -DADS127_COMPARE_INPUT=1
++
++; Hold DAC code 135 while both ADCs measure fluctuations; no production change.
++[env:ads127-p4-constant]
++extends = env:ads127-p4-compare
++build_flags =
++    ${env:ads127-p4-compare.build_flags}
++    -DADS127_DAC_CONSTANT=1
+diff --git a/featherUi/src/adc/ads127LowRate.cpp b/featherUi/src/adc/ads127LowRate.cpp
+index d6b9d14..d939461 100644
+--- a/featherUi/src/adc/ads127LowRate.cpp
++++ b/featherUi/src/adc/ads127LowRate.cpp
+@@ -4,7 +4,7 @@
+  * Read configure() for the complete register plan. Each successful write is
+  * echoed by the ADC then independently read back. TI ADS127L1x Rev B register
+  * sections 8.7-8.18 define these fields. Clock math assumes the EVM's documented
+- * 32.768 MHz oscillator; measured S3 word rate must later check that assumption.
++ * 32.768 MHz oscillator; measured receiver word rate must later check that assumption.
+  */
+ #include "ads127LowRate.h"
+ #include <Arduino.h>
+@@ -98,12 +98,16 @@ bool ads127LowRate::clearStartupFlags()
+ /**
+  * @brief Identify and stop the ADC, then configure the requested bench stage.
+  * stage indexes shared ads127BenchRates; default zero retains the 16-kHz test.
++ * externalInput=false retains the internal-short baseline. True selects the
++ * physical AIN0P/AIN0N inputs, driven through the EVM's analog front end. This
++ * selects CH0_CFG1's external input and enables the ADC's midpoint-voltage
++ * output for the EVM input amplifiers. Sample rate and serial format are unchanged.
+  * Returning true means settings read back correctly, not that DMA receives data.
+  * On failure make a best-effort stop and refuse start(). No reset is issued, so
+  * startup flags are logged before clearing; other fault flags are never cleared.
+  * A power cycle restores defaults.
+  */
+-bool ads127LowRate::configure(unsigned stage)
++bool ads127LowRate::configure(unsigned stage, bool externalInput)
+ {
+     configured = false;
+     if (stage >= ads127BenchRateCount)
+@@ -127,13 +131,22 @@ bool ads127LowRate::configure(unsigned stage)
+     if (retVal)
+     {
+         retVal = setAndCheck(0x09, 0x06) &&  // Max speed; software start/stop; no averaging.
+-                 setAndCheck(0x08, 0x00) &&  // Board's default 2.5-V reference range.
++                 // GEN_CFG1 bit 2 enables VCM: an analog output at the midpoint
++                 // of the ADC supply rails. The TI board connects this output to
++                 // the input amplifiers to establish their output center voltage.
++                 // Enable it for external-input tests; retain the internal-short
++                 // baseline otherwise. Bit 0 remains zero for the 2.5-V reference.
++                 // Readback confirms the setting, not the actual analog voltage
++                 // or that this change fixes the distorted recorded waveform.
++                 setAndCheck(0x08, externalInput ? 0x04 : 0x00) &&
+                  setAndCheck(0x0a, 0x00) &&  // 24 bits; full drive; SPI CRC remains off.
+                  setAndCheck(0x0d, 0x08) &&  // CLK_SEL bit 3 selects external EVM clock; divider 1.
+                  setAndCheck(0x0c, rate.clockDividerCode) && // DCLK /8, /4, /2 or /1; default bit delay.
+                  setAndCheck(0x0b, 0x70) &&  // Eight lanes; status header; no data CRC.
+                  setAndCheck(0x10, 0x00) &&  // No GPIO override of sample outputs.
+-                 setAndCheck(0x11, 0x20);    // Internal short: coax signal not needed.
++                 // TI Rev B table 8-20: MUX[6:4]=010 shorts internally; 000
++                 // uses normal external polarity. Range and buffer bits stay 0.
++                 setAndCheck(0x11, externalInput ? 0x00 : 0x20);
+     }
+ 
+     // Eight-lane mode puts channel zero alone on DOUT0, even though we connect
+@@ -148,7 +161,7 @@ bool ads127LowRate::configure(unsigned stage)
+     {
+ 
+         // Reassert stop after configuration: register changes can restart filter
+-        // sequencing. The later start must still wait for the S3 READY reply.
++        // sequencing. The later start must still wait for the receiver READY reply.
+         retVal = stop() && reportStatus("configured, before ARM");
+     }
+     if (!retVal)
+@@ -161,7 +174,7 @@ bool ads127LowRate::configure(unsigned stage)
+ }
+ 
+ /**
+- * @brief Request conversions only after successful configure() and S3 readiness.
++ * @brief Request conversions only after successful configure() and receiver readiness.
+  * CONTROL bit 1 self-clears. Its write echo is not proof of clock/sample delivery.
+  */
+ bool ads127LowRate::start()
+diff --git a/featherUi/src/adc/ads127LowRate.h b/featherUi/src/adc/ads127LowRate.h
+index a23610c..4aff510 100644
+--- a/featherUi/src/adc/ads127LowRate.h
++++ b/featherUi/src/adc/ads127LowRate.h
+@@ -6,7 +6,7 @@
+ #include "ads127l18.h"
+ 
+ /**
+- * @brief Configure channel zero's internal short test and control conversions.
++ * @brief Configure channel zero's selected bench input and control conversions.
+  * Called only by the Feather diagnostic's Arduino task. The ADC driver owns
+  * SPI transfers; this class owns their sequence and checks configuration readback.
+  * No output starts at construction or configuration time. A separate start()
+@@ -16,7 +16,7 @@ class ads127LowRate
+ {
+ public:
+     explicit ads127LowRate(ads127l18& adc);
+-    bool configure(unsigned stage = 0);
++    bool configure(unsigned stage = 0, bool externalInput = false);
+     bool start();
+     bool stop();
+     bool reportStatus(const char* phase);
+diff --git a/featherUi/test/buildHardwareTests.py b/featherUi/test/buildHardwareTests.py
+index 55e997d..2d4e4e6 100644
+--- a/featherUi/test/buildHardwareTests.py
++++ b/featherUi/test/buildHardwareTests.py
+@@ -12,7 +12,7 @@ env.Append(CPPPATH=[str(projectRoot / 'src' / 'adc'),
+                    str(projectRoot.parent / 'shared'),
+                    str(frameworkRoot / 'libraries' / 'SPI' / 'src')])
+ selectedSource = env.GetProjectOption('custom_test_source', 'ads127SpiDiagnostic.cpp')
+-if selectedSource not in ['ads127SpiDiagnostic.cpp', 'ads127CaptureControl.cpp']:
++if selectedSource not in ['ads127SpiDiagnostic.cpp', 'ads127CaptureControl.cpp', 'benchDacLoopback.cpp']:
+     raise ValueError('Unknown Feather hardware test: ' + selectedSource)
+ env.BuildSources('$BUILD_DIR/hardwareTests', str(projectRoot / 'test' / 'hardware'),
+-                 src_filter=['-<*>', '+<' + selectedSource + '>'])
++                 src_filter=['-<*>', '+<' + selectedSource + '>', '+<benchDac.cpp>', '+<inputSnapshot.cpp>'])
+diff --git a/featherUi/test/hardware/ads127CaptureControl.cpp b/featherUi/test/hardware/ads127CaptureControl.cpp
+index 461a560..4f066f0 100644
+--- a/featherUi/test/hardware/ads127CaptureControl.cpp
++++ b/featherUi/test/hardware/ads127CaptureControl.cpp
+@@ -4,8 +4,14 @@
+  * setup() leaves DAC off and SPI inputs undriven. USB 'g' configures the ADC,
+  * asks the receiver to arm, waits for matching READY, then starts conversions.
+  * After the shared run duration (or on 's') it stops ADC then receiver. The named
+- * P4 environment selects 60 seconds; the legacy S3 environment retains five.
++ * P4 environment selects 60 seconds or 30 minutes; legacy S3 retains five.
++ * The opt-in ads127-p4-dac-60s build selects external channel-0 input and starts
++ * a fixed DAC sine only after receiver READY. The compare variant also samples
++ * A2; ads127-p4-constant holds code 135 instead of generating a sine. Builds
++ * without ADS127_P4_DAC_TEST retain internal short and DAC off. A failed start, requested stop or receiver fault disables the DAC.
+  * UART reports are forwarded to USB. This is not the production web application.
++ * ads127-p4-compare additionally measures A2 during the same run. It exports
++ * timestamped input observations only after stopping the ADC and DAC.
+  */
+ #include <Arduino.h>
+ #include <driver/dac.h>
+@@ -17,6 +23,18 @@
+ #include "benchLine.h"
+ #include "ads127BenchRate.h"
+ #include "ads127BenchTiming.h"
++#if ADS127_COMPARE_INPUT
++#include "inputSnapshot.h"
++static inputSnapshot inputTrace;
++#endif
++#if ADS127_P4_DAC_TEST
++#include "benchDac.h"
++static benchDac signalSource;
++static bool dacReady = false;
++static constexpr bool externalInput = true;
++#else
++static constexpr bool externalInput = false;
++#endif
+ 
+ static ads127l18 adc(SPI, ads127Pins::featherClock, ads127Pins::featherMiso,
+                      ads127Pins::featherMosi, ads127Pins::featherSelect);
+@@ -31,7 +49,22 @@ static uint32_t stateMs = 0;
+ /** @brief Print operator commands without accessing ADC registers. */
+ static void printHelp()
+ {
++#if ADS127_COMPARE_INPUT
++    Serial.println(dacReady ? "COMPARE READY: simultaneous A1->A2 input and P4 RAM output; keep coax connected."
++                            : "COMPARE UNAVAILABLE: DAC/input ADC initialization failed.");
++#endif
++#if ADS127_P4_DAC_TEST
++    Serial.println("ADS127 DAC TEST: external CH0; A1/GPIO25 -> CH0P, CH0N grounded; SD controlled by P4.");
++#if ADS127_DAC_CONSTANT
++    Serial.println("DAC MODE: CONSTANT code=135 nominalVolts=1.747; 500 us repeated writes.");
++#else
++    Serial.println("DAC MODE: SINE");
++    Serial.println("DAC: nominal 10 Hz sine, 1.25 V offset, 0.5 V peak (0.75..1.75 V); 500 us updates.");
++#endif
++    Serial.println("DAC stays OFF until receiver READY; verify powered analog wiring before starting.");
++#else
+     Serial.println("ADS127 DMA CONTROL: DAC off; coax stays disconnected; SD untouched.");
++#endif
+     Serial.printf("g=16k, 1=32k, 2=64k, 3=128k, 4=256k, 5=512k, 6=1024k samples/s; %lu seconds each. s=stop; h=help.\n",
+                   static_cast<unsigned long>(ads127BenchTiming::runMs / 1000));
+     Serial.printf("Matching receiver firmware must allow %lu seconds from ARM.\n",
+@@ -48,8 +81,20 @@ static void requestStop()
+ {
+     const bool stopped = setupAdc.stop();
+     Serial.printf("ADC STOP command %s\n", stopped ? "echo confirmed" : "FAILED / state unconfirmed");
+-    setupAdc.reportStatus("after STOP");
++    const bool statusClean = setupAdc.reportStatus("after STOP");
+     Serial1.printf("ADC127 STOP %lu\n", runId);
++#if ADS127_P4_DAC_TEST
++    // ADC stop is requested first; timer shutdown then leaves A1 undriven. Any
++    // final in-flight ADC conversion may include this transition in the tail.
++    signalSource.stop();
++#endif
++#if ADS127_COMPARE_INPUT
++    // UART STOP was sent first, allowing P4 to stop and export independently.
++    // This local USB report cannot delay active acquisition on either board.
++    inputTrace.report(runId, stopped && statusClean && !signalSource.failed());
++#else
++    (void)statusClean;
++#endif
+     state = benchState::stopping;
+     stateMs = millis();
+ }
+@@ -65,9 +110,18 @@ static void requestRun(unsigned requestedStage)
+     {
+         Serial.println("Test already pending/running; use s to stop.");
+     }
+-    else if (setupAdc.configure(requestedStage))
++#if ADS127_P4_DAC_TEST
++    else if (!dacReady)
++    {
++        Serial.println("DAC setup failed; refusing ADC test. Reset after fixing initialization.");
++    }
++#endif
++    else if (setupAdc.configure(requestedStage, externalInput))
+     {
+         stage = requestedStage;
++#if ADS127_COMPARE_INPUT
++        inputTrace.reset();
++#endif
+         Serial.printf("TEST STAGE %u: %lu samples/s for %lu seconds.\n", stage,
+                       static_cast<unsigned long>(ads127BenchRates[stage].samplesPerSecond),
+                       static_cast<unsigned long>(ads127BenchTiming::runMs / 1000));
+@@ -100,8 +154,26 @@ static void acceptReply(const char* line)
+             receivedStage == stage &&
+             received == runId && state == benchState::waiting)
+         {
+-            if (setupAdc.start())
++            // Enable the source only after the receiver confirms this run ID.
++            // No ADC START is sent if the source fails. Skip startup transients
++            // when analyzing the file; this is a functional, not precision test.
++            bool sourceStarted = true;
++#if ADS127_P4_DAC_TEST
++            sourceStarted = signalSource.start();
++            if (sourceStarted)
+             {
++#if ADS127_DAC_CONSTANT
++                Serial.println("DAC ON: constant code 135; starting ADC external-input capture.");
++#else
++                Serial.println("DAC ON: 10 Hz sine; starting ADC external-input capture.");
++#endif
++            }
++#endif
++            if (sourceStarted && setupAdc.start())
++            {
++#if ADS127_COMPARE_INPUT
++                inputTrace.begin();
++#endif
+                 state = benchState::running;
+                 stateMs = millis();
+                 Serial.printf("ADC START echo confirmed. Waiting for receiver DMA data; auto-stop in %lu seconds.\n",
+@@ -109,10 +181,18 @@ static void acceptReply(const char* line)
+             }
+             else
+             {
+-                Serial.println("ADC START failed; stopping both ends.");
++                Serial.println("Source/ADC START failed; stopping both ends.");
+                 requestStop();
+             }
+         }
++        else if (sscanf(line, "ADC127 RAMFULL %lu %c", &received, &extra) == 1 &&
++                 received == runId && state == benchState::running)
++        {
++            // P4 retained its short RAM window. Stop hardware normally; the
++            // matching STOP lets P4 drain decoding before printing the waveform.
++            Serial.println("P4 RAM waveform complete; stopping ADC and DAC.");
++            requestStop();
++        }
+         else if (sscanf(line, "ADC127 DONE %lu", &received) == 1 &&
+                  received == runId && state == benchState::stopping)
+         {
+@@ -132,7 +212,9 @@ static void acceptReply(const char* line)
+ 
+ /**
+  * @brief Disable analog outputs and open USB plus the existing inter-board UART.
+- * Only loop() accesses these objects; no application mutex or worker task exists.
++ * loop() alone owns ADC SPI and UART. In the opt-in DAC build, initialize a
++ * stopped timer; its task callback owns DAC updates with benchDac's mutex.
++ * No waveform or ADC conversion is started here.
+  */
+ void setup()
+ {
+@@ -149,6 +231,13 @@ void setup()
+     Serial1.setTxBufferSize(512);
+     pinMode(RX, INPUT_PULLUP);
+     Serial1.begin(115200, SERIAL_8N1, RX, TX);
++#if ADS127_P4_DAC_TEST
++    dacReady = signalSource.initialize();
++#if ADS127_COMPARE_INPUT
++    dacReady = inputTrace.initialize() && dacReady;
++#endif
++    if (!dacReady) { Serial.println("DAC initialization FAILED; capture will be refused."); }
++#endif
+     delay(500);
+     printHelp();
+ }
+@@ -189,6 +278,28 @@ void loop()
+         }
+     }
+ 
++#if ADS127_P4_DAC_TEST
++    // The timer callback only latches errors; this task performs SPI stop and
++    // UART coordination so callback timing never includes those slow operations.
++    if (state == benchState::running && signalSource.failed())
++    {
++        Serial.println("DAC driver fault; requesting ADC/receiver stop.");
++        requestStop();
++    }
++#endif
++
++#if ADS127_COMPARE_INPUT
++    if (state == benchState::running)
++    {
++        inputTrace.poll();
++        if (inputTrace.failed())
++        {
++            Serial.println("Local input measurement failed; stopping comparison.");
++            requestStop();
++        }
++    }
++#endif
++
+     // Unsigned subtraction remains valid across the millis() counter wraparound.
+     const uint32_t elapsed = millis() - stateMs;
+     if (state == benchState::waiting && elapsed >= 2000)
+@@ -206,5 +317,13 @@ void loop()
+                       static_cast<unsigned long>(ads127BenchTiming::receiverTimeoutMs / 1000));
+         state = benchState::idle;
+     }
++#if ADS127_COMPARE_INPUT
++    // Poll frequently for 300 ms so a 500 us measurement burst still fits into
++    // each 1 ms slot. Interrupts and the higher-priority DAC timer remain enabled.
++    // This diagnostic uses extra Feather CPU; it is not a production load test.
++    if (state == benchState::running && inputTrace.sampling()) { delayMicroseconds(50); }
++    else { delay(1); }
++#else
+     delay(1);
++#endif
+ }
+diff --git a/p4Capture/.gitignore b/p4Capture/.gitignore
+index 0c2d1f6..231cd79 100644
+--- a/p4Capture/.gitignore
++++ b/p4Capture/.gitignore
+@@ -4,4 +4,6 @@
+ /sdkconfig.sd
+ /sdkconfig.sd.old
+ /build-sd/
++/build-profile/
++/sdkconfig.profile.old
+ /.pio/
+diff --git a/p4Capture/README.md b/p4Capture/README.md
+index f9268ef..5676e81 100644
+--- a/p4Capture/README.md
++++ b/p4Capture/README.md
+@@ -1,58 +1,19 @@
+ # P4 ADC capture and SD recording diagnostic
+ 
+-**Latest checkpoint: [October 17 overnight handoff](../docs/STATUS-2026-10-17-P4.md).
+-The 30-minute ADC-to-SD test PASSED.** Read that handoff before resuming work.
+-
+-Status: initial revision passed Karl's PC tests and built/uploaded successfully.
+-Five-second bench runs were clean through 256k samples/s; 512k filled the
+-software queue and stopped with one dropped block. Timing-v2 also exhausted
+-the pool at 512k, measuring decoder throughput below the input requirement.
+-Grouped-v3 subsequently passed PC tests and five-second hardware runs through
+-1.024M samples/s. The **60-second memory-only run also completed**, receiving
+-61,439,431 words at an estimated 1,024,020.0 samples/s, with all reported error
+-counters zero. Decoder throughput was 12.792 MB/s against 8.192 MB/s required;
+-queue peak was 3/16. This does not establish that every generated sample arrived.
+-One earlier post-upload ARM received no READY; restarting P4 restored the link.
+-That startup handshake issue has not been diagnosed or claimed fixed.
+-
+-**SD-v1 passed Karl's PC tests and built/uploaded after a callback-type fix.**
+-Both cards then failed mounting with FatFs error 13; both were confirmed exFAT.
+-SD-v2 mounted exFAT and preallocated successfully. The first combined ADC/SD
+-run stopped after about 7.9 seconds: 8,062,439 decoded words, zero reported
+-capture errors, recording-ring peak 4,194,300/4,194,304 bytes and one overflow.
+-It saved 32,243,708 accepted bytes; draining afterward did not recover the
+-rejected batch. Decoder throughput was 8.884 MB/s against 8.192 MB/s input.
+-SD-v3 passed Karl's PC checks and built/uploaded, but the first SD-only start
+-hit a stack protection fault in sdTest before its START message. The 4 KiB task
+-stack included a 2 KiB local batch and floating-point startup formatting.
+-SD-v3b moved that batch to the global object's internal RAM, reserved an 8 KiB
+-task stack, and used integer startup formatting. Karl built and uploaded it.
+-This crash produced no usable SD throughput result. Test rates, write sizes,
+-preallocation, pacing and the recording buffer are unchanged.
+-SD-only **26 Mbps passed for 60 seconds**: 195,000,000 bytes, ring peak 368,700,
+-zero overflow/errors/unsaved bytes, and every generated word verified.
+-Write-call throughput was 29.190 Mbps. **32.768 Mbps failed after 7.616 seconds**:
+-ring overflow, 31,194,468 accepted bytes saved, zero pattern errors, write-call
+-throughput 29.123 Mbps. These results concern the card currently installed;
+-do not assume it is the original S3 reference card.
+-
+-**SD-v4 passed the combined 60-second ADC-to-SD test:** 61,439,431 samples,
+-184,318,293 bytes (exactly three/sample), matching readback CRC f75cf499,
+-zero reported capture/storage errors, overflow or unsaved bytes. Ring peak
+-318,413/4,194,304; max write/flush 59,943 us; write-call throughput 28.978 Mbps.
+-File: P4376247.BIN. This retains the capture-loss limitations described below.
+-
+-**SD-v5 passed Karl's PC tests, both builds/uploads, and the 30-minute ADC-to-SD
+-hardware test.** Current installed firmware is the matched 30-minute pair.
+-Run 1844422070 saved 1,843,184,119 samples / 5,529,552,357 bytes to P4037876.BIN,
+-with matching full-file CRC32 34e6f7ed, zero reported capture/storage errors,
+-overflow or unsaved bytes. Ring peak was 355,717/4,194,304 bytes; maximum write/
+-flush 72,455 us; write-call throughput 29.029 Mbps. ADC stop was confirmed.
+-Earlier power-interrupted attempts failed and do not count toward this result.
+-DMA, packing, status checks, SD clock, ring and transfer sizes are unchanged.
+-Expected payload is 5,529,600,000 bytes (1,843,200,000 samples), approximately;
+-normal capture start/stop limitations still apply. No existing files are deleted.
+-The original Feather/S3 environment retains its five-second run duration.
++Start with [CURRENT-SETUP.md](CURRENT-SETUP.md) for firmware choices, matching
++PC commands, current wiring and diagnostic boundaries. Results and their limits
++are recorded in [the October 19 checkpoint](../docs/STATUS-2026-10-19-P4.md).
++Open decisions are in [TODO.md](../TODO.md).
++
++The latest uploaded pair is Feather `ads127-p4-constant` and P4 profiling/RAM
++firmware. The constant-voltage comparison completed on October 19 with factory
++reference calibration reported by Feather. This is diagnostic firmware, not a
++production qualification. Full-rate SD recording does not average samples.
++
++CardP passed the earlier 30-minute SD run. See [early test history](../docs/P4-EARLY-TEST-HISTORY.md)
++and the [October 17 handoff](../docs/STATUS-2026-10-17-P4.md) for that evidence.
++Historical revision notes later in this document explain implementation changes;
++they do not describe the currently installed firmware.
+ 
+ This standalone ESP-IDF project replaces Hello World on the P4 when uploaded.
+ The goal is to investigate receiving the ADS127L18 stream through PARLIO and
+@@ -388,6 +349,101 @@ Zero errors in this short test do **not** qualify sustained disk recording.
+ 
+ ## Buffer ownership and failure behavior
+ 
++Optional CPU/memory headroom measurements are documented in [PROFILE.md](PROFILE.md).
++They use a separate 60-second build and are disabled by default; the normal
++30-minute build does not compile the profiler.
++
++The source now includes a tutorial reading path: start with the overview in
++`main/main.cpp`, then `receiveBlock()`, `decodeTask()`,
++`frameDecoder::feed()/finishWord()`, and
++`sdRecorder::submitSamples()/write()/finishFile()`. The shared ring implementation
++is `../s3Recorder/lib/bufferedWriter/src/bufferedWriter.cpp`; its comments cover
++both the S3 and P4 callers.
++
++### Hardware capture versus software work
++
++At stage 6 the ADC output clock DCLK is 32.768 MHz (30.52 ns/cycle, approximately
++15.26 ns each high/low half). The ADC changes DOUT0 after falling edges; PARLIO
++captures DOUT0 and FSYNC together on rising edges. FSYNC's low-to-high transition
++starts the 8-bit status header followed by the 24-bit sample. FSYNC stays high
++for half the frame period (16 clocks here), then low for the other half. Its
++falling edge does not end the sample. These timings are specified by the ADC
++datasheet, not measured waveforms from this board.
++
++Four clock instants produce one packed byte in memory: DOUT0 in bits 0,2,4,6;
++FSYNC in bits 1,3,5,7; earliest pair in bits 1:0. Therefore one 32-clock frame
++occupies eight raw bytes. PARLIO's hardware receive FIFO preserves arrival order
++while GDMA transfers the packed stream into RAM. FIFO means First In, First Out;
++the FIFO's exact capacity and internal write granularity have not been verified
++here. The byte layout does not establish that hardware writes the FIFO exactly
++once per four clocks.
++
++**Correction to the October 18 conversation:** this P4 uses **GDMA-AXI**, not
++GDMA-AHB, for PARLIO. IDF 5.5.6's ESP32-P4 `soc/gdma_channel.h` selects AXI and
++`esp_driver_parlio/src/parlio_priv.h` selects `gdma_new_axi_channel`. DMA is
++hardware that transfers bytes; the DMA buffer is RAM, not memory inside DMA.
++There is no CPU interrupt per input clock. Completed DMA chunks cause driver
++interrupt handling on Core 0, which calls our `receiveBlock()` in that context.
++Core 1's decoding and Core 0's disk writing are ordinary scheduled tasks.
++
++### Four distinct storage areas
++
++| Area | Capacity | Who fills / drains it |
++|---|---:|---|
++| PARLIO hardware FIFO | Not verified here | PARLIO / DMA hardware |
++| DMA RAM buffer | 32 KiB internal RAM | DMA / Core 0 callback copies completed chunks |
++| Private raw block pool, `blocks` | 16 x 4096 bytes plus metadata | Core 0 copies / Core 1 decodes |
++| Recording ring | 4 MiB PSRAM | Core 1 submits 3-byte samples / Core 0 writes to SD |
++
++`freeBlocks` and `readyBlocks` are queues of **addresses into the same private
++pool**, not additional data buffers. Core 0 takes a free address, copies into
++that block with `memcpy()`, and sends its address to `readyBlocks`. Core 1 takes
++the oldest ready address, decodes and submits the sample bytes to the recording
++ring, then returns the address to `freeBlocks`. Only then may Core 0 overwrite
++that block. The ready queue has 17 pointer slots: 16 real blocks plus one null
++shutdown marker. `queueHigh` counts waiting blocks, excluding one held by Core 1.
++
++The 32 KiB allocation is **not eight 4096-byte DMA chunks**. For our aligned
++buffer and 64-byte cache alignment, IDF 5.5.6's
++`parlio_rx_mount_transaction_buffer()` creates seven 4032-byte chunks followed
++by 2240 and 2304 bytes. At stage 6 those represent 16128, 8960 and 9216 DCLK
++cycles, taking 492.19, 273.44 and 281.25 microseconds respectively. There are
++nine chunk completions per 4 ms (2250 callbacks/s average); interrupt service
++may be delayed after completion. Recheck this derivation if the SDK, alignment
++or allocation changes. Chunk boundaries need not coincide with sample frames.
++
++The allocation sizes were engineering starting choices subsequently tested,
++not proven optimal sizes. At 8.192 MB/s raw input, 32 KiB spans 4 ms; 64 KiB
++nominally spans 8 ms. Partially filled/private blocks in use reduce waiting
++capacity. DMA capacity cushions response/copy delays; the private pool cushions
++decoder scheduling delays. A larger private pool cannot rescue an overwritten
++DMA chunk or make a persistently slow decoder keep up. The early slow decoder
++exhausted this same pool; later optimization passed without increasing it.
++
++### Status bits and current test policy
++
++The high byte of each decoded word is TI's STATUS_DP header:
++
++| Bits | Meaning | Current bad-header condition |
++|---|---|---|
++| 7 | Power event | Counted in header histogram, not rejected alone |
++| 6 | ADC error | 1 |
++| 5 | Modulator saturation | Counted in header histogram, not rejected alone |
++| 4 | Repeated conversion data | 1 (not merely equal numerical sample values) |
++| 3 | PWDN, with 1 meaning normal operation | 0 |
++| 2:0 | Channel ID | Anything except channel 0 |
++
++`(header & 0x5f) != 0x08` counts one bad header per affected word, preserves the
++first eight bad words for console reporting, and still submits the sample.
++Bad headers do not immediately stop capture. At finalization, any bad header
++invalidates the recording: the file is preserved with an invalid header and
++`SD FAILED`, even if disk writes/readback succeed. Power/saturation flags alone
++do not cause this failure. The histogram retains counts, not sample locations.
++Status bytes and FSYNC are omitted from the three-byte sample payload; production
++quality reporting and recovery policy remain undecided in `../TODO.md`.
++
++### Scheduling, shutdown and limits
++
+ CPU0 handles commands and installs the DMA interrupt. CPU1 decodes. The driver
+ uses a 32 KiB circular DMA allocation; its interrupt supplies completed
+ descriptors. The callback immediately copies each descriptor into one of sixteen
+@@ -408,9 +464,12 @@ also use bitwise handling without reading past the delivered buffer.
+ This reduces repeated per-byte decisions even when FSYNC changes inside a
+ group, and handles the 32-clock frames needed at 1.024M samples/s.
+ All original header, frame period, short-word and tail checks remain enabled.
+-An inability to keep up increments drops and causes FAULT. A 65-second
+-receiver deadline from ARM causes TIMEOUT if STOP is lost. Feather independently
+-stops its normal run after 60 seconds and reacts to FAULT/TIMEOUT. A P4 fault
++An inability to obtain a free private block increments drops and causes FAULT.
++The current endurance build has an 1805-second receiver deadline from ARM and
++an 1800-second Feather run timer from confirmed ADC START. The retained long-run
++build uses 65/60 seconds instead; both boards must use matching timing builds.
++The receiver reports TIMEOUT if its deadline expires without STOP; Feather
++reacts to FAULT/TIMEOUT by requesting an ADC stop. A P4 fault
+ cannot physically stop the ADC if the command link is disconnected.
+ 
+ ESP-IDF 5.5.6 cyclic RX uses DMA descriptors without ownership checking and
+@@ -505,4 +564,4 @@ above; the older raw-byte counters have now been widened for 30 minutes.
+ 
+ Karl built and uploaded both revisions and supplied the completed run log.
+ The assistant has not independently built, uploaded, or operated hardware.
+-The currently pending work is validation of the SD revision described above.
++The SD endurance run subsequently passed; current open work is listed in ../TODO.md.
+diff --git a/p4Capture/main/CMakeLists.txt b/p4Capture/main/CMakeLists.txt
+index a4aaf00..2b4b794 100644
+--- a/p4Capture/main/CMakeLists.txt
++++ b/p4Capture/main/CMakeLists.txt
+@@ -1,6 +1,14 @@
+-idf_component_register(SRCS "main.cpp" "frameDecoder.cpp" "sdRecorder.cpp" "sdWriteTest.cpp"
++idf_component_register(SRCS "main.cpp" "frameDecoder.cpp" "sdRecorder.cpp" "sdWriteTest.cpp" "ramWaveform.cpp"
+     "../../s3Recorder/lib/bufferedWriter/src/bufferedWriter.cpp"
+     INCLUDE_DIRS "." "../../shared" "../../s3Recorder/lib/bufferedWriter/src"
+     REQUIRES esp_driver_parlio esp_driver_uart esp_driver_gpio esp_timer fatfs sdmmc esp_driver_sdmmc esp_psram esp_rom esp_hw_support)
+-target_compile_definitions(${COMPONENT_LIB} PRIVATE ADS127_P4_ENDURANCE=1
++target_compile_definitions(${COMPONENT_LIB} PRIVATE
+     BUFFERED_WRITER_EXTERNAL=1 BUFFERED_WRITER_CAPACITY=4194304 BUFFERED_WRITER_BLOCK_BYTES=131072)
++
++# Keep measurement code and its 60-second timing out of the normal firmware.
++if(CONFIG_P4_CAPTURE_PROFILE)
++    target_sources(${COMPONENT_LIB} PRIVATE "captureProfile.cpp")
++    target_compile_definitions(${COMPONENT_LIB} PRIVATE ADS127_P4_LONG_RUN=1)
++else()
++    target_compile_definitions(${COMPONENT_LIB} PRIVATE ADS127_P4_ENDURANCE=1)
++endif()
+diff --git a/p4Capture/main/frameDecoder.cpp b/p4Capture/main/frameDecoder.cpp
+index fddb731..34d1a67 100644
+--- a/p4Capture/main/frameDecoder.cpp
++++ b/p4Capture/main/frameDecoder.cpp
+@@ -1,5 +1,24 @@
+ /** @file frameDecoder.cpp
+  * @brief Fixed framing; never search for a convenient header or shift bad data.
++ *
++ * Reading path: feed() -> beginFrame()/appendBits() -> finishWord() ->
++ * flushOutput(). Core 1's decodeTask calls feed() with a private raw block;
++ * desktop tests call the same functions without any chip hardware.
++ *
++ * PARLIO has already captured DOUT0 (serial ADC bits) alongside FSYNC (the
++ * separate frame-start wire) and DMA has moved them into RAM. Each byte holds
++ * four clock instants, earliest in bits 1:0. We do not read GPIO pins here.
++ * Only a captured FSYNC transition from 0 to 1 starts a frame. A continuing 1
++ * does not start more frames. At stage 6 FSYNC is high for the first 16 clocks,
++ * low for the next 16; falling halfway through does NOT end the sample.
++ * DOUT0's first 8 bits are status, the next 24 the signed measurement value.
++ * Thus 8 raw bytes reconstruct one 32-bit word; sdRecorder later retains only
++ * 3 sample bytes. A raw block may start/end partway through a frame, so decoder
++ * state persists between feed() calls. Only reset() starts a new acquisition.
++ *
++ * References: TI ADS127L18 datasheet section 5.7 (FSYNC half-period high/low),
++ * sections 7.4.10.3-7.4.10.6 (status and data timing).
++ * https://www.ti.com/lit/ds/symlink/ads127l18.pdf
+  */
+ #include "frameDecoder.h"
+ #include <array>
+@@ -100,6 +119,9 @@ void frameDecoder::reset(uint32_t clocksPerFrame)
+  * even when a frame spans group boundaries. Block tails use the bitwise path.
+  * Multiple rises within sixteen clocks indicate unusual input: use clockBit()
+  * for the whole group so no early frame, short word or error gets hidden.
++ * data is borrowed only until this call returns; length is its valid byte count,
++ * not block capacity. feed() returns no value: results accumulate in counts and
++ * complete words go to the configured callback. No disk I/O occurs here.
+  */
+ void frameDecoder::feed(const uint8_t* data, size_t length)
+ {
+@@ -115,6 +137,9 @@ void frameDecoder::feed(const uint8_t* data, size_t length)
+             (static_cast<uint32_t>(group[1]) << 8) |
+             (static_cast<uint32_t>(group[2]) << 16) |
+             (static_cast<uint32_t>(group[3]) << 24);
++        // 0xaaaaaaaa is alternating 1/0 bits: keep FSYNC, remove DOUT0.
++        // rising retains only positions where current FSYNC=1 and previous=0.
++        // previousHigh carries the last level across groups AND raw blocks.
+         const uint32_t markers = packed & 0xaaaaaaaaU;
+         const uint32_t rising = markers & ~((markers << 2) | (previousHigh ? 2U : 0U));
+         if (rising == 0)
+@@ -167,6 +192,9 @@ void frameDecoder::feed(const uint8_t* data, size_t length)
+  * @brief Record a rising FSYNC at an absolute captured-clock position.
+  * Used by both grouped and bitwise paths. An early next frame still records
+  * both period and short-word errors before discarding that incomplete word.
++ * position counts captured DCLK instants since reset, not CPU cycles or bytes.
++ * frameClocks is 32 at stage 6, larger in slower configurations. Checking this
++ * spacing detects some missing/extra clocks but cannot prove none were lost.
+  */
+ void frameDecoder::beginFrame(uint64_t position)
+ {
+@@ -226,14 +254,36 @@ void frameDecoder::clockBit(unsigned pair)
+ 
+ /**
+  * @brief Count a complete received word, keeping invalid headers visible.
+- * Header mask 0x5f checks error, repeated data, channel-active and channel ID.
+- * Power/modulator flags are retained in the histogram, as in the S3 diagnostic.
++ * The first transmitted byte becomes word bits 31:24. TI STATUS_DP layout:
++ * bit 7 PWR_FLAG: power event since its underlying flags were cleared.
++ * bit 6 ERR_FLAG: ADC error indication (not a complete explanation of its cause).
++ * bit 5 MOD_FLAG: modulator saturation inside the ADC conversion circuitry.
++ * bit 4 RPT_DATA: repeated conversion data, not merely equal numeric samples.
++ * bit 3 PWDN: 1 means NORMAL operation; 0 means power-down/standby.
++ * bits 2:0 CH_ID: which ADC channel produced this word, numbered 0 through 7.
++ *
++ * Header mask 0x5f selects bits 6,4,3,2,1,0. Expected masked value 0x08 means
++ * no error, new data, normal operation, channel zero. Power and saturation bits
++ * are deliberately excluded from badHeaders, but included in headers[] counts.
++ * The usual clean byte is 0x08; 0x88/0x28 also pass THIS mask. That does not make
++ * a power event or saturated analog measurement harmless or correct.
++ *
++ * Current test policy: count one badHeaders per rejected header regardless of
++ * how many bits are wrong; retain the first eight complete bad words. Continue
++ * counting and forwarding their sample values: no automatic stop or filtering
++ * occurs here. stopCapture() later invalidates the recording if badHeaders!=0.
++ * The histogram records how often each byte occurred, not its sample position.
++ * Per-sample status is omitted from the SD payload. Production responses and
++ * persistent quality/event reporting are still undecided (repository TODO.md).
+  * The 24-bit two's-complement sample is expanded to signed 32-bit arithmetic;
+  * e.g. 0xffffff means -1, not 16777215. This does not check payload correctness.
+  */
+ void frameDecoder::finishWord()
+ {
+     const unsigned header = word >> 24;
++
++    // The 256 histogram entries cover every possible status byte. This retains
++    // excluded power/saturation flags for reporting even when badHeaders stays 0.
+     ++counts.words;
+     ++counts.headers[header];
+     if ((header & 0x5fU) != 0x08U)
+@@ -241,9 +291,15 @@ void frameDecoder::finishWord()
+         if (counts.badHeaders < 8) { counts.badExamples[counts.badHeaders] = word; }
+         ++counts.badHeaders;
+     }
++
++    // Interpret bit 23 as the sign. These latest values are diagnostics; the
++    // output batch below carries the original status+sample word without changes.
+     counts.latestWord = word;
+     const int32_t value = static_cast<int32_t>(word & 0xffffffU);
+     counts.latestSample = (value & 0x800000) ? value - 0x1000000 : value;
++
++    // At most 512 complete words per callback. A failure stops later submissions
++    // but not decoding/counters, so a storage problem cannot hide input errors.
+     if (output != nullptr && !outputBroken)
+     {
+         outputWords[outputCount++] = word;
+@@ -261,7 +317,13 @@ void frameDecoder::setOutput(outputCallback callback, void* context)
+     outputContext = context;
+ }
+ 
+-/** @brief Submit the current batch without retaining a pointer in the receiver. */
++/**
++ * @brief Synchronously offer the completed words to the configured receiver.
++ * In the P4 program output is recordWords(), which calls submitSamples() and
++ * copies the three-byte representation into the ring before returning. Therefore
++ * this outputWords array can be reused immediately; it is not a queued pointer
++ * to the raw input block. A false result latches outputBroken until reset().
++ */
+ void frameDecoder::flushOutput()
+ {
+     if (outputCount != 0)
+diff --git a/p4Capture/main/frameDecoder.h b/p4Capture/main/frameDecoder.h
+index a3af512..d80940a 100644
+--- a/p4Capture/main/frameDecoder.h
++++ b/p4Capture/main/frameDecoder.h
+@@ -25,14 +25,19 @@ struct captureStats
+ 
+ /**
+  * @brief Worker-owned state spanning DMA blocks, including split ADC words.
+- * A sample is one ADC conversion result. FSYNC (frame synchronization) rises
+- * once per sample; DCLK provides one clock per serial bit. Each packed pair
++ * A sample is one ADC conversion result. In our selected channel arrangement,
++ * FSYNC (frame synchronization) rises once per sample; DCLK provides one clock
++ * per serial bit. A rising edge means low-to-high, not every captured high level.
++ * FSYNC falls halfway through its period; data continue while it is low. Each packed pair
+  * contains DOUT0 in bit 0 and FSYNC in bit 1, earliest pair in byte bits 1:0.
+  * Only the first 32 DCLKs of a frame form our 8-bit header + 24-bit sample.
+  * Idle clocks in the rest of a frame are deliberately ignored.
+  * An optional output callback receives copies of complete raw words in batches
+  * of at most 512. A rejected batch latches failure but does not hide diagnostic
+  * counts. reset clears that latch while preserving the selected callback.
++ * The output is 32-bit status+sample words, not the final three-byte SD format.
++ * This class owns no DMA buffer or ready/free queue. main.cpp supplies each raw
++ * block and must not return it to freeBlocks until feed() has finished reading.
+  */
+ class frameDecoder
+ {
+diff --git a/p4Capture/main/main.cpp b/p4Capture/main/main.cpp
+index 53f53e1..2e47402 100644
+--- a/p4Capture/main/main.cpp
++++ b/p4Capture/main/main.cpp
+@@ -1,15 +1,58 @@
+ /**
+  * @file main.cpp
+- * @brief P4 ADC-to-SD commissioning test, driven by the Feather.
++ * @brief P4 ADC commissioning: SD recording or an opt-in RAM waveform window.
++ * Before any SD command after reset, USB 'w' selects RAM-only operation until
++ * the next reset. The usual DMA and frame decoder still run; ramWaveform keeps
++ * 600 min/max/mean bins after settling. RAMFULL asks Feather to stop, and only
++ * after decoding drains does Core 0 print the bins. No card is mounted in this
++ * mode. Read ramWaveform and RAM-WAVEFORM.md for its ownership and limitations.
+  * Reading path: app_main -> handleLine -> startCapture -> receiveBlock ->
+  * decodeTask -> stopCapture; sdRecorder owns asynchronous card operations.
+  * No DAC, ADC SPI, Wi-Fi, or automatic start.
+  *
+- * PARLIO is the parallel-input peripheral. DMA (Direct Memory Access) moves
+- * paired DOUT/FSYNC bits from it to a circular memory area without a CPU read
+- * per bit. Its ISR (Interrupt Service Routine) copies completed DMA blocks into
+- * separately owned buffers. A task (scheduled thread) on CPU1 decodes those
+- * buffers. CPU0 handles commands and the shared finite safety deadline.
++ * A sample is one ADC (analog-to-digital converter) measurement. The Feather
++ * configures and starts/stops the ADC; this P4 receives and records its output.
++ * DCLK is the ADC's output bit clock, DOUT0 its data wire, and FSYNC a separate
++ * wire whose low-to-high transition marks the start of a new sample frame.
++ * At stage 6, DCLK is 32.768 MHz: one cycle every 30.52 ns, about 15.26 ns each
++ * high/low half. The ADC changes data after falling edges; PARLIO captures both
++ * DOUT0 and FSYNC on rising edges. These are hardware actions, not CPU calls.
++ *
++ * PARLIO (parallel input/output) captures both pins at once. Four clock instants
++ * become one packed byte: DOUT0 occupies bits 0,2,4,6 and FSYNC bits 1,3,5,7;
++ * the earliest pair is in bits 1:0. PARLIO's hardware receive FIFO (First In,
++ * First Out) preserves arrival order before DMA transfers the stream to RAM.
++ * Its exact FIFO capacity/internal packing-write width is not established here;
++ * neither should be confused with the software buffer sizes below.
++ * GDMA (General Direct Memory Access) is transfer hardware, not memory. The P4
++ * PARLIO driver uses GDMA-AXI (verified in IDF's esp32p4 gdma_channel.h and
++ * parlio_priv.h), not GDMA-AHB. The driver configures it; neither CPU moves each
++ * pair of input bits. DMA transfers use the internal bus timing, not one CPU
++ * operation or interrupt per DCLK edge.
++ *
++ * Data path and ownership:
++ * 1. Hardware fills the 32 KiB DMA RAM area cyclically (reusing its beginning).
++ * 2. A completed descriptor (address/length instructions for one DMA chunk)
++ *    causes a DMA interrupt. Core 0 services the driver's ISR, an Interrupt
++ *    Service Routine that briefly interrupts normal task execution. The driver
++ *    calls receiveBlock() in that same interrupt context.
++ * 3. receiveBlock() copies raw bytes into one of 16 private 4 KiB blocks and
++ *    queues its ADDRESS in readyBlocks. The block stays at its RAM address.
++ * 4. Core 1's decodeTask, an ordinary scheduled thread, takes that address,
++ *    calls decoder.feed(), and submits decoded sample bytes to the SD ring.
++ *    Only then does it return the raw block's address to freeBlocks for reuse.
++ * 5. The independent Core 0 sdWriter task drains the 4 MiB PSRAM recording ring
++ *    through sdRecorder::write(). Interrupts can interrupt this task. A queued
++ *    sample is not yet saved; final SD SAVED follows file readback and closing.
++ *
++ * At stage 6 each frame is 8 status bits + 24 sample bits on DOUT0, with a
++ * captured FSYNC bit alongside EVERY bit: 32 clocks x 2 bits = 8 raw bytes.
++ * Decoding checks status and packs only the sample into 3 file bytes. Input is
++ * 8.192 MB/s; sample payload is 3.072 MB/s (24.576 Mbps). MB is decimal; KiB and
++ * MiB mean 1024 and 1048576 bytes. Lower stages can have unused frame clocks.
++ *
++ * CPU0 also handles Feather commands and the finite receiver deadline. Neither
++ * decoder.feed() nor SD file writing runs inside the receive interrupt handler.
+  *
+  * A free-buffer queue transfers ownership to the ISR; a ready-buffer queue
+  * transfers it to the decoder. No queued pointer refers to a DMA buffer that
+@@ -38,7 +81,11 @@
+ #include "frameDecoder.h"
+ #include "sdRecorder.h"
+ #include "sdWriteTest.h"
++#include "ramWaveform.h"
+ #include "sdkconfig.h"
++#if CONFIG_P4_CAPTURE_PROFILE
++#include "captureProfile.h"
++#endif
+ 
+ #if !CONFIG_ESP32P4_SELECTS_REV_LESS_V3 || !CONFIG_ESPTOOLPY_FLASHSIZE_16MB
+ #error "This bench project requires P4 pre-v3 silicon support and 16 MB flash."
+@@ -49,7 +96,24 @@
+ #endif
+ 
+ static constexpr uart_port_t featherPort = UART_NUM_1;
++
++// These are tested starting allocations, not proven minimum/optimal sizes.
++// 32 KiB holds 4 ms of raw stage-6 input. It buys time to COPY completed chunks
++// before DMA reuses them. A larger decoder queue cannot rescue a missed copy.
++// IDF 5.5.6 with our aligned buffer and 64-byte cache alignment divides this into
++// seven 4032-byte chunks, then 2240 and 2304 bytes: nine chunks, NOT eight 4 KiB
++// chunks. See parlio_rx_mount_transaction_buffer(). This is driver-specific.
++// Four DCLKs per byte gives 16128, 8960, 9216 clocks respectively, or 492.19,
++// 273.44, 281.25 us at stage 6. Nine receive callbacks per 4 ms average 2250/s;
++// callback service can be delayed after the hardware completion event.
+ static constexpr size_t dmaBytes = 32768;
++
++// Private blocks must hold any delivered chunk. Sixteen 4 KiB data arrays use
++// 64 KiB of internal RAM plus metadata/queue overhead. Their nominal capacity
++// is 8 ms of raw input; partly filled blocks and blocks being copied/decoded
++// reduce the waiting capacity. This cushions brief scheduling delays, not a
++// decoder that is persistently slower than input. The early decoder exhausted
++// this pool; optimizing decoding allowed passing without increasing these sizes.
+ static constexpr size_t blockBytes = 4096;
+ static constexpr unsigned blockCount = 16;
+ static_assert(std::atomic<uint32_t>::is_always_lock_free,
+@@ -81,13 +145,29 @@ struct decoderTiming
+ static decoderTiming timing;
+ 
+ static captureBlock* blocks = nullptr;
++
++// Both FreeRTOS queues hold captureBlock* addresses into the SAME blocks array.
++// freeBlocks means Core 0 may overwrite the block; readyBlocks means Core 1
++// must read it first. The queues are not another 64 KiB copy of the data.
+ static QueueHandle_t freeBlocks = nullptr;
+ static QueueHandle_t readyBlocks = nullptr;
+ static QueueHandle_t uartEvents = nullptr;
+ static SemaphoreHandle_t drained = nullptr;
+ static frameDecoder decoder;
++#if CONFIG_P4_CAPTURE_PROFILE
++// Core 0 alone owns profiling state. No extra task, ISR call or decoder-loop
++// instrumentation is added. Runtime-counter bookkeeping is an SDK build option.
++static captureProfile profile;
++static TaskHandle_t decoderTaskHandle = nullptr;
++#endif
+ static sdRecorder recording;
+ static sdWriteTest storageTest;
++// Mode is selected on Core 0 before any capture/SD commands after boot and is
++// then fixed until reset. Core 1 reads it only after receiving a queued block.
++static bool ramMode = false;
++static bool modeLocked = false;
++static ramWaveform waveform;
++static int64_t ramStopRequestedAt = 0;
+ static parlio_rx_unit_handle_t receiver = nullptr;
+ static parlio_rx_delimiter_handle_t delimiter = nullptr;
+ static uint8_t* dmaBuffer = nullptr;
+@@ -140,6 +220,9 @@ static void reply(const char* format, ...)
+  * wrapped around its own 32 KiB area. A failed allocation/queue send is counted.
+  * Returning true asks the scheduler to wake a newly runnable higher-priority
+  * task. No logging, heap allocation, decoding or waiting occurs in the ISR.
++ * The driver supplies event->data and recv_bytes for this completed chunk;
++ * they are packed pin states, not decoded sample values. FromISR queue calls
++ * are the interrupt-safe versions: they never wait for another task to run.
+  */
+ static bool receiveBlock(parlio_rx_unit_handle_t,
+                          const parlio_rx_event_data_t* event, void*)
+@@ -169,16 +252,23 @@ static bool receiveBlock(parlio_rx_unit_handle_t,
+     }
+     else
+     {
++        // The free queue gave us exclusive use of this block. Copy the actual
++        // received length, not its 4096-byte capacity (chunks can be shorter).
+         block->length = event->recv_bytes;
+         block->arrivedAt = now;
+         memcpy(block->data, event->data, block->length);
+         const int64_t copyUs = esp_timer_get_time() - now;
+         if (copyUs > maxCopyUs) { maxCopyUs = copyUs; }
++
++        // &block lets FreeRTOS copy the pointer value into the queue. It does
++        // not copy the pointed-to bytes. CPU1 may start reading after this send.
+         if (xQueueSendFromISR(readyBlocks, &block, &awakened) != pdTRUE)
+         {
+             droppedBlocks.fetch_add(1, std::memory_order_relaxed);
+             xQueueSendFromISR(freeBlocks, &block, &awakened);
+         }
++
++        // Count waiting blocks only, excluding a block already held by CPU1.
+         const uint32_t queued = uxQueueMessagesWaitingFromISR(readyBlocks);
+         if (queued > queueHighWater) { queueHighWater = queued; }
+     }
+@@ -190,7 +280,12 @@ static bool receiveBlock(parlio_rx_unit_handle_t,
+  * A null pointer is a drain marker inserted after DMA stops. FIFO ordering means
+  * all preceding blocks have been processed when the semaphore is given. CPU0
+  * can then read/reset decoder state without a race. Normal blocks return to the
+- * free queue only AFTER feed reads them and copies decoded words into the SD ring.
++ * free queue only AFTER feed reads them and attempts submission of the decoded
++ * samples to the SD ring. On submission failure, diagnostics continue and no
++ * code retains the raw pointer, so returning the block remains safe.
++ * portMAX_DELAY sleeps this task until a pointer is available, rather than
++ * burning CPU time checking repeatedly. It does not stop DMA or Core 0.
++ * This task is woken through a queue; it is NOT an interrupt handler.
+  */
+ static void decodeTask(void*)
+ {
+@@ -207,6 +302,9 @@ static void decodeTask(void*)
+             if (timing.blocks == 0) { lastPauseAt = startedAt; }
+             const int64_t waitUs = startedAt - block->arrivedAt;
+             if (waitUs > timing.maxWaitUs) { timing.maxWaitUs = waitUs; }
++            // feed() reconstructs words and calls recordWords() synchronously.
++            // That path copies packed samples into the separate recording ring;
++            // it does not wait for SD. No later code retains this raw block.
+             decoder.feed(block->data, block->length);
+             const int64_t finishedAt = esp_timer_get_time();
+             const int64_t decodeUs = finishedAt - startedAt;
+@@ -214,6 +312,9 @@ static void decodeTask(void*)
+             if (decodeUs > timing.maxDecodeUs) { timing.maxDecodeUs = decodeUs; }
+             timing.bytes += static_cast<uint32_t>(block->length);
+             ++timing.blocks;
++
++            // Return the ADDRESS, not the data: the memory stays in place and
++            // Core 0 is now allowed to overwrite it with another DMA chunk.
+             xQueueSend(freeBlocks, &block, portMAX_DELAY);
+ 
+             // Keep background/idle scheduling opportunities even under backlog,
+@@ -323,7 +424,9 @@ static esp_err_t startCapture(unsigned stage)
+ 
+     // A software delimiter keeps receiving across DMA descriptors. Its large
+     // frame limit is not an ADC sample length; on_partial_receive handles each
+-    // completed descriptor (at most 4092 bytes, with cache-alignment rounding).
++    // completed descriptor. The current P4 alignment gives 4032-byte maximum
++    // chunks; the final two are smaller (see dmaBytes above). A descriptor
++    // boundary is a memory boundary, not necessarily an ADC frame boundary.
+     parlio_rx_soft_delimiter_config_t delimiterConfig = {};
+     delimiterConfig.sample_edge = PARLIO_SAMPLE_EDGE_POS;
+     delimiterConfig.bit_pack_order = PARLIO_BIT_PACK_ORDER_LSB;
+@@ -359,6 +462,14 @@ static esp_err_t startCapture(unsigned stage)
+         releaseReceiver();
+         drainDecoder();
+     }
++#if CONFIG_P4_CAPTURE_PROFILE
++    else
++    {
++        // Measure capture only: SD preparation already finished. READY and ADC
++        // START follow, so the short startup handshake is part of this interval.
++        profile.begin(xTaskGetCurrentTaskHandle(), decoderTaskHandle, recording.profileTask());
++    }
++#endif
+     return retVal;
+ }
+ 
+@@ -372,6 +483,11 @@ static esp_err_t startCapture(unsigned stage)
+  */
+ static void stopCapture(const char* kind)
+ {
++#if CONFIG_P4_CAPTURE_PROFILE
++    // Freeze before teardown/draining: file verification must not inflate CPU
++    // usage attributed to steady acquisition. Reporting is deferred until quiet.
++    profile.finish();
++#endif
+     releaseReceiver();
+     drainDecoder();
+     active = false;
+@@ -428,11 +544,40 @@ static void stopCapture(const char* kind)
+     }
+     printf("DONE means receiver stopped. Missing final DMA tail and undetected "
+            "hardware loss remain possible; review counts and errors.\n");
++
+     // The protocol acknowledgement precedes potentially slow SD draining and
+     // readback. The disk task prints SD SAVED separately when those finish.
+-    recording.finish(strcmp(kind, "DONE") == 0 && stats.words != 0 &&
++    // A bad header does not itself stop capture early. After draining, even ONE
++    // counted bad header invalidates this test recording. SD still preserves
++    // and verifies the payload, but reports FAILED and writes an invalid header.
++    // This distinguishes bad acquisition from a disk write failure; see TODO.md
++    // for the undecided production policy. Power/saturation flags alone are not
++    // badHeaders: frameDecoder::finishWord() documents the exact mask.
++#if CONFIG_P4_CAPTURE_PROFILE
++    profile.report();
++#endif
++    const bool clean = strcmp(kind, "DONE") == 0 && stats.words != 0 &&
+         stats.badHeaders == 0 && stats.badPeriods == 0 && stats.shortWords == 0 &&
+-        droppedBlocks.load() == 0 && callbackErrors.load() == 0 && !decoder.outputFailed(), stats.words);
++        droppedBlocks.load() == 0 && callbackErrors.load() == 0 && !decoder.outputFailed();
++    if (ramMode)
++    {
++        // drainDecoder() above transfers ownership back to Core 0. Print only
++        // now: USB output must never slow the running decode/interrupt path.
++        // 'clean' concerns reported capture faults, not sine shape or clipping.
++        printf("WAVE_BEGIN run=%lu rate=%lu bins=%lu samplesPerBin=%lu clean=%u\n",
++               activeRun, static_cast<unsigned long>(ads127BenchRates[activeStage].samplesPerSecond),
++               static_cast<unsigned long>(waveform.completedBins),
++               static_cast<unsigned long>(waveform.samplesPerBin), unsigned(clean && waveform.complete()));
++        for (unsigned index = 0; index < waveform.completedBins; ++index)
++        {
++            const auto& bin = waveform.bins[index];
++            printf("WAVE,%u,%ld,%ld,%.3f\n", index, static_cast<long>(bin.minimum),
++                   static_cast<long>(bin.maximum), double(bin.sum) / waveform.samplesPerBin);
++        }
++        printf("WAVE_END run=%lu\n", activeRun);
++        fflush(stdout);
++    }
++    else { recording.finish(clean, stats.words); }
+ }
+ 
+ /**
+@@ -460,7 +605,7 @@ static void handleLine(const char* line)
+         {
+             reply("ADC127 FAILED %lu reason=invalid-request\n", run);
+         }
+-        else if (!recording.claim(run, stage, ads127BenchRates[stage].samplesPerSecond))
++        else if (!ramMode && !recording.claim(run, stage, ads127BenchRates[stage].samplesPerSecond))
+         {
+             reply("ADC127 FAILED %lu reason=SD-not-ready-press-p-on-P4\n", run);
+         }
+@@ -468,6 +613,9 @@ static void handleLine(const char* line)
+         {
+             activeRun = run;
+             activeStage = stage;
++            modeLocked = true;
++            ramStopRequestedAt = 0;
++            if (ramMode) { waveform.reset(ads127BenchRates[stage].samplesPerSecond); }
+             const esp_err_t result = startCapture(stage);
+             if (result == ESP_OK)
+             {
+@@ -478,7 +626,7 @@ static void handleLine(const char* line)
+             else
+             {
+                 reply("ADC127 FAILED %lu reason=%s\n", run, esp_err_to_name(result));
+-                recording.finish(false);
++                if (!ramMode) { recording.finish(false); }
+             }
+         }
+     }
+@@ -489,12 +637,21 @@ static void handleLine(const char* line)
+     }
+ }
+ 
+-/** @brief CPU1 packs decoded samples to three bytes before the nonblocking ring copy.
++/** @brief CPU1 sends decoded samples to the selected RAM or SD collector.
+  * frameDecoder retains status/header validation and DMA capture is unchanged.
++ * Called synchronously by frameDecoder::flushOutput(), with count complete
++ * 32-bit words (status in the high byte). True means copied into ring RAM, not
++ * written to SD. False latches decoder output failure; the caller cannot keep
++ * pointers to its reusable batch. sdRecorder::submitSamples() performs the copy.
++ * RAM mode instead summarizes samples immediately in ramWaveform::accept();
++ * later samples are ignored after its window fills, without reporting overflow.
+  */
+ static bool recordWords(const uint32_t* words, size_t count, void*)
+ {
+-    return recording.submitSamples(words, count);
++    bool retVal = true;
++    if (ramMode) { waveform.accept(words, count); }
++    else { retVal = recording.submitSamples(words, count); }
++    return retVal;
+ }
+ 
+ /**
+@@ -523,6 +680,12 @@ extern "C" void app_main()
+     inputs.pin_bit_mask = (1ULL << 0) | (1ULL << 1) | (1ULL << 2);
+     inputs.mode = GPIO_MODE_INPUT;
+     ESP_ERROR_CHECK(gpio_config(&inputs));
++
++    // Allocate all raw blocks before capture: no allocation inside the ISR.
++    // A queue item is only one pointer. Seventeen ready slots permit a null
++    // shutdown marker after all 16 real blocks; there is NO seventeenth block.
++    // drained is a semaphore: a completion signal from CPU1 back to CPU0 so
++    // stopCapture can safely inspect/reset decoder state after queued work ends.
+     blocks = static_cast<captureBlock*>(heap_caps_calloc(
+         blockCount, sizeof(captureBlock), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+     freeBlocks = xQueueCreate(blockCount, sizeof(captureBlock*));
+@@ -534,8 +697,17 @@ extern "C" void app_main()
+         captureBlock* block = &blocks[index];
+         xQueueSend(freeBlocks, &block, 0);
+     }
++
++    // Initially every block is free. Pin the decoder to CPU1, with a 4096-byte
++    // task stack and scheduling priority 10. Stack storage is for function calls
++    // and locals; it is separate from the sixteen 4096-byte input blocks.
++#if CONFIG_P4_CAPTURE_PROFILE
++    TaskHandle_t* decoderHandleOutput = &decoderTaskHandle;
++#else
++    TaskHandle_t* decoderHandleOutput = nullptr;
++#endif
+     ESP_ERROR_CHECK(xTaskCreatePinnedToCore(decodeTask, "decode", 4096, nullptr, 10,
+-                                          nullptr, 1) == pdPASS ? ESP_OK : ESP_ERR_NO_MEM);
++                                          decoderHandleOutput, 1) == pdPASS ? ESP_OK : ESP_ERR_NO_MEM);
+ 
+     // Driver queues buffer short command bursts. Detect framing, parity and
+     // overflow events rather than accepting a corrupted control message.
+@@ -549,9 +721,15 @@ extern "C" void app_main()
+     ESP_ERROR_CHECK(uart_param_config(featherPort, &uartConfig));
+     ESP_ERROR_CHECK(uart_set_pin(featherPort, 5, 4, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
+     ESP_ERROR_CHECK(uart_driver_install(featherPort, 2048, 512, 16, &uartEvents, 0));
++#if CONFIG_P4_CAPTURE_PROFILE
++    printf("P4 capture IDLE (sd-profile-60s). Profiling ON; use Feather 60s firmware.\n");
++    printf("Press p here and wait for SD READY before starting. "
++#else
+     printf("P4 capture IDLE (sd-v5-30min). Press p here and wait for SD READY before starting. "
++#endif
+            "DCLK=0 FSYNC=1 DOUT0=2 RX=4 TX=5.\n");
+     printf("ADC files: 3 bytes/sample, status still checked; stage 6 requires 24.576 Mbps to SD.\n");
++    printf("For RAM waveform only: press w BEFORE any p/t/u or capture. Mode fixed until reset; no SD needed.\n");
+     printf("P4 keys: p=prepare; t=SD-only 26 Mbps; u=SD-only 32.768 Mbps; s=stop SD test. "
+            "Each SD test lasts 60 seconds. Do not send Feather commands during SD tests.\n");
+     printf("Bench run=%lu seconds; receiver timeout=%lu seconds from ARM.\n",
+@@ -563,13 +741,29 @@ extern "C" void app_main()
+         char consoleKey = 0;
+         if (read(STDIN_FILENO, &consoleKey, 1) == 1)
+         {
+-            if (consoleKey == 'p')
++            if (consoleKey == 'w')
++            {
++                if (!modeLocked && !active)
++                {
++                    ramMode = true;
++                    modeLocked = true;
++                    printf("RAM READY: no card access; use Feather DAC firmware with RAMFULL support, then 6.\n");
++                }
++                else { printf("Mode already selected; reset P4 before changing modes.\n"); }
++            }
++            else if (ramMode && (consoleKey == 'p' || consoleKey == 't' || consoleKey == 'u' || consoleKey == 's'))
++            {
++                printf("RAM mode: SD commands disabled until reset.\n");
++            }
++            else if (consoleKey == 'p')
+             {
++                modeLocked = true;
+                 const bool accepted = !active && recording.prepare();
+                 printf("SD prepare %s\n", accepted ? "requested; wait for SD READY" : "busy/already prepared");
+             }
+             else if (consoleKey == 't' || consoleKey == 'u')
+             {
++                modeLocked = true;
+                 const bool accepted = !active && storageTest.start(consoleKey == 't' ? 812500 : 1024000);
+                 if (!accepted) { printf("SD TEST refused: busy or not prepared; p then SD READY required\n"); }
+             }
+@@ -603,15 +797,31 @@ extern "C" void app_main()
+         }
+         if (active)
+         {
+-            if (droppedBlocks.load() != 0 || callbackErrors.load() != 0 || recording.failed())
++            // A completed RAM window asks the Feather to stop the ADC. Its
++            // matching STOP returns through handleLine(), then we dump USB data.
++            // Older Feather firmware ignores RAMFULL: bound that wait to 2 s
++            // and report FAULT (which also asks older firmware to stop).
++            if (ramMode && waveform.complete() && ramStopRequestedAt == 0)
++            {
++                ramStopRequestedAt = esp_timer_get_time();
++                reply("ADC127 RAMFULL %lu\n", activeRun);
++            }
++            if (droppedBlocks.load() != 0 || callbackErrors.load() != 0 ||
++                (!ramMode && recording.failed()) ||
++                (ramStopRequestedAt != 0 && esp_timer_get_time() - ramStopRequestedAt > 2000000))
+             {
+                 stopCapture("FAULT");
+             }
+             else if (esp_timer_get_time() - armedAt >=
+-                     static_cast<int64_t>(ads127BenchTiming::receiverTimeoutMs) * 1000)
++                     static_cast<int64_t>(ramMode ? 5000 : ads127BenchTiming::receiverTimeoutMs) * 1000)
+             {
+                 stopCapture("TIMEOUT");
+             }
++#if CONFIG_P4_CAPTURE_PROFILE
++            // poll() is normally just a timestamp comparison. About once per
++            // second it samples counters without console output or stack scans.
++            if (active) { profile.poll(); }
++#endif
+         }
+         vTaskDelay(pdMS_TO_TICKS(1));
+     }
+diff --git a/p4Capture/main/recordingFormat.h b/p4Capture/main/recordingFormat.h
+index 37e1860..dd10fe0 100644
+--- a/p4Capture/main/recordingFormat.h
++++ b/p4Capture/main/recordingFormat.h
+@@ -2,6 +2,11 @@
+  * @brief Portable sample packing and versioned P4 commissioning file headers.
+  * ADC v3 stores three-byte signed samples and 64-bit sizes; synthetic v1 is unchanged.
+  * These helpers do not allocate memory, perform disk I/O, or change DMA capture.
++ * This is the SECOND kind of packing in the data path. PARLIO hardware first
++ * packs pairs of pin levels into raw bytes. frameDecoder reconstructs 32-bit
++ * words. packSamples() here then removes the status byte and arranges the three
++ * sample bytes for the file. These operations must not be confused: hardware
++ * sees pin levels; this software sees already-decoded ADC values.
+  */
+ #pragma once
+ #include <cstddef>
+diff --git a/p4Capture/main/sdRecorder.cpp b/p4Capture/main/sdRecorder.cpp
+index e2e1915..b8b2b94 100644
+--- a/p4Capture/main/sdRecorder.cpp
++++ b/p4Capture/main/sdRecorder.cpp
+@@ -3,6 +3,28 @@
+  * A 4 MiB PSRAM ring absorbs card stalls, not sustained insufficient throughput.
+  * The disk task copies each 16 KiB slice into internal RAM before f_write(),
+  * avoiding a dependency on the card driver's ability to DMA from PSRAM.
++ *
++ * Reading path: submitSamples() -> submitBytes() for Core 1's data submission;
++ * work() -> bufferedWriter::pump() -> write() for Core 0's actual card writes;
++ * finish() -> finishFile() for shutdown and verification. A task is a software
++ * thread scheduled by FreeRTOS, not an interrupt handler. Both paths can run
++ * concurrently on different cores, coordinated by the writer's atomic head/tail
++ * positions (positions updated so the other core sees complete copies).
++ *
++ * Core 1 receives decoded 32-bit status+sample words, packs their low 24 bits
++ * into packedSamples, then writer.submit() COPIES those bytes to ring memory.
++ * No queued pointer refers back to the decoder batch or its raw input block.
++ * Core 0 later asks writer.pump() to write a contiguous span, normally up to
++ * 128 KiB. This calls our write(), which uses a 16 KiB temporary internal-RAM
++ * buffer and f_write(). The ring span remains unavailable for reuse until the
++ * write succeeds. PSRAM is external RAM, separate from the internal DMA and
++ * raw-block allocations in main.cpp. The 4 MiB ring holds about 1.37 seconds of
++ * stage-6 three-byte samples when empty; it cannot fix a persistently slow card.
++ *
++ * SD READY means the file was prepared, ADC DONE means capture stopped, and
++ * SD SAVED means capture checks plus drain/readback/header/close succeeded.
++ * Full readback CRC compares saved bytes with accepted bytes; it does not prove
++ * analog accuracy or that hardware delivered every ADC-generated sample.
+  */
+ #include "sdRecorder.h"
+ #include "sdTestData.h"
+@@ -58,13 +80,32 @@ static uint64_t recordingClock()
+ /** @brief Allocate once and start the disk thread without mounting or starting capture. */
+ bool sdRecorder::initialize()
+ {
++    // Retain the task handle only in diagnostic builds. The normal build does
++    // not allocate profiling state or ask FreeRTOS to return this handle.
++#if CONFIG_P4_CAPTURE_PROFILE
++    TaskHandle_t* taskHandle = &diskTask;
++#else
++    TaskHandle_t* taskHandle = nullptr;
++#endif
+     scratch = static_cast<uint8_t*>(heap_caps_aligned_alloc(
+         64, scratchBytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA | MALLOC_CAP_8BIT));
+     const bool retVal = scratch != nullptr && writer.initializeMemory(allocateRing, releaseRing) &&
+-        xTaskCreatePinnedToCore(taskEntry, "sdWriter", 8192, this, 4, nullptr, 0) == pdPASS;
++        xTaskCreatePinnedToCore(taskEntry, "sdWriter", 8192, this, 4, taskHandle, 0) == pdPASS;
+     return retVal;
+ }
+ 
++#if CONFIG_P4_CAPTURE_PROFILE
++/**
++ * @brief Borrow the persistent writer task handle for runtime/stack diagnostics.
++ * Main calls this after initialize() succeeds. The task is never deleted, so
++ * the profiler may inspect it without owning, stopping or scheduling it.
++ */
++TaskHandle_t sdRecorder::profileTask() const
++{
++    return diskTask;
++}
++#endif
++
+ /** @brief CPU0 requests preparation; only a closed previous recording may be replaced. */
+ bool sdRecorder::prepare()
+ {
+@@ -103,6 +144,10 @@ bool sdRecorder::submitWords(const uint32_t* words, size_t count)
+  * No status checks are removed: frameDecoder checks/counts every status before
+  * invoking this callback. Invalid status still invalidates the completed run.
+  * A failed pack or submission returns false, latching decoder output failure.
++ * Called on Core 1 by recordWords(), not by an ISR. count is WORDS, while bytes
++ * and ring capacity are BYTES. 0x08123456 becomes 56 34 12 in the file: discard
++ * status 08 after checking it, store the least-significant sample byte first.
++ * A bad header's sample is still submitted; final captureClean will be false.
+  */
+ bool sdRecorder::submitSamples(const uint32_t* words, size_t count)
+ {
+@@ -116,6 +161,9 @@ bool sdRecorder::submitSamples(const uint32_t* words, size_t count)
+ /** @brief Producer copies bytes into owned ring memory and checksums accepted bytes.
+  * writer.submit is the actual copy; the source batch may be reused afterward.
+  * submittedBytes and CRC are read by the disk task only after the producer stops.
++ * Here producer means the Core 1 ADC decoder (or mutually exclusive synthetic
++ * test). True promises RAM acceptance only. If no space exists, writer.submit()
++ * rejects the entire batch and latches failure; it never waits for an SD write.
+  */
+ bool sdRecorder::submitBytes(const uint8_t* data, uint32_t bytes)
+ {
+@@ -259,6 +307,11 @@ bool sdRecorder::prepareFile()
+ /** @brief Disk-thread byte destination; return the exact prefix accepted by f_write.
+  * memcpy copies from the PSRAM ring to internal scratch; f_write performs the
+  * card transfer. Ring ownership is retained until every slice returns.
++ * bufferedWriter::pump() calls this on Core 0 with a pointer into its ring.
++ * data+retVal advances past bytes already written; amount limits each copy to
++ * scratch capacity. f_write() is a FatFs filesystem call, which reaches the
++ * SDMMC driver and SD hardware; it may wait for the card. It is not PARLIO DMA.
++ * DMA/SD interrupt handling belongs to those drivers, not this ordinary task.
+  */
+ size_t sdRecorder::write(const uint8_t* data, size_t length)
+ {
+diff --git a/p4Capture/main/sdRecorder.h b/p4Capture/main/sdRecorder.h
+index ea0a972..48e44e7 100644
+--- a/p4Capture/main/sdRecorder.h
++++ b/p4Capture/main/sdRecorder.h
+@@ -9,12 +9,22 @@
+ #include "bufferedWriter.h"
+ #include "ff.h"
+ #include "sdmmc_cmd.h"
++#include "sdkconfig.h"
++#if CONFIG_P4_CAPTURE_PROFILE
++#include "freertos/FreeRTOS.h"
++#include "freertos/task.h"
++#endif
+ 
+ /** @brief One prepared recording, with explicit asynchronous preparation and saving.
+  * State publication transfers ownership: ready permits claim(), running permits
+  * CPU1 submissions, finishing is published only after CPU1 has drained. Disk
+  * calls never occur in either submission method. Files are created exclusively,
+  * never replaced.
++ * bufferedWriter owns the ring and protects queued bytes until disk writing
++ * finishes. This adapter owns board/card configuration and file metadata.
++ * prepare()/finish() request work by changing atomic state; their return does
++ * not mean the asynchronous disk work is complete. Console READY/SAVED/FAILED
++ * is printed by the disk task after the corresponding operation finishes.
+  */
+ class sdRecorder : public byteSink
+ {
+@@ -26,7 +36,13 @@ public:
+     bool submitSamples(const uint32_t* words, size_t count);
+     bool failed() const;
+     void finish(bool captureClean, uint32_t expectedSamples = 0);
++#if CONFIG_P4_CAPTURE_PROFILE
++    TaskHandle_t profileTask() const;
++#endif
+ private:
++#if CONFIG_P4_CAPTURE_PROFILE
++    TaskHandle_t diskTask = nullptr;
++#endif
+     enum class phase { idle, preparing, ready, running, finishing, complete, error, blocked };
+     static void taskEntry(void* context);
+     void work();
+diff --git a/s3Recorder/lib/bufferedWriter/src/bufferedWriter.cpp b/s3Recorder/lib/bufferedWriter/src/bufferedWriter.cpp
+index 7df618a..b649215 100644
+--- a/s3Recorder/lib/bufferedWriter/src/bufferedWriter.cpp
++++ b/s3Recorder/lib/bufferedWriter/src/bufferedWriter.cpp
+@@ -6,9 +6,13 @@
+  *
+  * A ring buffer is a fixed array reused in a circle. It temporarily holds data
+  * while the SD card is busy. The producer ADDS bytes; the consumer REMOVES them
+- * only after writing them. In this project:
+- * ADC -> sampleFormatter::submit() -> bufferedWriter::submit() -> RAM array
+- * recordingService::run() -> bufferedWriter::pump() -> sdRecordingSink -> card
++ * only after writing them. This library is shared by two board adapters:
++ * S3: sampleFormatter::submit() -> submit(); recordingService::run() -> pump()
++ *     -> sdRecordingSink::write() -> card.
++ * P4: Core 1 sdRecorder::submitSamples() -> submit(); Core 0 sdRecorder::work()
++ *     -> pump() -> sdRecorder::write() -> card. P4 supplies three-byte samples
++ *     and uses a 4 MiB PSRAM ring with 128 KiB write batches. The library itself
++ *     treats these as bytes; it does not understand ADC frames or status bits.
+  *
+  * head is the total producer position, tail the total consumer position. They
+  * keep advancing even when the physical array position wraps back to zero.
+@@ -68,7 +72,7 @@ bufferedWriter::~bufferedWriter()
+  * microseconds. The adapter may open after this call to measure opening time,
+  * but must not enable the producer until the file is ready.
+  *
+- * Called by recordingService's disk task when preparing a NEW recording.
++ * Called by recordingService (S3) or sdRecorder (P4) when preparing a NEW recording.
+  * This only prepares RAM; it does not open a file, start the ADC, or erase a card.
+  * Resetting positions makes old bytes irrelevant without clearing the whole array.
+  * @param destination Object that implements the actual write/flush operations.
+@@ -102,16 +106,19 @@ void bufferedWriter::start(byteSink& destination, uint64_t (*clock)())
+  * silently joining data on either side of a missing section. rejectedBytes counts
+  * only bytes explicitly offered and rejected, not unseen hardware samples.
+  *
+- * Called once per formatted sample: from fastCapture's core-0 interrupt at 30k,
+- * or from acquisition's core-0 task at lower rates. There must be ONE producer,
+- * not both paths at once. The disk task may be reading the ring simultaneously.
++ * S3 calls once per formatted sample from fastCapture's core-0 interrupt at 30k,
++ * or acquisition's core-0 task at lower rates. P4 instead calls from its Core 1
++ * decoder task with batches of packed three-byte samples (four-byte words for
++ * its separate synthetic test). There must be ONE producer, never both paths
++ * at once. The disk task may be reading other ring bytes simultaneously.
+  * @param data Bytes to copy. The caller may reuse its memory when this returns.
+- * @param length Number of BYTES, not number of samples (currently four per sample).
++ * @param length Number of BYTES, not samples; the board adapter chooses the format.
+  * @return True means copied into RAM, NOT saved to disk. False means none of this
+  * submission was copied. Acquisition must observe failed(), stop collecting, and
+  * ask the disk task to finish the earlier data; this function cannot stop the ADC.
+- * No waiting is allowed here: the next 30k sample arrives about 33 microseconds
+- * later. An ISR is an interrupt service routine, which briefly interrupts a task.
++ * No waiting is allowed here: incoming acquisition continues while disk writes
++ * may stall. An ISR is an interrupt service routine, which briefly interrupts a
++ * task. P4 submits from a task, not an ISR; its external-memory path uses memcpy.
+  */
+ bool BUFFERED_IRAM bufferedWriter::submit(const uint8_t* data, uint32_t length)
+ {
+@@ -212,17 +219,21 @@ void bufferedWriter::measure(uint64_t beganUs, uint32_t kind, bool success)
+  * An overflow still allows earlier queued good bytes to be drained.
+  *
+  * THIS IS WHERE WE READ DATA OUT OF THE RING BUFFER.
+- * recordingService::run() calls this repeatedly from the disk task on core 1.
++ * S3 recordingService::run() calls this from its Core 1 disk task; P4
++ * sdRecorder::work() calls it from its Core 0 disk task. The adapter determines
++ * scheduling; this reusable library does not create tasks or choose a CPU core.
+  * Reading here does not mean reading the ADC or loading a file from the SD card.
+  * It means giving the oldest queued RAM bytes to the object that writes the file.
+  *
+- * There is no separate ring read() method or second temporary data array:
++ * There is no separate ring read() method or temporary array in this library:
+  * sink->write(buffer + offset, length) reads directly from our owned buffer.
+  * It must finish using that memory before returning. While it waits for the card,
+  * submit() may add samples elsewhere in the ring, but cannot reuse this block.
++ * An adapter may use temporary storage internally: P4 copies 16 KiB slices to
++ * internal RAM before f_write(). That does not release the source ring early.
+  *
+  * @param drain False during recording: normally wait for a blockBytes-sized batch to
+- * avoid a separate filesystem call for every four-byte sample. True after Stop:
++ * avoid a separate filesystem call for every sample. True after Stop:
+  * allow the final short batch, even if it contains only one sample.
+  * @return False if a disk write failed (now or previously). True can also mean
+  * NOTHING was written: for example, only 100 bytes are queued and drain is false.
+@@ -252,7 +263,8 @@ bool bufferedWriter::pump(bool drain)
+         const uint64_t began = clockUs();
+ 
+         // This call reads the ring memory and writes the file. sink is a byteSink
+-        // interface; in this project the actual function is sdRecordingSink::write().
++        // interface; the implementation is sdRecordingSink::write() on S3 or
++        // sdRecorder::write() on P4. Both must finish reading before returning.
+         // It can block on storage. Crucially, tail has NOT moved yet.
+         const size_t written = sink->write(buffer + offset, length);
+ 

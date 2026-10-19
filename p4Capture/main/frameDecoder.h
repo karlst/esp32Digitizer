@@ -25,14 +25,19 @@ struct captureStats
 
 /**
  * @brief Worker-owned state spanning DMA blocks, including split ADC words.
- * A sample is one ADC conversion result. FSYNC (frame synchronization) rises
- * once per sample; DCLK provides one clock per serial bit. Each packed pair
+ * A sample is one ADC conversion result. In our selected channel arrangement,
+ * FSYNC (frame synchronization) rises once per sample; DCLK provides one clock
+ * per serial bit. A rising edge means low-to-high, not every captured high level.
+ * FSYNC falls halfway through its period; data continue while it is low. Each packed pair
  * contains DOUT0 in bit 0 and FSYNC in bit 1, earliest pair in byte bits 1:0.
  * Only the first 32 DCLKs of a frame form our 8-bit header + 24-bit sample.
  * Idle clocks in the rest of a frame are deliberately ignored.
  * An optional output callback receives copies of complete raw words in batches
  * of at most 512. A rejected batch latches failure but does not hide diagnostic
  * counts. reset clears that latch while preserving the selected callback.
+ * The output is 32-bit status+sample words, not the final three-byte SD format.
+ * This class owns no DMA buffer or ready/free queue. main.cpp supplies each raw
+ * block and must not return it to freeBlocks until feed() has finished reading.
  */
 class frameDecoder
 {

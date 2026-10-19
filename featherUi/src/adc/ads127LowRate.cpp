@@ -4,7 +4,7 @@
  * Read configure() for the complete register plan. Each successful write is
  * echoed by the ADC then independently read back. TI ADS127L1x Rev B register
  * sections 8.7-8.18 define these fields. Clock math assumes the EVM's documented
- * 32.768 MHz oscillator; measured S3 word rate must later check that assumption.
+ * 32.768 MHz oscillator; measured receiver word rate must later check that assumption.
  */
 #include "ads127LowRate.h"
 #include <Arduino.h>
@@ -98,12 +98,16 @@ bool ads127LowRate::clearStartupFlags()
 /**
  * @brief Identify and stop the ADC, then configure the requested bench stage.
  * stage indexes shared ads127BenchRates; default zero retains the 16-kHz test.
+ * externalInput=false retains the internal-short baseline. True selects the
+ * physical AIN0P/AIN0N inputs, driven through the EVM's analog front end. This
+ * selects CH0_CFG1's external input and enables the ADC's midpoint-voltage
+ * output for the EVM input amplifiers. Sample rate and serial format are unchanged.
  * Returning true means settings read back correctly, not that DMA receives data.
  * On failure make a best-effort stop and refuse start(). No reset is issued, so
  * startup flags are logged before clearing; other fault flags are never cleared.
  * A power cycle restores defaults.
  */
-bool ads127LowRate::configure(unsigned stage)
+bool ads127LowRate::configure(unsigned stage, bool externalInput)
 {
     configured = false;
     if (stage >= ads127BenchRateCount)
@@ -127,13 +131,22 @@ bool ads127LowRate::configure(unsigned stage)
     if (retVal)
     {
         retVal = setAndCheck(0x09, 0x06) &&  // Max speed; software start/stop; no averaging.
-                 setAndCheck(0x08, 0x00) &&  // Board's default 2.5-V reference range.
+                 // GEN_CFG1 bit 2 enables VCM: an analog output at the midpoint
+                 // of the ADC supply rails. The TI board connects this output to
+                 // the input amplifiers to establish their output center voltage.
+                 // Enable it for external-input tests; retain the internal-short
+                 // baseline otherwise. Bit 0 remains zero for the 2.5-V reference.
+                 // Readback confirms the setting, not the actual analog voltage
+                 // or that this change fixes the distorted recorded waveform.
+                 setAndCheck(0x08, externalInput ? 0x04 : 0x00) &&
                  setAndCheck(0x0a, 0x00) &&  // 24 bits; full drive; SPI CRC remains off.
                  setAndCheck(0x0d, 0x08) &&  // CLK_SEL bit 3 selects external EVM clock; divider 1.
                  setAndCheck(0x0c, rate.clockDividerCode) && // DCLK /8, /4, /2 or /1; default bit delay.
                  setAndCheck(0x0b, 0x70) &&  // Eight lanes; status header; no data CRC.
                  setAndCheck(0x10, 0x00) &&  // No GPIO override of sample outputs.
-                 setAndCheck(0x11, 0x20);    // Internal short: coax signal not needed.
+                 // TI Rev B table 8-20: MUX[6:4]=010 shorts internally; 000
+                 // uses normal external polarity. Range and buffer bits stay 0.
+                 setAndCheck(0x11, externalInput ? 0x00 : 0x20);
     }
 
     // Eight-lane mode puts channel zero alone on DOUT0, even though we connect
@@ -148,7 +161,7 @@ bool ads127LowRate::configure(unsigned stage)
     {
 
         // Reassert stop after configuration: register changes can restart filter
-        // sequencing. The later start must still wait for the S3 READY reply.
+        // sequencing. The later start must still wait for the receiver READY reply.
         retVal = stop() && reportStatus("configured, before ARM");
     }
     if (!retVal)
@@ -161,7 +174,7 @@ bool ads127LowRate::configure(unsigned stage)
 }
 
 /**
- * @brief Request conversions only after successful configure() and S3 readiness.
+ * @brief Request conversions only after successful configure() and receiver readiness.
  * CONTROL bit 1 self-clears. Its write echo is not proof of clock/sample delivery.
  */
 bool ads127LowRate::start()

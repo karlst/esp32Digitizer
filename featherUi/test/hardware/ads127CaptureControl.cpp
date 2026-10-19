@@ -4,8 +4,14 @@
  * setup() leaves DAC off and SPI inputs undriven. USB 'g' configures the ADC,
  * asks the receiver to arm, waits for matching READY, then starts conversions.
  * After the shared run duration (or on 's') it stops ADC then receiver. The named
- * P4 environment selects 60 seconds; the legacy S3 environment retains five.
+ * P4 environment selects 60 seconds or 30 minutes; legacy S3 retains five.
+ * The opt-in ads127-p4-dac-60s build selects external channel-0 input and starts
+ * a fixed DAC sine only after receiver READY. The compare variant also samples
+ * A2; ads127-p4-constant holds code 135 instead of generating a sine. Builds
+ * without ADS127_P4_DAC_TEST retain internal short and DAC off. A failed start, requested stop or receiver fault disables the DAC.
  * UART reports are forwarded to USB. This is not the production web application.
+ * ads127-p4-compare additionally measures A2 during the same run. It exports
+ * timestamped input observations only after stopping the ADC and DAC.
  */
 #include <Arduino.h>
 #include <driver/dac.h>
@@ -17,6 +23,18 @@
 #include "benchLine.h"
 #include "ads127BenchRate.h"
 #include "ads127BenchTiming.h"
+#if ADS127_COMPARE_INPUT
+#include "inputSnapshot.h"
+static inputSnapshot inputTrace;
+#endif
+#if ADS127_P4_DAC_TEST
+#include "benchDac.h"
+static benchDac signalSource;
+static bool dacReady = false;
+static constexpr bool externalInput = true;
+#else
+static constexpr bool externalInput = false;
+#endif
 
 static ads127l18 adc(SPI, ads127Pins::featherClock, ads127Pins::featherMiso,
                      ads127Pins::featherMosi, ads127Pins::featherSelect);
@@ -31,7 +49,22 @@ static uint32_t stateMs = 0;
 /** @brief Print operator commands without accessing ADC registers. */
 static void printHelp()
 {
+#if ADS127_COMPARE_INPUT
+    Serial.println(dacReady ? "COMPARE READY: simultaneous A1->A2 input and P4 RAM output; keep coax connected."
+                            : "COMPARE UNAVAILABLE: DAC/input ADC initialization failed.");
+#endif
+#if ADS127_P4_DAC_TEST
+    Serial.println("ADS127 DAC TEST: external CH0; A1/GPIO25 -> CH0P, CH0N grounded; SD controlled by P4.");
+#if ADS127_DAC_CONSTANT
+    Serial.println("DAC MODE: CONSTANT code=135 nominalVolts=1.747; 500 us repeated writes.");
+#else
+    Serial.println("DAC MODE: SINE");
+    Serial.println("DAC: nominal 10 Hz sine, 1.25 V offset, 0.5 V peak (0.75..1.75 V); 500 us updates.");
+#endif
+    Serial.println("DAC stays OFF until receiver READY; verify powered analog wiring before starting.");
+#else
     Serial.println("ADS127 DMA CONTROL: DAC off; coax stays disconnected; SD untouched.");
+#endif
     Serial.printf("g=16k, 1=32k, 2=64k, 3=128k, 4=256k, 5=512k, 6=1024k samples/s; %lu seconds each. s=stop; h=help.\n",
                   static_cast<unsigned long>(ads127BenchTiming::runMs / 1000));
     Serial.printf("Matching receiver firmware must allow %lu seconds from ARM.\n",
@@ -48,8 +81,20 @@ static void requestStop()
 {
     const bool stopped = setupAdc.stop();
     Serial.printf("ADC STOP command %s\n", stopped ? "echo confirmed" : "FAILED / state unconfirmed");
-    setupAdc.reportStatus("after STOP");
+    const bool statusClean = setupAdc.reportStatus("after STOP");
     Serial1.printf("ADC127 STOP %lu\n", runId);
+#if ADS127_P4_DAC_TEST
+    // ADC stop is requested first; timer shutdown then leaves A1 undriven. Any
+    // final in-flight ADC conversion may include this transition in the tail.
+    signalSource.stop();
+#endif
+#if ADS127_COMPARE_INPUT
+    // UART STOP was sent first, allowing P4 to stop and export independently.
+    // This local USB report cannot delay active acquisition on either board.
+    inputTrace.report(runId, stopped && statusClean && !signalSource.failed());
+#else
+    (void)statusClean;
+#endif
     state = benchState::stopping;
     stateMs = millis();
 }
@@ -65,9 +110,18 @@ static void requestRun(unsigned requestedStage)
     {
         Serial.println("Test already pending/running; use s to stop.");
     }
-    else if (setupAdc.configure(requestedStage))
+#if ADS127_P4_DAC_TEST
+    else if (!dacReady)
+    {
+        Serial.println("DAC setup failed; refusing ADC test. Reset after fixing initialization.");
+    }
+#endif
+    else if (setupAdc.configure(requestedStage, externalInput))
     {
         stage = requestedStage;
+#if ADS127_COMPARE_INPUT
+        inputTrace.reset();
+#endif
         Serial.printf("TEST STAGE %u: %lu samples/s for %lu seconds.\n", stage,
                       static_cast<unsigned long>(ads127BenchRates[stage].samplesPerSecond),
                       static_cast<unsigned long>(ads127BenchTiming::runMs / 1000));
@@ -100,8 +154,26 @@ static void acceptReply(const char* line)
             receivedStage == stage &&
             received == runId && state == benchState::waiting)
         {
-            if (setupAdc.start())
+            // Enable the source only after the receiver confirms this run ID.
+            // No ADC START is sent if the source fails. Skip startup transients
+            // when analyzing the file; this is a functional, not precision test.
+            bool sourceStarted = true;
+#if ADS127_P4_DAC_TEST
+            sourceStarted = signalSource.start();
+            if (sourceStarted)
             {
+#if ADS127_DAC_CONSTANT
+                Serial.println("DAC ON: constant code 135; starting ADC external-input capture.");
+#else
+                Serial.println("DAC ON: 10 Hz sine; starting ADC external-input capture.");
+#endif
+            }
+#endif
+            if (sourceStarted && setupAdc.start())
+            {
+#if ADS127_COMPARE_INPUT
+                inputTrace.begin();
+#endif
                 state = benchState::running;
                 stateMs = millis();
                 Serial.printf("ADC START echo confirmed. Waiting for receiver DMA data; auto-stop in %lu seconds.\n",
@@ -109,9 +181,17 @@ static void acceptReply(const char* line)
             }
             else
             {
-                Serial.println("ADC START failed; stopping both ends.");
+                Serial.println("Source/ADC START failed; stopping both ends.");
                 requestStop();
             }
+        }
+        else if (sscanf(line, "ADC127 RAMFULL %lu %c", &received, &extra) == 1 &&
+                 received == runId && state == benchState::running)
+        {
+            // P4 retained its short RAM window. Stop hardware normally; the
+            // matching STOP lets P4 drain decoding before printing the waveform.
+            Serial.println("P4 RAM waveform complete; stopping ADC and DAC.");
+            requestStop();
         }
         else if (sscanf(line, "ADC127 DONE %lu", &received) == 1 &&
                  received == runId && state == benchState::stopping)
@@ -132,7 +212,9 @@ static void acceptReply(const char* line)
 
 /**
  * @brief Disable analog outputs and open USB plus the existing inter-board UART.
- * Only loop() accesses these objects; no application mutex or worker task exists.
+ * loop() alone owns ADC SPI and UART. In the opt-in DAC build, initialize a
+ * stopped timer; its task callback owns DAC updates with benchDac's mutex.
+ * No waveform or ADC conversion is started here.
  */
 void setup()
 {
@@ -149,6 +231,13 @@ void setup()
     Serial1.setTxBufferSize(512);
     pinMode(RX, INPUT_PULLUP);
     Serial1.begin(115200, SERIAL_8N1, RX, TX);
+#if ADS127_P4_DAC_TEST
+    dacReady = signalSource.initialize();
+#if ADS127_COMPARE_INPUT
+    dacReady = inputTrace.initialize() && dacReady;
+#endif
+    if (!dacReady) { Serial.println("DAC initialization FAILED; capture will be refused."); }
+#endif
     delay(500);
     printHelp();
 }
@@ -189,6 +278,28 @@ void loop()
         }
     }
 
+#if ADS127_P4_DAC_TEST
+    // The timer callback only latches errors; this task performs SPI stop and
+    // UART coordination so callback timing never includes those slow operations.
+    if (state == benchState::running && signalSource.failed())
+    {
+        Serial.println("DAC driver fault; requesting ADC/receiver stop.");
+        requestStop();
+    }
+#endif
+
+#if ADS127_COMPARE_INPUT
+    if (state == benchState::running)
+    {
+        inputTrace.poll();
+        if (inputTrace.failed())
+        {
+            Serial.println("Local input measurement failed; stopping comparison.");
+            requestStop();
+        }
+    }
+#endif
+
     // Unsigned subtraction remains valid across the millis() counter wraparound.
     const uint32_t elapsed = millis() - stateMs;
     if (state == benchState::waiting && elapsed >= 2000)
@@ -206,5 +317,13 @@ void loop()
                       static_cast<unsigned long>(ads127BenchTiming::receiverTimeoutMs / 1000));
         state = benchState::idle;
     }
+#if ADS127_COMPARE_INPUT
+    // Poll frequently for 300 ms so a 500 us measurement burst still fits into
+    // each 1 ms slot. Interrupts and the higher-priority DAC timer remain enabled.
+    // This diagnostic uses extra Feather CPU; it is not a production load test.
+    if (state == benchState::running && inputTrace.sampling()) { delayMicroseconds(50); }
+    else { delay(1); }
+#else
     delay(1);
+#endif
 }

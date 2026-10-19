@@ -1,0 +1,9 @@
+# Apply after sdkconfig.defaults and sdkconfig.sd.defaults, in a NEW build/config.
+CONFIG_P4_CAPTURE_PROFILE=y
+CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS=y
+CONFIG_FREERTOS_RUN_TIME_STATS_USING_ESP_TIMER=y
+# Avoid a runtime-clock rollover if the boards remain powered between runs.
+CONFIG_FREERTOS_RUN_TIME_COUNTER_TYPE_U64=y
+
+# Reserve control-task stack for post-capture waveform reporting (prior margin 388 bytes).
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=6144

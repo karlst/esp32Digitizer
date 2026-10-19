@@ -6,9 +6,13 @@
  *
  * A ring buffer is a fixed array reused in a circle. It temporarily holds data
  * while the SD card is busy. The producer ADDS bytes; the consumer REMOVES them
- * only after writing them. In this project:
- * ADC -> sampleFormatter::submit() -> bufferedWriter::submit() -> RAM array
- * recordingService::run() -> bufferedWriter::pump() -> sdRecordingSink -> card
+ * only after writing them. This library is shared by two board adapters:
+ * S3: sampleFormatter::submit() -> submit(); recordingService::run() -> pump()
+ *     -> sdRecordingSink::write() -> card.
+ * P4: Core 1 sdRecorder::submitSamples() -> submit(); Core 0 sdRecorder::work()
+ *     -> pump() -> sdRecorder::write() -> card. P4 supplies three-byte samples
+ *     and uses a 4 MiB PSRAM ring with 128 KiB write batches. The library itself
+ *     treats these as bytes; it does not understand ADC frames or status bits.
  *
  * head is the total producer position, tail the total consumer position. They
  * keep advancing even when the physical array position wraps back to zero.
@@ -68,7 +72,7 @@ bufferedWriter::~bufferedWriter()
  * microseconds. The adapter may open after this call to measure opening time,
  * but must not enable the producer until the file is ready.
  *
- * Called by recordingService's disk task when preparing a NEW recording.
+ * Called by recordingService (S3) or sdRecorder (P4) when preparing a NEW recording.
  * This only prepares RAM; it does not open a file, start the ADC, or erase a card.
  * Resetting positions makes old bytes irrelevant without clearing the whole array.
  * @param destination Object that implements the actual write/flush operations.
@@ -102,16 +106,19 @@ void bufferedWriter::start(byteSink& destination, uint64_t (*clock)())
  * silently joining data on either side of a missing section. rejectedBytes counts
  * only bytes explicitly offered and rejected, not unseen hardware samples.
  *
- * Called once per formatted sample: from fastCapture's core-0 interrupt at 30k,
- * or from acquisition's core-0 task at lower rates. There must be ONE producer,
- * not both paths at once. The disk task may be reading the ring simultaneously.
+ * S3 calls once per formatted sample from fastCapture's core-0 interrupt at 30k,
+ * or acquisition's core-0 task at lower rates. P4 instead calls from its Core 1
+ * decoder task with batches of packed three-byte samples (four-byte words for
+ * its separate synthetic test). There must be ONE producer, never both paths
+ * at once. The disk task may be reading other ring bytes simultaneously.
  * @param data Bytes to copy. The caller may reuse its memory when this returns.
- * @param length Number of BYTES, not number of samples (currently four per sample).
+ * @param length Number of BYTES, not samples; the board adapter chooses the format.
  * @return True means copied into RAM, NOT saved to disk. False means none of this
  * submission was copied. Acquisition must observe failed(), stop collecting, and
  * ask the disk task to finish the earlier data; this function cannot stop the ADC.
- * No waiting is allowed here: the next 30k sample arrives about 33 microseconds
- * later. An ISR is an interrupt service routine, which briefly interrupts a task.
+ * No waiting is allowed here: incoming acquisition continues while disk writes
+ * may stall. An ISR is an interrupt service routine, which briefly interrupts a
+ * task. P4 submits from a task, not an ISR; its external-memory path uses memcpy.
  */
 bool BUFFERED_IRAM bufferedWriter::submit(const uint8_t* data, uint32_t length)
 {
@@ -212,17 +219,21 @@ void bufferedWriter::measure(uint64_t beganUs, uint32_t kind, bool success)
  * An overflow still allows earlier queued good bytes to be drained.
  *
  * THIS IS WHERE WE READ DATA OUT OF THE RING BUFFER.
- * recordingService::run() calls this repeatedly from the disk task on core 1.
+ * S3 recordingService::run() calls this from its Core 1 disk task; P4
+ * sdRecorder::work() calls it from its Core 0 disk task. The adapter determines
+ * scheduling; this reusable library does not create tasks or choose a CPU core.
  * Reading here does not mean reading the ADC or loading a file from the SD card.
  * It means giving the oldest queued RAM bytes to the object that writes the file.
  *
- * There is no separate ring read() method or second temporary data array:
+ * There is no separate ring read() method or temporary array in this library:
  * sink->write(buffer + offset, length) reads directly from our owned buffer.
  * It must finish using that memory before returning. While it waits for the card,
  * submit() may add samples elsewhere in the ring, but cannot reuse this block.
+ * An adapter may use temporary storage internally: P4 copies 16 KiB slices to
+ * internal RAM before f_write(). That does not release the source ring early.
  *
  * @param drain False during recording: normally wait for a blockBytes-sized batch to
- * avoid a separate filesystem call for every four-byte sample. True after Stop:
+ * avoid a separate filesystem call for every sample. True after Stop:
  * allow the final short batch, even if it contains only one sample.
  * @return False if a disk write failed (now or previously). True can also mean
  * NOTHING was written: for example, only 100 bytes are queued and drain is false.
@@ -252,7 +263,8 @@ bool bufferedWriter::pump(bool drain)
         const uint64_t began = clockUs();
 
         // This call reads the ring memory and writes the file. sink is a byteSink
-        // interface; in this project the actual function is sdRecordingSink::write().
+        // interface; the implementation is sdRecordingSink::write() on S3 or
+        // sdRecorder::write() on P4. Both must finish reading before returning.
         // It can block on storage. Crucially, tail has NOT moved yet.
         const size_t written = sink->write(buffer + offset, length);
 

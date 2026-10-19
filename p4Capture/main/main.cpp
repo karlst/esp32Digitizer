@@ -1,15 +1,58 @@
 /**
  * @file main.cpp
- * @brief P4 ADC-to-SD commissioning test, driven by the Feather.
+ * @brief P4 ADC commissioning: SD recording or an opt-in RAM waveform window.
+ * Before any SD command after reset, USB 'w' selects RAM-only operation until
+ * the next reset. The usual DMA and frame decoder still run; ramWaveform keeps
+ * 600 min/max/mean bins after settling. RAMFULL asks Feather to stop, and only
+ * after decoding drains does Core 0 print the bins. No card is mounted in this
+ * mode. Read ramWaveform and RAM-WAVEFORM.md for its ownership and limitations.
  * Reading path: app_main -> handleLine -> startCapture -> receiveBlock ->
  * decodeTask -> stopCapture; sdRecorder owns asynchronous card operations.
  * No DAC, ADC SPI, Wi-Fi, or automatic start.
  *
- * PARLIO is the parallel-input peripheral. DMA (Direct Memory Access) moves
- * paired DOUT/FSYNC bits from it to a circular memory area without a CPU read
- * per bit. Its ISR (Interrupt Service Routine) copies completed DMA blocks into
- * separately owned buffers. A task (scheduled thread) on CPU1 decodes those
- * buffers. CPU0 handles commands and the shared finite safety deadline.
+ * A sample is one ADC (analog-to-digital converter) measurement. The Feather
+ * configures and starts/stops the ADC; this P4 receives and records its output.
+ * DCLK is the ADC's output bit clock, DOUT0 its data wire, and FSYNC a separate
+ * wire whose low-to-high transition marks the start of a new sample frame.
+ * At stage 6, DCLK is 32.768 MHz: one cycle every 30.52 ns, about 15.26 ns each
+ * high/low half. The ADC changes data after falling edges; PARLIO captures both
+ * DOUT0 and FSYNC on rising edges. These are hardware actions, not CPU calls.
+ *
+ * PARLIO (parallel input/output) captures both pins at once. Four clock instants
+ * become one packed byte: DOUT0 occupies bits 0,2,4,6 and FSYNC bits 1,3,5,7;
+ * the earliest pair is in bits 1:0. PARLIO's hardware receive FIFO (First In,
+ * First Out) preserves arrival order before DMA transfers the stream to RAM.
+ * Its exact FIFO capacity/internal packing-write width is not established here;
+ * neither should be confused with the software buffer sizes below.
+ * GDMA (General Direct Memory Access) is transfer hardware, not memory. The P4
+ * PARLIO driver uses GDMA-AXI (verified in IDF's esp32p4 gdma_channel.h and
+ * parlio_priv.h), not GDMA-AHB. The driver configures it; neither CPU moves each
+ * pair of input bits. DMA transfers use the internal bus timing, not one CPU
+ * operation or interrupt per DCLK edge.
+ *
+ * Data path and ownership:
+ * 1. Hardware fills the 32 KiB DMA RAM area cyclically (reusing its beginning).
+ * 2. A completed descriptor (address/length instructions for one DMA chunk)
+ *    causes a DMA interrupt. Core 0 services the driver's ISR, an Interrupt
+ *    Service Routine that briefly interrupts normal task execution. The driver
+ *    calls receiveBlock() in that same interrupt context.
+ * 3. receiveBlock() copies raw bytes into one of 16 private 4 KiB blocks and
+ *    queues its ADDRESS in readyBlocks. The block stays at its RAM address.
+ * 4. Core 1's decodeTask, an ordinary scheduled thread, takes that address,
+ *    calls decoder.feed(), and submits decoded sample bytes to the SD ring.
+ *    Only then does it return the raw block's address to freeBlocks for reuse.
+ * 5. The independent Core 0 sdWriter task drains the 4 MiB PSRAM recording ring
+ *    through sdRecorder::write(). Interrupts can interrupt this task. A queued
+ *    sample is not yet saved; final SD SAVED follows file readback and closing.
+ *
+ * At stage 6 each frame is 8 status bits + 24 sample bits on DOUT0, with a
+ * captured FSYNC bit alongside EVERY bit: 32 clocks x 2 bits = 8 raw bytes.
+ * Decoding checks status and packs only the sample into 3 file bytes. Input is
+ * 8.192 MB/s; sample payload is 3.072 MB/s (24.576 Mbps). MB is decimal; KiB and
+ * MiB mean 1024 and 1048576 bytes. Lower stages can have unused frame clocks.
+ *
+ * CPU0 also handles Feather commands and the finite receiver deadline. Neither
+ * decoder.feed() nor SD file writing runs inside the receive interrupt handler.
  *
  * A free-buffer queue transfers ownership to the ISR; a ready-buffer queue
  * transfers it to the decoder. No queued pointer refers to a DMA buffer that
@@ -38,7 +81,11 @@
 #include "frameDecoder.h"
 #include "sdRecorder.h"
 #include "sdWriteTest.h"
+#include "ramWaveform.h"
 #include "sdkconfig.h"
+#if CONFIG_P4_CAPTURE_PROFILE
+#include "captureProfile.h"
+#endif
 
 #if !CONFIG_ESP32P4_SELECTS_REV_LESS_V3 || !CONFIG_ESPTOOLPY_FLASHSIZE_16MB
 #error "This bench project requires P4 pre-v3 silicon support and 16 MB flash."
@@ -49,7 +96,24 @@
 #endif
 
 static constexpr uart_port_t featherPort = UART_NUM_1;
+
+// These are tested starting allocations, not proven minimum/optimal sizes.
+// 32 KiB holds 4 ms of raw stage-6 input. It buys time to COPY completed chunks
+// before DMA reuses them. A larger decoder queue cannot rescue a missed copy.
+// IDF 5.5.6 with our aligned buffer and 64-byte cache alignment divides this into
+// seven 4032-byte chunks, then 2240 and 2304 bytes: nine chunks, NOT eight 4 KiB
+// chunks. See parlio_rx_mount_transaction_buffer(). This is driver-specific.
+// Four DCLKs per byte gives 16128, 8960, 9216 clocks respectively, or 492.19,
+// 273.44, 281.25 us at stage 6. Nine receive callbacks per 4 ms average 2250/s;
+// callback service can be delayed after the hardware completion event.
 static constexpr size_t dmaBytes = 32768;
+
+// Private blocks must hold any delivered chunk. Sixteen 4 KiB data arrays use
+// 64 KiB of internal RAM plus metadata/queue overhead. Their nominal capacity
+// is 8 ms of raw input; partly filled blocks and blocks being copied/decoded
+// reduce the waiting capacity. This cushions brief scheduling delays, not a
+// decoder that is persistently slower than input. The early decoder exhausted
+// this pool; optimizing decoding allowed passing without increasing these sizes.
 static constexpr size_t blockBytes = 4096;
 static constexpr unsigned blockCount = 16;
 static_assert(std::atomic<uint32_t>::is_always_lock_free,
@@ -81,13 +145,29 @@ struct decoderTiming
 static decoderTiming timing;
 
 static captureBlock* blocks = nullptr;
+
+// Both FreeRTOS queues hold captureBlock* addresses into the SAME blocks array.
+// freeBlocks means Core 0 may overwrite the block; readyBlocks means Core 1
+// must read it first. The queues are not another 64 KiB copy of the data.
 static QueueHandle_t freeBlocks = nullptr;
 static QueueHandle_t readyBlocks = nullptr;
 static QueueHandle_t uartEvents = nullptr;
 static SemaphoreHandle_t drained = nullptr;
 static frameDecoder decoder;
+#if CONFIG_P4_CAPTURE_PROFILE
+// Core 0 alone owns profiling state. No extra task, ISR call or decoder-loop
+// instrumentation is added. Runtime-counter bookkeeping is an SDK build option.
+static captureProfile profile;
+static TaskHandle_t decoderTaskHandle = nullptr;
+#endif
 static sdRecorder recording;
 static sdWriteTest storageTest;
+// Mode is selected on Core 0 before any capture/SD commands after boot and is
+// then fixed until reset. Core 1 reads it only after receiving a queued block.
+static bool ramMode = false;
+static bool modeLocked = false;
+static ramWaveform waveform;
+static int64_t ramStopRequestedAt = 0;
 static parlio_rx_unit_handle_t receiver = nullptr;
 static parlio_rx_delimiter_handle_t delimiter = nullptr;
 static uint8_t* dmaBuffer = nullptr;
@@ -140,6 +220,9 @@ static void reply(const char* format, ...)
  * wrapped around its own 32 KiB area. A failed allocation/queue send is counted.
  * Returning true asks the scheduler to wake a newly runnable higher-priority
  * task. No logging, heap allocation, decoding or waiting occurs in the ISR.
+ * The driver supplies event->data and recv_bytes for this completed chunk;
+ * they are packed pin states, not decoded sample values. FromISR queue calls
+ * are the interrupt-safe versions: they never wait for another task to run.
  */
 static bool receiveBlock(parlio_rx_unit_handle_t,
                          const parlio_rx_event_data_t* event, void*)
@@ -169,16 +252,23 @@ static bool receiveBlock(parlio_rx_unit_handle_t,
     }
     else
     {
+        // The free queue gave us exclusive use of this block. Copy the actual
+        // received length, not its 4096-byte capacity (chunks can be shorter).
         block->length = event->recv_bytes;
         block->arrivedAt = now;
         memcpy(block->data, event->data, block->length);
         const int64_t copyUs = esp_timer_get_time() - now;
         if (copyUs > maxCopyUs) { maxCopyUs = copyUs; }
+
+        // &block lets FreeRTOS copy the pointer value into the queue. It does
+        // not copy the pointed-to bytes. CPU1 may start reading after this send.
         if (xQueueSendFromISR(readyBlocks, &block, &awakened) != pdTRUE)
         {
             droppedBlocks.fetch_add(1, std::memory_order_relaxed);
             xQueueSendFromISR(freeBlocks, &block, &awakened);
         }
+
+        // Count waiting blocks only, excluding a block already held by CPU1.
         const uint32_t queued = uxQueueMessagesWaitingFromISR(readyBlocks);
         if (queued > queueHighWater) { queueHighWater = queued; }
     }
@@ -190,7 +280,12 @@ static bool receiveBlock(parlio_rx_unit_handle_t,
  * A null pointer is a drain marker inserted after DMA stops. FIFO ordering means
  * all preceding blocks have been processed when the semaphore is given. CPU0
  * can then read/reset decoder state without a race. Normal blocks return to the
- * free queue only AFTER feed reads them and copies decoded words into the SD ring.
+ * free queue only AFTER feed reads them and attempts submission of the decoded
+ * samples to the SD ring. On submission failure, diagnostics continue and no
+ * code retains the raw pointer, so returning the block remains safe.
+ * portMAX_DELAY sleeps this task until a pointer is available, rather than
+ * burning CPU time checking repeatedly. It does not stop DMA or Core 0.
+ * This task is woken through a queue; it is NOT an interrupt handler.
  */
 static void decodeTask(void*)
 {
@@ -207,6 +302,9 @@ static void decodeTask(void*)
             if (timing.blocks == 0) { lastPauseAt = startedAt; }
             const int64_t waitUs = startedAt - block->arrivedAt;
             if (waitUs > timing.maxWaitUs) { timing.maxWaitUs = waitUs; }
+            // feed() reconstructs words and calls recordWords() synchronously.
+            // That path copies packed samples into the separate recording ring;
+            // it does not wait for SD. No later code retains this raw block.
             decoder.feed(block->data, block->length);
             const int64_t finishedAt = esp_timer_get_time();
             const int64_t decodeUs = finishedAt - startedAt;
@@ -214,6 +312,9 @@ static void decodeTask(void*)
             if (decodeUs > timing.maxDecodeUs) { timing.maxDecodeUs = decodeUs; }
             timing.bytes += static_cast<uint32_t>(block->length);
             ++timing.blocks;
+
+            // Return the ADDRESS, not the data: the memory stays in place and
+            // Core 0 is now allowed to overwrite it with another DMA chunk.
             xQueueSend(freeBlocks, &block, portMAX_DELAY);
 
             // Keep background/idle scheduling opportunities even under backlog,
@@ -323,7 +424,9 @@ static esp_err_t startCapture(unsigned stage)
 
     // A software delimiter keeps receiving across DMA descriptors. Its large
     // frame limit is not an ADC sample length; on_partial_receive handles each
-    // completed descriptor (at most 4092 bytes, with cache-alignment rounding).
+    // completed descriptor. The current P4 alignment gives 4032-byte maximum
+    // chunks; the final two are smaller (see dmaBytes above). A descriptor
+    // boundary is a memory boundary, not necessarily an ADC frame boundary.
     parlio_rx_soft_delimiter_config_t delimiterConfig = {};
     delimiterConfig.sample_edge = PARLIO_SAMPLE_EDGE_POS;
     delimiterConfig.bit_pack_order = PARLIO_BIT_PACK_ORDER_LSB;
@@ -359,6 +462,14 @@ static esp_err_t startCapture(unsigned stage)
         releaseReceiver();
         drainDecoder();
     }
+#if CONFIG_P4_CAPTURE_PROFILE
+    else
+    {
+        // Measure capture only: SD preparation already finished. READY and ADC
+        // START follow, so the short startup handshake is part of this interval.
+        profile.begin(xTaskGetCurrentTaskHandle(), decoderTaskHandle, recording.profileTask());
+    }
+#endif
     return retVal;
 }
 
@@ -372,6 +483,11 @@ static esp_err_t startCapture(unsigned stage)
  */
 static void stopCapture(const char* kind)
 {
+#if CONFIG_P4_CAPTURE_PROFILE
+    // Freeze before teardown/draining: file verification must not inflate CPU
+    // usage attributed to steady acquisition. Reporting is deferred until quiet.
+    profile.finish();
+#endif
     releaseReceiver();
     drainDecoder();
     active = false;
@@ -428,11 +544,40 @@ static void stopCapture(const char* kind)
     }
     printf("DONE means receiver stopped. Missing final DMA tail and undetected "
            "hardware loss remain possible; review counts and errors.\n");
+
     // The protocol acknowledgement precedes potentially slow SD draining and
     // readback. The disk task prints SD SAVED separately when those finish.
-    recording.finish(strcmp(kind, "DONE") == 0 && stats.words != 0 &&
+    // A bad header does not itself stop capture early. After draining, even ONE
+    // counted bad header invalidates this test recording. SD still preserves
+    // and verifies the payload, but reports FAILED and writes an invalid header.
+    // This distinguishes bad acquisition from a disk write failure; see TODO.md
+    // for the undecided production policy. Power/saturation flags alone are not
+    // badHeaders: frameDecoder::finishWord() documents the exact mask.
+#if CONFIG_P4_CAPTURE_PROFILE
+    profile.report();
+#endif
+    const bool clean = strcmp(kind, "DONE") == 0 && stats.words != 0 &&
         stats.badHeaders == 0 && stats.badPeriods == 0 && stats.shortWords == 0 &&
-        droppedBlocks.load() == 0 && callbackErrors.load() == 0 && !decoder.outputFailed(), stats.words);
+        droppedBlocks.load() == 0 && callbackErrors.load() == 0 && !decoder.outputFailed();
+    if (ramMode)
+    {
+        // drainDecoder() above transfers ownership back to Core 0. Print only
+        // now: USB output must never slow the running decode/interrupt path.
+        // 'clean' concerns reported capture faults, not sine shape or clipping.
+        printf("WAVE_BEGIN run=%lu rate=%lu bins=%lu samplesPerBin=%lu clean=%u\n",
+               activeRun, static_cast<unsigned long>(ads127BenchRates[activeStage].samplesPerSecond),
+               static_cast<unsigned long>(waveform.completedBins),
+               static_cast<unsigned long>(waveform.samplesPerBin), unsigned(clean && waveform.complete()));
+        for (unsigned index = 0; index < waveform.completedBins; ++index)
+        {
+            const auto& bin = waveform.bins[index];
+            printf("WAVE,%u,%ld,%ld,%.3f\n", index, static_cast<long>(bin.minimum),
+                   static_cast<long>(bin.maximum), double(bin.sum) / waveform.samplesPerBin);
+        }
+        printf("WAVE_END run=%lu\n", activeRun);
+        fflush(stdout);
+    }
+    else { recording.finish(clean, stats.words); }
 }
 
 /**
@@ -460,7 +605,7 @@ static void handleLine(const char* line)
         {
             reply("ADC127 FAILED %lu reason=invalid-request\n", run);
         }
-        else if (!recording.claim(run, stage, ads127BenchRates[stage].samplesPerSecond))
+        else if (!ramMode && !recording.claim(run, stage, ads127BenchRates[stage].samplesPerSecond))
         {
             reply("ADC127 FAILED %lu reason=SD-not-ready-press-p-on-P4\n", run);
         }
@@ -468,6 +613,9 @@ static void handleLine(const char* line)
         {
             activeRun = run;
             activeStage = stage;
+            modeLocked = true;
+            ramStopRequestedAt = 0;
+            if (ramMode) { waveform.reset(ads127BenchRates[stage].samplesPerSecond); }
             const esp_err_t result = startCapture(stage);
             if (result == ESP_OK)
             {
@@ -478,7 +626,7 @@ static void handleLine(const char* line)
             else
             {
                 reply("ADC127 FAILED %lu reason=%s\n", run, esp_err_to_name(result));
-                recording.finish(false);
+                if (!ramMode) { recording.finish(false); }
             }
         }
     }
@@ -489,12 +637,21 @@ static void handleLine(const char* line)
     }
 }
 
-/** @brief CPU1 packs decoded samples to three bytes before the nonblocking ring copy.
+/** @brief CPU1 sends decoded samples to the selected RAM or SD collector.
  * frameDecoder retains status/header validation and DMA capture is unchanged.
+ * Called synchronously by frameDecoder::flushOutput(), with count complete
+ * 32-bit words (status in the high byte). True means copied into ring RAM, not
+ * written to SD. False latches decoder output failure; the caller cannot keep
+ * pointers to its reusable batch. sdRecorder::submitSamples() performs the copy.
+ * RAM mode instead summarizes samples immediately in ramWaveform::accept();
+ * later samples are ignored after its window fills, without reporting overflow.
  */
 static bool recordWords(const uint32_t* words, size_t count, void*)
 {
-    return recording.submitSamples(words, count);
+    bool retVal = true;
+    if (ramMode) { waveform.accept(words, count); }
+    else { retVal = recording.submitSamples(words, count); }
+    return retVal;
 }
 
 /**
@@ -523,6 +680,12 @@ extern "C" void app_main()
     inputs.pin_bit_mask = (1ULL << 0) | (1ULL << 1) | (1ULL << 2);
     inputs.mode = GPIO_MODE_INPUT;
     ESP_ERROR_CHECK(gpio_config(&inputs));
+
+    // Allocate all raw blocks before capture: no allocation inside the ISR.
+    // A queue item is only one pointer. Seventeen ready slots permit a null
+    // shutdown marker after all 16 real blocks; there is NO seventeenth block.
+    // drained is a semaphore: a completion signal from CPU1 back to CPU0 so
+    // stopCapture can safely inspect/reset decoder state after queued work ends.
     blocks = static_cast<captureBlock*>(heap_caps_calloc(
         blockCount, sizeof(captureBlock), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
     freeBlocks = xQueueCreate(blockCount, sizeof(captureBlock*));
@@ -534,8 +697,17 @@ extern "C" void app_main()
         captureBlock* block = &blocks[index];
         xQueueSend(freeBlocks, &block, 0);
     }
+
+    // Initially every block is free. Pin the decoder to CPU1, with a 4096-byte
+    // task stack and scheduling priority 10. Stack storage is for function calls
+    // and locals; it is separate from the sixteen 4096-byte input blocks.
+#if CONFIG_P4_CAPTURE_PROFILE
+    TaskHandle_t* decoderHandleOutput = &decoderTaskHandle;
+#else
+    TaskHandle_t* decoderHandleOutput = nullptr;
+#endif
     ESP_ERROR_CHECK(xTaskCreatePinnedToCore(decodeTask, "decode", 4096, nullptr, 10,
-                                          nullptr, 1) == pdPASS ? ESP_OK : ESP_ERR_NO_MEM);
+                                          decoderHandleOutput, 1) == pdPASS ? ESP_OK : ESP_ERR_NO_MEM);
 
     // Driver queues buffer short command bursts. Detect framing, parity and
     // overflow events rather than accepting a corrupted control message.
@@ -549,9 +721,15 @@ extern "C" void app_main()
     ESP_ERROR_CHECK(uart_param_config(featherPort, &uartConfig));
     ESP_ERROR_CHECK(uart_set_pin(featherPort, 5, 4, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
     ESP_ERROR_CHECK(uart_driver_install(featherPort, 2048, 512, 16, &uartEvents, 0));
+#if CONFIG_P4_CAPTURE_PROFILE
+    printf("P4 capture IDLE (sd-profile-60s). Profiling ON; use Feather 60s firmware.\n");
+    printf("Press p here and wait for SD READY before starting. "
+#else
     printf("P4 capture IDLE (sd-v5-30min). Press p here and wait for SD READY before starting. "
+#endif
            "DCLK=0 FSYNC=1 DOUT0=2 RX=4 TX=5.\n");
     printf("ADC files: 3 bytes/sample, status still checked; stage 6 requires 24.576 Mbps to SD.\n");
+    printf("For RAM waveform only: press w BEFORE any p/t/u or capture. Mode fixed until reset; no SD needed.\n");
     printf("P4 keys: p=prepare; t=SD-only 26 Mbps; u=SD-only 32.768 Mbps; s=stop SD test. "
            "Each SD test lasts 60 seconds. Do not send Feather commands during SD tests.\n");
     printf("Bench run=%lu seconds; receiver timeout=%lu seconds from ARM.\n",
@@ -563,13 +741,29 @@ extern "C" void app_main()
         char consoleKey = 0;
         if (read(STDIN_FILENO, &consoleKey, 1) == 1)
         {
-            if (consoleKey == 'p')
+            if (consoleKey == 'w')
             {
+                if (!modeLocked && !active)
+                {
+                    ramMode = true;
+                    modeLocked = true;
+                    printf("RAM READY: no card access; use Feather DAC firmware with RAMFULL support, then 6.\n");
+                }
+                else { printf("Mode already selected; reset P4 before changing modes.\n"); }
+            }
+            else if (ramMode && (consoleKey == 'p' || consoleKey == 't' || consoleKey == 'u' || consoleKey == 's'))
+            {
+                printf("RAM mode: SD commands disabled until reset.\n");
+            }
+            else if (consoleKey == 'p')
+            {
+                modeLocked = true;
                 const bool accepted = !active && recording.prepare();
                 printf("SD prepare %s\n", accepted ? "requested; wait for SD READY" : "busy/already prepared");
             }
             else if (consoleKey == 't' || consoleKey == 'u')
             {
+                modeLocked = true;
                 const bool accepted = !active && storageTest.start(consoleKey == 't' ? 812500 : 1024000);
                 if (!accepted) { printf("SD TEST refused: busy or not prepared; p then SD READY required\n"); }
             }
@@ -603,15 +797,31 @@ extern "C" void app_main()
         }
         if (active)
         {
-            if (droppedBlocks.load() != 0 || callbackErrors.load() != 0 || recording.failed())
+            // A completed RAM window asks the Feather to stop the ADC. Its
+            // matching STOP returns through handleLine(), then we dump USB data.
+            // Older Feather firmware ignores RAMFULL: bound that wait to 2 s
+            // and report FAULT (which also asks older firmware to stop).
+            if (ramMode && waveform.complete() && ramStopRequestedAt == 0)
+            {
+                ramStopRequestedAt = esp_timer_get_time();
+                reply("ADC127 RAMFULL %lu\n", activeRun);
+            }
+            if (droppedBlocks.load() != 0 || callbackErrors.load() != 0 ||
+                (!ramMode && recording.failed()) ||
+                (ramStopRequestedAt != 0 && esp_timer_get_time() - ramStopRequestedAt > 2000000))
             {
                 stopCapture("FAULT");
             }
             else if (esp_timer_get_time() - armedAt >=
-                     static_cast<int64_t>(ads127BenchTiming::receiverTimeoutMs) * 1000)
+                     static_cast<int64_t>(ramMode ? 5000 : ads127BenchTiming::receiverTimeoutMs) * 1000)
             {
                 stopCapture("TIMEOUT");
             }
+#if CONFIG_P4_CAPTURE_PROFILE
+            // poll() is normally just a timestamp comparison. About once per
+            // second it samples counters without console output or stack scans.
+            if (active) { profile.poll(); }
+#endif
         }
         vTaskDelay(pdMS_TO_TICKS(1));
     }
