@@ -64,7 +64,7 @@ static constexpr std::array<uint8_t, 256> makeBitPositions()
     std::array<uint8_t, 256> retVal = {};
     for (unsigned bit = 0; bit < 8; ++bit)
     {
-        retVal[1U << bit] = static_cast<uint8_t>(bit);
+        retVal[size_t{1} << bit] = static_cast<uint8_t>(bit);
     }
     return retVal;
 }

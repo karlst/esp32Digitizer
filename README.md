@@ -18,21 +18,21 @@ license by the source-file headers.
 
 ## Project overview
 
-ESP32-based 24-bit recorder with a working ADS1256 path and separate ADS127L18
-capture experiments. Start with the [October 12 handoff](docs/STATUS-2026-10-12.md)
-for verified results, firmware state, and the paused P4/FPGA investigation.
+The current recorder is in `p4Capture/`, with Feather control firmware in
+`featherUi/`. Start with [the current setup](p4Capture/CURRENT-SETUP.md) and
+[October 19 results](docs/STATUS-2026-10-19-P4.md).
 
-For the current SD backend and future DMA integration, start with
-[the backend reading guide](s3Recorder/src/backend/README.md).
-Hardware diagnostics and host runners are catalogued in
-[the test guide](s3Recorder/test/README.md). The historical test notes below
-describe the experiments that led to the current configuration.
+`shared/bufferedWriter/` contains the reusable ring buffer, byte writer, and its
+PC tests. P4 uses this directly; its firmware and tests need no S3 source files.
+`s3Recorder/` retains the legacy S3 implementation and S3-specific tests. The
+S3 project also uses the shared writer, so there is only one implementation.
 
-Target architecture:
+The S3 build and experiment notes below are historical. The current data path is:
 
 ```text
-ADS1256 -> ESP32-S3 -> ring buffer -> microSD
-                              -> decimated/status data -> ESP32 Feather -> browser UI
+ADS127L18 -> ESP32-P4 -> shared ring buffer -> microSD
+                 ^
+          Feather control
 ```
 
 ## P4 chip revision: development versus production (October 17, 2026)
@@ -75,9 +75,10 @@ Primary source: [Espressif revision 3.2 upgrade and revision 1.3 end-of-life pla
 
 ```text
 esp32Digitizer/
-    s3Recorder/     ESP32-S3 acquisition/recorder firmware
+    p4Capture/      Current ESP32-P4 capture/recorder firmware and tests
+    s3Recorder/     Legacy ESP32-S3 firmware and S3-specific tests
     featherUi/      ESP32 Feather UI/control firmware
-    shared/         Shared headers, protocol definitions, version constants
+    shared/         Reusable bufferedWriter library/tests, shared headers and protocol
     backups/        Local firmware/reference backups
     docs/           Project documentation
 ```
@@ -92,7 +93,8 @@ Primary development environment:
 - Arduino framework
 - Git / GitHub
 
-Both firmware projects are PlatformIO projects.
+Feather and legacy S3 use PlatformIO. P4 uses ESP-IDF; see
+[p4Capture/CURRENT-SETUP.md](p4Capture/CURRENT-SETUP.md) for its build commands.
 
 ## Branches
 
@@ -244,7 +246,7 @@ Reading path through the implementation:
    producer before draining/closing. Every accepted sample is submitted, including
    every 30k interrupt read, not just the periodically displayed latest sample.
 2. `sampleFormatter.cpp` encodes signed 24-bit ADC values into little-endian int32.
-3. `lib/bufferedWriter/src/` owns a 64-KiB single-producer/single-consumer ring,
+3. `shared/bufferedWriter/src/` (from the repository root) owns a 64-KiB single-producer/single-consumer ring,
    writes 4-KiB blocks, retains in-flight bytes, and measures write/flush delay.
    Its byte interface knows nothing about an ADC, Feather, pins, or file format.
 4. `recordingService.cpp` runs filesystem work in a core-1 task; communications

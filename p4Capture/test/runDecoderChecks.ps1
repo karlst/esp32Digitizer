@@ -13,7 +13,7 @@
 # Compile/run the real decoder on this PC. No board connection or upload.
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path $PSScriptRoot -Parent
-$recorderRoot = Join-Path (Split-Path $projectRoot -Parent) 's3Recorder'
+$writerRoot = Join-Path (Split-Path $projectRoot -Parent) 'shared/bufferedWriter'
 $vsWhere = "${env:ProgramFiles(x86)}/Microsoft Visual Studio/Installer/vswhere.exe"
 $installation = & $vsWhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
 if (!$installation) { throw 'Microsoft C++ build tools are required.' }
@@ -29,11 +29,11 @@ cl /nologo /std:c++17 /O2 /EHsc /W4 /DADS127_P4_ENDURANCE=1 /I"$projectRoot/main
 if %errorlevel% neq 0 exit /b 1
 decoderChecks.exe
 if %errorlevel% neq 0 exit /b 1
-cl /nologo /std:c++17 /O2 /EHsc /W4 /DBUFFERED_WRITER_EXTERNAL=1 /DBUFFERED_WRITER_CAPACITY=4194304 /DBUFFERED_WRITER_BLOCK_BYTES=131072 /I"$recorderRoot/src" /I"$recorderRoot/src/backend" /I"$recorderRoot/lib/bufferedWriter/src" "$recorderRoot/test/writerChecks.cpp" "$recorderRoot/src/sampleFormatter.cpp" "$recorderRoot/lib/bufferedWriter/src/bufferedWriter.cpp" /Fe:externalWriterChecks.exe
+cl /nologo /std:c++17 /O2 /EHsc /W4 /DBUFFERED_WRITER_EXTERNAL=1 /DBUFFERED_WRITER_CAPACITY=4194304 /DBUFFERED_WRITER_BLOCK_BYTES=131072 /I"$writerRoot/src" "$writerRoot/test/main.cpp" "$writerRoot/test/bufferedWriterChecks.cpp" "$writerRoot/src/bufferedWriter.cpp" /Fe:externalWriterChecks.exe
 if %errorlevel% neq 0 exit /b 1
 externalWriterChecks.exe
 if %errorlevel% neq 0 exit /b 1
-cl /nologo /std:c++17 /O2 /EHsc /W4 /DBUFFERED_WRITER_EXTERNAL=1 /DBUFFERED_WRITER_CAPACITY=4194304 /DBUFFERED_WRITER_BLOCK_BYTES=131072 /I"$recorderRoot/lib/bufferedWriter/src" "$projectRoot/test/writerRolloverChecks.cpp" "$recorderRoot/lib/bufferedWriter/src/bufferedWriter.cpp" /Fe:writerRolloverChecks.exe
+cl /nologo /std:c++17 /O2 /EHsc /W4 /DBUFFERED_WRITER_EXTERNAL=1 /DBUFFERED_WRITER_CAPACITY=4194304 /DBUFFERED_WRITER_BLOCK_BYTES=131072 /I"$writerRoot/src" "$projectRoot/test/writerRolloverChecks.cpp" "$writerRoot/src/bufferedWriter.cpp" /Fe:writerRolloverChecks.exe
 if %errorlevel% neq 0 exit /b 1
 writerRolloverChecks.exe
 exit /b %errorlevel%

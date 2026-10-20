@@ -42,8 +42,8 @@ static_assert(sizeof(configRUN_TIME_COUNTER_TYPE) == 8,
 void captureProfile::begin(TaskHandle_t control, TaskHandle_t decoder, TaskHandle_t writer)
 {
     *this = captureProfile{};
-    handles[0] = xTaskGetIdleTaskHandleForCPU(0);
-    handles[1] = xTaskGetIdleTaskHandleForCPU(1);
+    handles[0] = xTaskGetIdleTaskHandleForCore(0);
+    handles[1] = xTaskGetIdleTaskHandleForCore(1);
     handles[2] = decoder;
     handles[3] = writer;
     handles[4] = control;

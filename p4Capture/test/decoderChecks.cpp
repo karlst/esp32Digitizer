@@ -64,10 +64,10 @@ static void checkRecordingFormat()
     assert(header64(header + 28) == 18 && header[36] == 1 && header[39] == 0xab);
     assert(header[40] == 3 && header64(header + 44) == 6);
     for (size_t index = 52; index < sizeof(header); ++index) { assert(header[index] == 0); }
-    for (uint64_t bytes : {0xffffffffULL, 0x100000000ULL, 5529600000ULL, 10000000000ULL})
+    for (uint64_t payloadBytes : {0xffffffffULL, 0x100000000ULL, 5529600000ULL, 10000000000ULL})
     {
-        recordingFormat::makeHeader(header, false, false, 1, 6, 1024000, bytes, 0xabcdef01);
-        assert(header64(header + 28) == bytes && header64(header + 44) == bytes / 3);
+        recordingFormat::makeHeader(header, false, false, 1, 6, 1024000, payloadBytes, 0xabcdef01);
+        assert(header64(header + 28) == payloadBytes && header64(header + 44) == payloadBytes / 3);
         assert(header[36] == 1 && header[39] == 0xab && header[40] == 3 && header[12] == 0);
     }
     recordingFormat::makeHeader(header, true, true, 1, 0xffffffff, 812500, 20, 0);

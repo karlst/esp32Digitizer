@@ -357,7 +357,7 @@ The source now includes a tutorial reading path: start with the overview in
 `main/main.cpp`, then `receiveBlock()`, `decodeTask()`,
 `frameDecoder::feed()/finishWord()`, and
 `sdRecorder::submitSamples()/write()/finishFile()`. The shared ring implementation
-is `../s3Recorder/lib/bufferedWriter/src/bufferedWriter.cpp`; its comments cover
+is `../shared/bufferedWriter/src/bufferedWriter.cpp`; its comments cover
 both the S3 and P4 callers.
 
 ### Hardware capture versus software work

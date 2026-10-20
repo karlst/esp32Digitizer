@@ -134,7 +134,7 @@ void bufferedWriter::start(byteSink& destination, uint64_t (*clock)())
  * may stall. An ISR is an interrupt service routine, which briefly interrupts a
  * task. P4 submits from a task, not an ISR; its external-memory path uses memcpy.
  */
-bool BUFFERED_IRAM bufferedWriter::submit(const uint8_t* data, uint32_t length)
+bool bufferedWriter::submit(const uint8_t* data, uint32_t length)
 {
     // head belongs to this producer. relaxed is sufficient for our own position.
     // The other core owns tail; acquire means observe space only after that core

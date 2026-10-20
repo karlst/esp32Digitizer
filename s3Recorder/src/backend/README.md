@@ -1,7 +1,7 @@
 # Recording backend: start here
 
 This is the S3 card adapter and background storage service. The actual ring
-buffer and byte writer are in `../../lib/bufferedWriter/src`. That library has
+buffer and byte writer are in `../../../shared/bufferedWriter/src`. That library has
 no ADC, Feather, UART, file-format or SD pin dependencies.
 
 ## Reading order
@@ -9,7 +9,7 @@ no ADC, Feather, UART, file-format or SD pin dependencies.
 1. `recordingConfig.h`: reservation policy, card pins and disk task settings.
 2. `recordingService.h`, then `recordingService.cpp`: the application-facing
    lifecycle, background task, and published status.
-3. `../../lib/bufferedWriter/src/bufferedWriter.cpp`: `submit()` copies bytes,
+3. `../../../shared/bufferedWriter/src/bufferedWriter.cpp`: `submit()` copies bytes,
    `pump()` writes them, and `finish()` drains the queue and synchronizes storage.
 4. `sdRecordingSink.cpp`: numbered files, reservation, headers and finalization.
 5. `sdmmcBlockDevice.cpp`: actual card transfers through `sdmmc_write_sectors()`.
@@ -41,7 +41,7 @@ ADS1256 interrupt binding and diagnostic generator. It exposes a writer object,
 not mutable ring memory; new task-based acquisition should use `submit()`.
 
 The disk task and its status translation are project integration code.
-To reuse the byte backend elsewhere, copy `lib/bufferedWriter`, implement
+To reuse the byte backend elsewhere, use `shared/bufferedWriter` from the repository root, implement
 `byteSink::write/flush`, supply a monotonic microsecond clock and memory allocator,
 and call `pump()` from that application's storage task. No Feather code is needed.
 

@@ -96,6 +96,9 @@ public:
         uint32_t overflows = 0, errors = 0;
     };
     void start(byteSink& destination, uint64_t (*clockUs)());
+    // Place submit's instructions in internal RAM for the S3 interrupt caller.
+    // The definition inherits this attribute. Repeating it there would generate
+    // a different ESP-IDF section label and cause a compiler conflict.
     bool BUFFERED_IRAM submit(const uint8_t* data, uint32_t length);
     bool pump(bool drain = false);
     bool finish();

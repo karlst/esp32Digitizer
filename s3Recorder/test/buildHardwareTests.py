@@ -27,7 +27,7 @@ env.Append(CPPPATH=[str(testRoot), env.subst('$PROJECT_DIR/src'),
 # Test sources outside src/ therefore need the same explicitly declared library
 # headers as the application; the libraries themselves are still linked by PIO.
 frameworkRoot = env.PioPlatform().get_package_dir('framework-arduinoespressif32')
-env.Append(CPPPATH=[env.subst('$PROJECT_DIR/lib/bufferedWriter/src'),
+env.Append(CPPPATH=[env.subst('$PROJECT_DIR/../shared/bufferedWriter/src'),
                    env.subst('$PROJECT_LIBDEPS_DIR/$PIOENV/SdFat/src'),
                    str(Path(frameworkRoot) / 'libraries' / 'SPI' / 'src')])
 selectedSource = env.GetProjectOption('custom_test_source', '')
