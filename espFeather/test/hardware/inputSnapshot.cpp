@@ -12,7 +12,7 @@
  * Public License in the repository LICENSE file or <https://www.gnu.org/licenses/>.
  */
 
-/** @file inputSnapshot.cpp
+/** @file InputSnapshot.cpp
  * @brief Measure the test voltage through Feather A2 while the external ADC captures it.
  * This is a second ADC observing the same wire, not a copy of the values sent
  * to the DAC. It can have its own noise and calibration error. poll() runs in
@@ -26,7 +26,7 @@
  * reports do not align clocks or fit gain. report() exports calibration only
  * after capture stops, leaving acquisition timing unchanged.
  */
-#include "inputSnapshot.h"
+#include "InputSnapshot.h"
 #if ADS127_COMPARE_INPUT
 #include <driver/adc.h>
 #include <esp_timer.h>
@@ -47,7 +47,7 @@ static constexpr int64_t endReadUs = 1299500;
 /** @brief setup configures ADC1 range/width without enabling DAC or ADS127.
  * True confirms configuration calls, not jumper presence or measured accuracy.
  */
-bool inputSnapshot::initialize()
+bool InputSnapshot::initialize()
 {
     pinMode(A2, INPUT);
     const bool retVal = adc1_config_width(ADC_WIDTH_BIT_12) == ESP_OK &&
@@ -56,23 +56,23 @@ bool inputSnapshot::initialize()
 }
 
 /** @brief Discard the previous record before accepting a new run, while idle. */
-void inputSnapshot::reset()
+void InputSnapshot::reset()
 {
-    collecting = broken = false;
-    count = missed = maxGapUs = 0;
-    origin = nextRead = lastRead = 0;
+    _collecting = _broken = false;
+    _count = _missed = _maxGapUs = 0;
+    _origin = _nextRead = _lastRead = 0;
 }
 
 /** @brief Called immediately after confirmed ADC START; establish a local origin.
  * The origin is software observation of the command echo, not an ADC sample
  * edge. The exported timestamp and PC shift fit make that distinction explicit.
  */
-void inputSnapshot::begin()
+void InputSnapshot::begin()
 {
     reset();
-    origin = esp_timer_get_time();
-    nextRead = origin + firstReadUs;
-    collecting = true;
+    _origin = esp_timer_get_time();
+    _nextRead = _origin + firstReadUs;
+    _collecting = true;
 }
 
 /** @brief loop collects a 500 us A2 burst per slot (1 ms RAM, 100 ms SD smoke).
@@ -84,16 +84,16 @@ void inputSnapshot::begin()
  * The timer task can still update DAC during a burst. No locks/USB output here.
  * This extra measurement work is diagnostic-only, not production qualification.
  */
-void inputSnapshot::poll()
+void InputSnapshot::poll()
 {
-    if (collecting)
+    if (_collecting)
     {
         const int64_t now = esp_timer_get_time();
-        if (now - origin >= endReadUs) { collecting = false; }
-        else if (now >= nextRead)
+        if (now - _origin >= endReadUs) { _collecting = false; }
+        else if (now >= _nextRead)
         {
-            missed += static_cast<uint32_t>((now - nextRead) / readIntervalUs);
-            nextRead += ((now - nextRead) / readIntervalUs + 1) * readIntervalUs;
+            _missed += static_cast<uint32_t>((now - _nextRead) / readIntervalUs);
+            _nextRead += ((now - _nextRead) / readIntervalUs + 1) * readIntervalUs;
             const int64_t before = esp_timer_get_time();
             uint32_t sum = 0, reads = 0;
             int minimum = 4095, maximum = 0;
@@ -102,7 +102,7 @@ void inputSnapshot::poll()
             do
             {
                 const int raw = adc1_get_raw(ADC1_CHANNEL_6);
-                if (raw < 0 || raw > 4095) { broken = true; }
+                if (raw < 0 || raw > 4095) { _broken = true; }
                 else
                 {
                     sum += static_cast<uint32_t>(raw);
@@ -110,22 +110,22 @@ void inputSnapshot::poll()
                     if (raw < minimum) { minimum = raw; }
                     if (raw > maximum) { maximum = raw; }
                 }
-            } while (!broken && reads < 4096 && esp_timer_get_time() - before < 500);
+            } while (!_broken && reads < 4096 && esp_timer_get_time() - before < 500);
             const int64_t after = esp_timer_get_time();
             const int64_t at = (before + after) / 2;
-            if (broken || reads < 2 || count >= 320)
+            if (_broken || reads < 2 || _count >= 320)
             {
-                broken = true;
-                collecting = false;
+                _broken = true;
+                _collecting = false;
             }
             else
             {
-                if (lastRead != 0 && at - lastRead > maxGapUs)
+                if (_lastRead != 0 && at - _lastRead > _maxGapUs)
                 {
-                    maxGapUs = static_cast<uint32_t>(at - lastRead);
+                    _maxGapUs = static_cast<uint32_t>(at - _lastRead);
                 }
-                lastRead = at;
-                points[count++] = {static_cast<uint32_t>(at - origin),
+                _lastRead = at;
+                _points[_count++] = {static_cast<uint32_t>(at - _origin),
                     static_cast<uint32_t>(after - before), reads, sum, minimum, maximum};
             }
         }
@@ -137,20 +137,20 @@ void inputSnapshot::poll()
  * 1 ms slots. Outside
  * this short interval loop retains its ordinary sleep. Never used in other builds.
  */
-bool inputSnapshot::sampling() const
+bool InputSnapshot::sampling() const
 {
     // Sleeping between the sparse smoke bursts does not lose 100-ms slots.
 #if ADS127_HARDWARE_SMOKE
     return false;
 #else
-    return collecting && esp_timer_get_time() - origin >= firstReadUs;
+    return _collecting && esp_timer_get_time() - _origin >= firstReadUs;
 #endif
 }
 
 /** @brief loop reads its own latched ADC-driver/capacity failure state. */
-bool inputSnapshot::failed() const
+bool InputSnapshot::failed() const
 {
-    return broken;
+    return _broken;
 }
 
 /** @brief Export the matching run after stop, preserving actual sample times.
@@ -159,9 +159,9 @@ bool inputSnapshot::failed() const
  * P4 may request stop just before this window ends. This flag does not assess
  * waveform shape. The PC also validates matching run IDs, row counts and order.
  */
-void inputSnapshot::report(unsigned long run, bool hardwareClean)
+void InputSnapshot::report(unsigned long run, bool hardwareClean)
 {
-    collecting = false;
+    _collecting = false;
 
     // After acquisition has stopped, ask the SDK for this ADC's count-to-mV
     // mapping. Factory eFuse values are permanent calibration data in the chip;
@@ -182,22 +182,22 @@ void inputSnapshot::report(unsigned long run, bool hardwareClean)
     Serial.printf("CAL,4095,%lu\n", static_cast<unsigned long>(
         esp_adc_cal_raw_to_voltage(4095, &calibration)));
 #if ADS127_HARDWARE_SMOKE
-    const bool clean = hardwareClean && !broken && missed == 0 && count == 300 &&
-        points[299].timeUs >= 29950000;
+    const bool clean = hardwareClean && !_broken && _missed == 0 && _count == 300 &&
+        _points[299]._timeUs >= 29950000;
 #else
-    const bool clean = hardwareClean && !broken && count >= 200 &&
-        points[count - 1].timeUs - points[0].timeUs >= 250000;
+    const bool clean = hardwareClean && !_broken && _count >= 200 &&
+        _points[_count - 1]._timeUs - _points[0]._timeUs >= 250000;
 #endif
     Serial.printf("INPUT_BEGIN run=%lu count=%u clean=%u missed=%lu maxGapUs=%lu mode=burst\n",
-                  run, count, unsigned(clean), static_cast<unsigned long>(missed),
-                  static_cast<unsigned long>(maxGapUs));
-    for (unsigned index = 0; index < count; ++index)
+                  run, _count, unsigned(clean), static_cast<unsigned long>(_missed),
+                  static_cast<unsigned long>(_maxGapUs));
+    for (unsigned index = 0; index < _count; ++index)
     {
-        const auto& point = points[index];
+        const auto& point = _points[index];
         Serial.printf("INPUT,%u,%lu,%.6f,%d,%d,%lu,%lu\n", index,
-                      static_cast<unsigned long>(point.timeUs), double(point.sum) / point.reads,
-                      point.minimum, point.maximum, static_cast<unsigned long>(point.reads),
-                      static_cast<unsigned long>(point.durationUs));
+                      static_cast<unsigned long>(point._timeUs), double(point._sum) / point._reads,
+                      point._minimum, point._maximum, static_cast<unsigned long>(point._reads),
+                      static_cast<unsigned long>(point._durationUs));
     }
     Serial.printf("INPUT_END run=%lu\n", run);
 }

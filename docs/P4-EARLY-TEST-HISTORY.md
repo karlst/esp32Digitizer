@@ -103,9 +103,9 @@ backend adapter is separate work; retain the reusable buffered writer.
 - [P4 datasheet](https://documentation.espressif.com/esp32-p4_datasheet_en.html)
 - [PARLIO buffer defect](https://github.com/espressif/esp-idf/issues/17581)
 - [S3 I2S limitations](https://docs.espressif.com/projects/esp-idf/en/stable/esp32s3/api-reference/peripherals/i2s.html)
-- [ADS127L18 datasheet](https://www.ti.com/lit/ds/symlink/ads127l18.pdf)
+- [ADS127L18 datasheet](https://www.ti.com/lit/ds/symlink/ads127L18.pdf)
 - [Translator datasheet](https://www.ti.com/lit/ds/symlink/sn74axc8t245.pdf)
-- [TI FPGA reference](https://github.com/TexasInstruments/precision-adc-examples/tree/main/devices/ads127l18/verilog)
+- [TI FPGA reference](https://github.com/TexasInstruments/precision-adc-examples/tree/main/devices/ads127L18/verilog)
 
 ### PC and build verification at that checkpoint
 

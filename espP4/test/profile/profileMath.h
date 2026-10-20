@@ -42,36 +42,5 @@ inline uint32_t percentTenths(uint64_t executedUs, uint64_t elapsedUs)
     return retVal;
 }
 
-/**
- * @brief Add measured execution and elapsed times, rather than averaging percentages.
- * For example, a busy 0.1-second interval must not count as much as an idle
- * one-second interval. Dividing the summed times gives the proper average.
- * The final partial interval counts in averages, but intervals below 0.5 seconds
- * do not set the worst-window figure. This avoids a tiny Stop interval dominating
- * the estimate through scheduler tick/accounting boundary effects.
- */
-struct intervalTotals
-{
-    uint64_t elapsedUs = 0;
-    uint64_t executedUs = 0;
-    uint32_t maxTenths = 0;
-    uint32_t peakWindows = 0;
 
-    /**
-     * @brief Add elapsed and executed microseconds for one accepted interval.
-     * peakWindows counts all intervals eligible for the maximum (at least
-     * 0.5 seconds), not just intervals that set a new maximum.
-     */
-    void add(uint64_t durationUs, uint64_t runtimeUs)
-    {
-        elapsedUs += durationUs;
-        executedUs += runtimeUs;
-        if (durationUs >= 500000)
-        {
-            const uint32_t value = percentTenths(runtimeUs, durationUs);
-            if (value > maxTenths) { maxTenths = value; }
-            ++peakWindows;
-        }
-    }
-};
 }

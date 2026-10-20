@@ -12,7 +12,7 @@
  * Public License in the repository LICENSE file or <https://www.gnu.org/licenses/>.
  */
 
-/** @file sdWriteTest.cpp
+/** @file SdWriteTest.cpp
  * @brief Generate known numbers for 60 seconds to test SD writing without an ADC.
  * start() chooses a rate; work() computes how many words should exist by each
  * elapsed time. Falling too far behind fails the test instead of quietly
@@ -20,7 +20,7 @@
  * otherwise sleeping generator. The prepared
  * recorder is exclusively claimed before that notification; ADC ARM then fails.
  */
-#include "sdWriteTest.h"
+#include "SdWriteTest.h"
 #include "sdTestData.h"
 #include "esp_timer.h"
 #include "esp_random.h"
@@ -30,10 +30,10 @@
  * ESP-IDF specifies stack size in bytes. Reserve 8 KiB for nested library and
  * console calls; the separate member batch no longer consumes that stack.
  */
-bool sdWriteTest::initialize(sdRecorder& recorder)
+bool SdWriteTest::initialize(SdRecorder& recorder)
 {
-    destination = &recorder;
-    return xTaskCreatePinnedToCore(taskEntry, "sdTest", 8192, this, 5, &task, 1) == pdPASS;
+    _sdRecorder = &recorder;
+    return xTaskCreatePinnedToCore(taskEntry, "sdTest", 8192, this, 5, &_task, 1) == pdPASS;
 }
 
 /**
@@ -42,36 +42,36 @@ bool sdWriteTest::initialize(sdRecorder& recorder)
  * true only when an unused prepared file was claimed and the task was signaled.
  * This does not mean the test or card writes have completed successfully.
  */
-bool sdWriteTest::start(uint32_t wordsPerSecond)
+bool SdWriteTest::start(uint32_t wordsPerSecond)
 {
-    bool retVal = !busy.load() && (wordsPerSecond == 812500 || wordsPerSecond == 1024000);
+    bool retVal = !_busy.load() && (wordsPerSecond == 812500 || wordsPerSecond == 1024000);
     if (retVal)
     {
-        retVal = destination->claim(esp_random() | 1U, sdTestData::stage, wordsPerSecond);
+        retVal = _sdRecorder->claim(esp_random() | 1U, sdTestData::stage, wordsPerSecond, &_syntheticRecordingLayout);
     }
     if (retVal)
     {
-        rate = wordsPerSecond;
-        stopRequested.store(false);
-        busy.store(true);
-        xTaskNotifyGive(task);
+        _rate = wordsPerSecond;
+        _stopRequested.store(false);
+        _busy.store(true);
+        xTaskNotifyGive(_task);
     }
     return retVal;
 }
 
 /** @brief CPU0 requests an early stop; partial tests cannot receive a pass verdict. */
-void sdWriteTest::stop()
+void SdWriteTest::stop()
 {
-    if (busy.load()) { stopRequested.store(true); }
+    if (_busy.load()) { _stopRequested.store(true); }
 }
 
 /**
  * @brief OS entry receives the sdWriteTest pointer supplied by initialize().
  * Its work() loop waits for requests and never returns during normal operation.
  */
-void sdWriteTest::taskEntry(void* context)
+void SdWriteTest::taskEntry(void* context)
 {
-    static_cast<sdWriteTest*>(context)->work();
+    static_cast<SdWriteTest*>(context)->work();
 }
 
 /** @brief Submit exactly the timed number of words, or fail promptly.
@@ -81,7 +81,7 @@ void sdWriteTest::taskEntry(void* context)
  * More than 100 ms of scheduling backlog also fails rather than pretending a
  * slower source sustained the requested rate. One-tick sleeps allow CPU1 idle.
  */
-void sdWriteTest::work()
+void SdWriteTest::work()
 {
     for (;;)
     {
@@ -90,12 +90,12 @@ void sdWriteTest::work()
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
         // Integer formatting avoids the floating-point formatter's startup
         // allocation and deeper call stack. This is outside the timed interval.
-        const uint32_t bitsPerSecond = rate * 32U;
+        const uint32_t bitsPerSecond = _rate * 32U;
         printf("SD TEST START %lu.%03lu Mbps for 60 seconds; generated data, ADC not used\n",
                static_cast<unsigned long>(bitsPerSecond / 1000000),
                static_cast<unsigned long>((bitsPerSecond % 1000000) / 1000));
         const int64_t began = esp_timer_get_time();
-        const uint64_t expected = sdTestData::dueWords(sdTestData::durationUs, rate);
+        const uint64_t expected = sdTestData::dueWords(sdTestData::durationUs, _rate);
         uint64_t sent = 0;
         uint64_t maxLagUs = 0;
         bool ok = true;
@@ -104,48 +104,38 @@ void sdWriteTest::work()
             // Compare submitted words with words due by wall-clock time. The
             // difference converted to microseconds is how far the source lags.
             const uint64_t elapsed = esp_timer_get_time() - began;
-            const uint64_t due = sdTestData::dueWords(elapsed, rate);
-            const uint64_t lagUs = (due - sent) * 1000000 / rate;
+            const uint64_t due = sdTestData::dueWords(elapsed, _rate);
+            const uint64_t lagUs = (due - sent) * 1000000 / _rate;
             if (lagUs > maxLagUs) { maxLagUs = lagUs; }
-            ok = !stopRequested.load() && !destination->failed() && lagUs <= 100000 &&
+            ok = !_stopRequested.load() && !_sdRecorder->failed() && lagUs <= 100000 &&
                  elapsed <= sdTestData::durationUs + 100000;
             while (sent < due && ok)
             {
                 // Fill at most 512 words, each determined by its position.
-                // submitWords copies them, so this batch can be reused as soon
+                // submitBytes copies them, so this batch can be reused as soon
                 // as it returns. Refusal ends the test; do not retry lost data.
                 const size_t count = due - sent < 512 ? static_cast<size_t>(due - sent) : 512;
                 for (size_t index = 0; index < count; ++index)
                 {
-                    batch[index] = sdTestData::word(static_cast<uint32_t>(sent + index));
+                    _batch[index] = sdTestData::word(static_cast<uint32_t>(sent + index));
                 }
-                ok = !stopRequested.load() && destination->submitWords(batch, count);
+                ok = !_stopRequested.load() && _sdRecorder->submitBytes(reinterpret_cast<const uint8_t*>(_batch),
+                    static_cast<uint32_t>(count * sizeof(uint32_t)));
                 if (ok) { sent += count; }
             }
             if (sent < expected && ok) { vTaskDelay(1); }
         }
         const uint64_t elapsed = esp_timer_get_time() - began;
         ok = ok && sent == expected && elapsed <= sdTestData::durationUs + 100000 &&
-             !stopRequested.load() && !destination->failed();
+             !_stopRequested.load() && !_sdRecorder->failed();
         printf("SD TEST source %s words=%llu/%llu elapsedMs=%llu maxLagUs=%llu; "
                "wait for SD SAVED/FAILED\n", ok ? "COMPLETE" : "FAILED",
                static_cast<unsigned long long>(sent), static_cast<unsigned long long>(expected),
                static_cast<unsigned long long>(elapsed / 1000), static_cast<unsigned long long>(maxLagUs));
         // No further submissions follow publication of finishing. Readback and
         // file close belong to the disk task; source completion is not SD success.
-        destination->finish(ok);
-        busy.store(false);
+        _sdRecorder->finish(ok);
+        _busy.store(false);
     }
-}
-
-/** @brief CPU1 synthetic test copies four-byte generated words into the ring.
- * This keeps the SD-only 26/32.768 Mbps baselines unchanged. ADC capture calls
- * submitSamples instead. Only one of these producers can own a prepared file.
- */
-bool sdRecorder::submitWords(const uint32_t* words, size_t count)
-{
-    const uint32_t bytes = static_cast<uint32_t>(count * sizeof(uint32_t));
-    const auto* data = reinterpret_cast<const uint8_t*>(words);
-    return submitBytes(data, bytes);
 }
 

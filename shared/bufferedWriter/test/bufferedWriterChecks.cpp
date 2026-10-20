@@ -18,9 +18,9 @@
  * Check ordering through wraps, stalled storage, partial writes, flush failure,
  * byte contents, and concurrent producer/consumer publication on separate threads.
  */
-#include <bufferedWriter.h>
+#include <BufferedWriter.h>
 #include "bufferedWriterChecks.h"
-#include "memorySink.h"
+#include "MemorySink.h"
 #include <cassert>
 #include <vector>
 #include <thread>
@@ -39,13 +39,13 @@ static uint64_t clockUs() { return writerTestUs; }
  * This test helper packs an integer least-significant byte first. It is not
  * an ADC formatter: the writer must copy these bytes without interpreting them.
  */
-static bool submitWord(bufferedWriter& writer, int32_t value)
+static bool submitWord(BufferedWriter& bufferedWriter, int32_t value)
 {
     const uint32_t bits = static_cast<uint32_t>(value);
     const uint8_t bytes[4] = {static_cast<uint8_t>(bits),
         static_cast<uint8_t>(bits >> 8), static_cast<uint8_t>(bits >> 16),
         static_cast<uint8_t>(bits >> 24)};
-    const bool retVal = writer.submit(bytes, sizeof(bytes));
+    const bool retVal = bufferedWriter.submit(bytes, sizeof(bytes));
     return retVal;
 }
 
@@ -60,85 +60,85 @@ static bool submitWord(bufferedWriter& writer, int32_t value)
  */
 int runWriterChecks()
 {
-    bufferedWriter writer;
+    BufferedWriter bufferedWriter;
 #if BUFFERED_WRITER_EXTERNAL
 
     // A failed allocator must not leave a usable-looking writer or null-copy.
-    assert(!writer.initializeMemory([](uint32_t) -> uint8_t* { return nullptr; },
+    assert(!bufferedWriter.initializeMemory([](uint32_t) -> uint8_t* { return nullptr; },
         [](uint8_t* memory) { std::free(memory); }));
-    memorySink missingMemorySink;
-    writer.start(missingMemorySink, clockUs);
+    MemorySink memorySinkMissingMemory;
+    bufferedWriter.start(memorySinkMissingMemory, clockUs);
     const uint8_t probe = 1;
-    assert(!writer.submit(&probe, 1) && writer.failed());
-    writer.cancel();
-    assert(writer.initializeMemory([](uint32_t bytes) -> uint8_t* {
+    assert(!bufferedWriter.submit(&probe, 1) && bufferedWriter.failed());
+    bufferedWriter.cancel();
+    assert(bufferedWriter.initializeMemory([](uint32_t bytes) -> uint8_t* {
         return static_cast<uint8_t*>(std::malloc(bytes));
     }, [](uint8_t* memory) { std::free(memory); }));
 #endif
-    memorySink sink;
-    writer.start(sink, clockUs);
+    MemorySink memorySink;
+    bufferedWriter.start(memorySink, clockUs);
 
     // Send three known four-byte patterns. The generic writer must preserve
     // bytes exactly; it has no knowledge of ADC sample formats.
-    submitWord(writer, -1);
-    submitWord(writer, -8388608);
-    submitWord(writer, 8388607);
-    assert(writer.finish());
+    submitWord(bufferedWriter, -1);
+    submitWord(bufferedWriter, -8388608);
+    submitWord(bufferedWriter, 8388607);
+    assert(bufferedWriter.finish());
     const std::vector<uint8_t> expected = {255,255,255,255, 0,0,128,255, 255,255,127,0};
-    assert(sink.bytes == expected);
-    assert(writer.snapshot().maxUs == 45000 && writer.snapshot().maxKind == 2);
-    const auto stoppedTime = writer.snapshot().elapsedUs;
+    assert(memorySink._bytes == expected);
+    assert(bufferedWriter.snapshot()._maxUs == 45000 && bufferedWriter.snapshot()._maxKind == 2);
+    const auto stoppedTime = bufferedWriter.snapshot()._elapsedUs;
     writerTestUs += 100000;
-    assert(writer.snapshot().elapsedUs == stoppedTime);
+    assert(bufferedWriter.snapshot()._elapsedUs == stoppedTime);
 
     // A seven-byte submission straddles the physical end of the ring. This
     // exercises both copies in the external-memory path, including odd lengths
     // that four-byte samples alone would never produce. Verify every saved byte.
-    sink.bytes.clear(); writer.start(sink, clockUs);
-    std::vector<uint8_t> prefix(bufferedWriter::capacity - 3, 0x5a);
+    memorySink._bytes.clear(); bufferedWriter.start(memorySink, clockUs);
+    std::vector<uint8_t> prefix(BufferedWriter::_capacity - 3, 0x5a);
     const uint8_t wrapped[7] = {1, 2, 3, 4, 5, 6, 7};
-    assert(writer.submit(prefix.data(), static_cast<uint32_t>(prefix.size())));
-    assert(writer.pump());
-    assert(writer.submit(wrapped, sizeof(wrapped)));
-    assert(writer.finish());
+    assert(bufferedWriter.submit(prefix.data(), static_cast<uint32_t>(prefix.size())));
+    assert(bufferedWriter.pump());
+    assert(bufferedWriter.submit(wrapped, sizeof(wrapped)));
+    assert(bufferedWriter.finish());
     prefix.insert(prefix.end(), wrapped, wrapped + sizeof(wrapped));
-    assert(sink.bytes == prefix);
+    assert(memorySink._bytes == prefix);
 
     // Force a full buffer while its first block is still in write(). Queued
     // bytes must remain stable; overflow is visible and finish reports failure.
-    sink.bytes.clear(); writer.start(sink, clockUs);
-    for (int index = 0; index < static_cast<int>(bufferedWriter::blockBytes / 4); ++index) { submitWord(writer, index); }
-    sink.duringWrite = &writer;
-    writer.pump();
-    assert(writer.failed() && writer.snapshot().overflows == 1);
-    assert(!writer.finish() && writer.snapshot().used == 0);
+    memorySink._bytes.clear(); bufferedWriter.start(memorySink, clockUs);
+    for (int index = 0; index < static_cast<int>(BufferedWriter::_blockBytes / 4); ++index) { submitWord(bufferedWriter, index); }
+    memorySink._bufferedWriterDuringWrite = &bufferedWriter;
+    bufferedWriter.pump();
+    assert(bufferedWriter.failed() && bufferedWriter.snapshot()._overflows == 1);
+    assert(!bufferedWriter.finish() && bufferedWriter.snapshot()._used == 0);
 
     // Never retry a partially written block. Its accepted prefix is counted,
     // but the queue remains occupied so callers cannot assume everything saved.
-    sink.bytes.clear(); sink.shortWrite = true;
-    writer.start(sink, clockUs); submitWord(writer, 42);
-    assert(!writer.finish());
-    assert(sink.bytes.size() == 3 && writer.snapshot().bytes == 3 && writer.snapshot().used == 4);
-    assert(writer.snapshot().errors == 1);
+    memorySink._bytes.clear(); memorySink._shortWrite = true;
+    bufferedWriter.start(memorySink, clockUs); submitWord(bufferedWriter, 42);
+    assert(!bufferedWriter.finish());
+    assert(memorySink._bytes.size() == 3 && bufferedWriter.snapshot()._bytes == 3 && bufferedWriter.snapshot()._used == 4);
+    assert(bufferedWriter.snapshot()._errors == 1);
 
     // A successful payload write still cannot make finish successful if its
     // final synchronization fails. Then separately test failed preparation timing.
-    sink.shortWrite = false; sink.flushOk = false;
-    writer.start(sink, clockUs);
-    assert(!writer.finish() && writer.snapshot().errors == 1);
-    writer.start(sink, clockUs);
+    memorySink._shortWrite = false; memorySink._flushOk = false;
+    bufferedWriter.start(memorySink, clockUs);
+    assert(!bufferedWriter.finish() && bufferedWriter.snapshot()._errors == 1);
+    bufferedWriter.start(memorySink, clockUs);
     writerTestUs += 123;
-    writer.measure(writerTestUs - 123, 1, false);
-    writer.cancel();
+    bufferedWriter.measure(writerTestUs - 123, 1, false);
+    bufferedWriter.cancel();
     writerTestUs += 100000;
-    assert(writer.snapshot().elapsedUs == 123);
+    assert(bufferedWriter.snapshot()._elapsedUs == 123);
 
     // A producer pauses BEFORE full capacity (it does not retry rejected data).
     // Real recording stops on full instead; this test isolates publication and
     // ordering through many ring wraps with actual concurrent threads.
-    sink.flushOk = true; sink.bytes.clear(); writer.start(sink, clockUs);
+    memorySink._flushOk = true; memorySink._bytes.clear(); bufferedWriter.start(memorySink, clockUs);
     std::atomic<uint32_t> consumed{0};
-    constexpr uint32_t count = bufferedWriter::capacity / 4 * 3 + 17;
+    constexpr uint32_t count = BufferedWriter::_capacity / 4 * 3 + 17;
 
     // This second OS thread simulates the sample source; it alone calls submit.
     // The main test thread runs pump and publishes how many words were consumed.
@@ -147,27 +147,27 @@ int runWriterChecks()
         // Submit increasing values so the consumer can check their order later.
         for (uint32_t index = 0; index < count; ++index)
         {
-            while (index - consumed.load(std::memory_order_acquire) >= bufferedWriter::blockBytes / 4 * 2) { std::this_thread::yield(); }
-            assert(submitWord(writer, static_cast<int32_t>(index)));
+            while (index - consumed.load(std::memory_order_acquire) >= BufferedWriter::_blockBytes / 4 * 2) { std::this_thread::yield(); }
+            assert(submitWord(bufferedWriter, static_cast<int32_t>(index)));
         }
     });
-    while (writer.snapshot().bytes < (count * 4 / bufferedWriter::blockBytes) * bufferedWriter::blockBytes)
+    while (bufferedWriter.snapshot()._bytes < (count * 4 / BufferedWriter::_blockBytes) * BufferedWriter::_blockBytes)
     {
-        assert(writer.pump());
-        consumed.store(static_cast<uint32_t>(writer.snapshot().bytes / 4), std::memory_order_release);
+        assert(bufferedWriter.pump());
+        consumed.store(static_cast<uint32_t>(bufferedWriter.snapshot()._bytes / 4), std::memory_order_release);
         std::this_thread::yield();
     }
 
     // Wait for the source to finish before draining the final short block.
     // Otherwise finish would race new submissions, violating its contract.
     producer.join();
-    assert(writer.finish() && sink.bytes.size() == count * 4);
+    assert(bufferedWriter.finish() && memorySink._bytes.size() == count * 4);
 
     // Decode saved words and check for missing, duplicated or overwritten data
     // across every ring wrap, not just the final reported sample count.
     for (uint32_t index = 0; index < count; ++index)
     {
-        const uint8_t* bytes = sink.bytes.data() + index * 4;
+        const uint8_t* bytes = memorySink._bytes.data() + index * 4;
         const uint32_t value = bytes[0] | (uint32_t(bytes[1]) << 8) |
             (uint32_t(bytes[2]) << 16) | (uint32_t(bytes[3]) << 24);
         assert(value == index);

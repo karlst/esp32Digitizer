@@ -1,7 +1,7 @@
 # Paired RAM capture text protocol
 
-Read captureComparison.py first for PC orchestration, inputSnapshot.cpp for
-Feather measurement/export, and ramWaveform.cpp plus main.cpp for P4 collection.
+Read captureComparison.py first for PC orchestration, InputSnapshot.cpp for
+Feather measurement/export, and RamWaveform.cpp plus main.cpp for P4 collection.
 These are diagnostic USB reports, not the SD file format or a production API.
 
 Each serial reader assembles newline-terminated text and queues lines for the

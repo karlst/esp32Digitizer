@@ -20,20 +20,16 @@
  * one second, measures A2 for 300 ms, stops DAC, then prints timestamped values.
  * This checks waveform shape with an independent ADC, not calibrated precision.
  */
+#include "LoopbackPoint.h"
 #include <Arduino.h>
 #include <driver/adc.h>
 #include <driver/dac.h>
 #include <esp_timer.h>
-#include "benchDac.h"
+#include "BenchDac.h"
 
-/** @brief One physical A2 measurement; time is microseconds after sampling begins. */
-struct loopbackPoint
-{
-    uint32_t timeUs;
-    int raw;
-};
-static benchDac source;
-static loopbackPoint points[320];
+
+static BenchDac benchDac;
+static LoopbackPoint loopbackPoints[320];
 static unsigned pointCount = 0;
 static bool ready = false, running = false;
 static int64_t startedAt = 0, nextReadAt = 0;
@@ -48,14 +44,14 @@ static uint32_t missedReadSlots = 0;
  */
 static void finishMeasurement(bool clean)
 {
-    source.stop();
+    benchDac.stop();
     running = false;
-    const bool good = clean && !source.failed() && pointCount >= 200;
+    const bool good = clean && !benchDac.failed() && pointCount >= 200;
     Serial.printf("LOOP_BEGIN count=%u clean=%u missedReadSlots=%lu\n", pointCount,
                   unsigned(good), static_cast<unsigned long>(missedReadSlots));
     for (unsigned index = 0; index < pointCount; ++index)
     {
-        Serial.printf("LOOP,%lu,%d\n", static_cast<unsigned long>(points[index].timeUs), points[index].raw);
+        Serial.printf("LOOP,%lu,%d\n", static_cast<unsigned long>(loopbackPoints[index]._timeUs), loopbackPoints[index]._raw);
     }
     Serial.println("LOOP_END");
 }
@@ -72,7 +68,7 @@ void setup()
     pinMode(A1, INPUT);
     pinMode(A2, INPUT);
     Serial.begin(115200);
-    ready = source.initialize() && adc1_config_width(ADC_WIDTH_BIT_12) == ESP_OK &&
+    ready = benchDac.initialize() && adc1_config_width(ADC_WIDTH_BIT_12) == ESP_OK &&
         adc1_config_channel_atten(ADC1_CHANNEL_6, ADC_ATTEN_DB_12) == ESP_OK;
     delay(500);
     Serial.println("FEATHER DAC LOOPBACK: A1 -> A2 jumper; TI coax disconnected for first test.");
@@ -94,7 +90,7 @@ void loop()
         if (command == 'g' && ready && !running)
         {
             pointCount = missedReadSlots = 0;
-            if (source.start())
+            if (benchDac.start())
             {
                 startedAt = esp_timer_get_time();
                 nextReadAt = startedAt + 1000000;
@@ -107,7 +103,7 @@ void loop()
     if (running)
     {
         const int64_t now = esp_timer_get_time();
-        if (source.failed()) { finishMeasurement(false); }
+        if (benchDac.failed()) { finishMeasurement(false); }
         else if (now - startedAt >= 1300000) { finishMeasurement(true); }
         else if (now >= nextReadAt)
         {
@@ -119,7 +115,7 @@ void loop()
             if (value < 0 || pointCount >= 320) { finishMeasurement(false); }
             else
             {
-                points[pointCount++] = {static_cast<uint32_t>((before + after) / 2 - startedAt - 1000000), value};
+                loopbackPoints[pointCount++] = {static_cast<uint32_t>((before + after) / 2 - startedAt - 1000000), value};
             }
         }
     }

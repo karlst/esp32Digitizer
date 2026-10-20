@@ -12,7 +12,7 @@
  * Public License in the repository LICENSE file or <https://www.gnu.org/licenses/>.
  */
 
-/** @file frameDecoder.cpp
+/** @file FrameDecoder.cpp
  * @brief Turn captured data bits into ADC numbers using the separate sample-start signal.
  * A frame is one sample's clock interval. Its start comes from FSYNC, not from
  * searching the data for a plausible value. Status errors are counted without
@@ -35,9 +35,9 @@
  *
  * References: TI ADS127L18 datasheet section 5.7 (FSYNC half-period high/low),
  * sections 7.4.10.3-7.4.10.6 (status and data timing).
- * https://www.ti.com/lit/ds/symlink/ads127l18.pdf
+ * https://www.ti.com/lit/ds/symlink/ads127L18.pdf
  */
-#include "frameDecoder.h"
+#include "FrameDecoder.h"
 #include <array>
 
 /**
@@ -117,16 +117,16 @@ static inline uint32_t unpackData(const uint8_t* data)
  * Ignore an initial high FSYNC until a low-to-high transition is actually seen;
  * starting in the middle of a frame must not manufacture a complete sample.
  */
-void frameDecoder::reset(uint32_t clocksPerFrame)
+void FrameDecoder::reset(uint32_t clocksPerFrame)
 {
-    counts = {};
-    outputCount = 0;
-    outputBroken = false;
-    frameClocks = clocksPerFrame;
-    lastRise = 0;
-    word = bits = 0;
-    previousHigh = true;
-    synchronized = false;
+    _captureStats = {};
+    _outputCount = 0;
+    _outputBroken = false;
+    _frameClocks = clocksPerFrame;
+    _lastRise = 0;
+    _word = _bits = 0;
+    _previousHigh = true;
+    _synchronized = false;
 }
 
 /**
@@ -143,7 +143,7 @@ void frameDecoder::reset(uint32_t clocksPerFrame)
  * not block capacity. feed() returns no value: results accumulate in counts and
  * complete words go to the configured callback. No disk I/O occurs here.
  */
-void frameDecoder::feed(const uint8_t* data, size_t length)
+void FrameDecoder::feed(const uint8_t* data, size_t length)
 {
     size_t index = 0;
     while (length - index >= 4)
@@ -161,15 +161,15 @@ void frameDecoder::feed(const uint8_t* data, size_t length)
         // rising retains only positions where current FSYNC=1 and previous=0.
         // previousHigh carries the last level across groups AND raw blocks.
         const uint32_t markers = packed & 0xaaaaaaaaU;
-        const uint32_t rising = markers & ~((markers << 2) | (previousHigh ? 2U : 0U));
+        const uint32_t rising = markers & ~((markers << 2) | (_previousHigh ? 2U : 0U));
         if (rising == 0)
         {
-            if (synchronized && bits < 32)
+            if (_synchronized && _bits < 32)
             {
                 appendBits(unpackData(group), 16);
             }
-            counts.clocks += 16;
-            previousHigh = (markers & 0x80000000U) != 0;
+            _captureStats._clocks += 16;
+            _previousHigh = (markers & 0x80000000U) != 0;
         }
         else if ((rising & (rising - 1U)) == 0)
         {
@@ -180,10 +180,10 @@ void frameDecoder::feed(const uint8_t* data, size_t length)
             const unsigned suffix = 16 - prefix;
             const uint32_t payload = unpackData(group);
             appendBits(payload >> suffix, prefix);
-            beginFrame(counts.clocks + prefix);
+            beginFrame(_captureStats._clocks + prefix);
             appendBits(payload & ((1U << suffix) - 1U), suffix);
-            counts.clocks += 16;
-            previousHigh = (markers & 0x80000000U) != 0;
+            _captureStats._clocks += 16;
+            _previousHigh = (markers & 0x80000000U) != 0;
         }
         else
         {
@@ -216,17 +216,17 @@ void frameDecoder::feed(const uint8_t* data, size_t length)
  * frameClocks is 32 at stage 6, larger in slower configurations. Checking this
  * spacing detects some missing/extra clocks but cannot prove none were lost.
  */
-void frameDecoder::beginFrame(uint64_t position)
+void FrameDecoder::beginFrame(uint64_t position)
 {
-    if (synchronized)
+    if (_synchronized)
     {
-        if (position - lastRise != frameClocks) { ++counts.badPeriods; }
-        if (bits != 32) { ++counts.shortWords; }
+        if (position - _lastRise != _frameClocks) { ++_captureStats._badPeriods; }
+        if (_bits != 32) { ++_captureStats._shortWords; }
     }
-    lastRise = position;
-    ++counts.frames;
-    synchronized = true;
-    word = bits = 0;
+    _lastRise = position;
+    ++_captureStats._frames;
+    _synchronized = true;
+    _word = _bits = 0;
 }
 
 /**
@@ -236,15 +236,15 @@ void frameDecoder::beginFrame(uint64_t position)
  * and ignore twelve padding bits. Initial unsynchronized data is also ignored.
  * finishWord runs once at 32 bits; later padding cannot produce extra samples.
  */
-void frameDecoder::appendBits(uint32_t value, unsigned count)
+void FrameDecoder::appendBits(uint32_t value, unsigned count)
 {
-    if (synchronized && bits < 32 && count != 0)
+    if (_synchronized && _bits < 32 && count != 0)
     {
-        const unsigned available = 32 - bits;
+        const unsigned available = 32 - _bits;
         const unsigned take = count < available ? count : available;
-        word = (word << take) | (value >> (count - take));
-        bits += take;
-        if (bits == 32) { finishWord(); }
+        _word = (_word << take) | (value >> (count - take));
+        _bits += take;
+        if (_bits == 32) { finishWord(); }
     }
 }
 
@@ -256,21 +256,21 @@ void frameDecoder::appendBits(uint32_t value, unsigned count)
  * configuration. A period different from the configured frame length is an
  * error, even when the next header happens to look valid.
  */
-void frameDecoder::clockBit(unsigned pair)
+void FrameDecoder::clockBit(unsigned pair)
 {
     const bool high = (pair & 2U) != 0;
-    if (high && !previousHigh)
+    if (high && !_previousHigh)
     {
-        beginFrame(counts.clocks);
+        beginFrame(_captureStats._clocks);
     }
-    if (synchronized && bits < 32)
+    if (_synchronized && _bits < 32)
     {
-        word = (word << 1) | (pair & 1U);
-        ++bits;
-        if (bits == 32) { finishWord(); }
+        _word = (_word << 1) | (pair & 1U);
+        ++_bits;
+        if (_bits == 32) { finishWord(); }
     }
-    previousHigh = high;
-    ++counts.clocks;
+    _previousHigh = high;
+    ++_captureStats._clocks;
 }
 
 /**
@@ -299,32 +299,32 @@ void frameDecoder::clockBit(unsigned pair)
  * The 24-bit two's-complement sample is expanded to signed 32-bit arithmetic;
  * e.g. 0xffffff means -1, not 16777215. This does not check payload correctness.
  */
-void frameDecoder::finishWord()
+void FrameDecoder::finishWord()
 {
-    const unsigned header = word >> 24;
+    const unsigned header = _word >> 24;
 
     // The 256 histogram entries cover every possible status byte. This retains
     // excluded power/saturation flags for reporting even when badHeaders stays 0.
-    ++counts.words;
-    ++counts.headers[header];
+    ++_captureStats._words;
+    ++_captureStats._headers[header];
     if ((header & 0x5fU) != 0x08U)
     {
-        if (counts.badHeaders < 8) { counts.badExamples[counts.badHeaders] = word; }
-        ++counts.badHeaders;
+        if (_captureStats._badHeaders < 8) { _captureStats._badExamples[_captureStats._badHeaders] = _word; }
+        ++_captureStats._badHeaders;
     }
 
     // Interpret bit 23 as the sign. These latest values are diagnostics; the
     // output batch below carries the original status+sample word without changes.
-    counts.latestWord = word;
-    const int32_t value = static_cast<int32_t>(word & 0xffffffU);
-    counts.latestSample = (value & 0x800000) ? value - 0x1000000 : value;
+    _captureStats._latestWord = _word;
+    const int32_t value = static_cast<int32_t>(_word & 0xffffffU);
+    _captureStats._latestSample = (value & 0x800000) ? value - 0x1000000 : value;
 
     // At most 512 complete words per callback. A failure stops later submissions
     // but not decoding/counters, so a storage problem cannot hide input errors.
-    if (output != nullptr && !outputBroken)
+    if (_output != nullptr && !_outputBroken)
     {
-        outputWords[outputCount++] = word;
-        if (outputCount == 512) { flushOutput(); }
+        _outputWords[_outputCount++] = _word;
+        if (_outputCount == 512) { flushOutput(); }
     }
 }
 
@@ -334,10 +334,10 @@ void frameDecoder::finishWord()
  * The callback must copy the words before returning; this array is reused.
  * A false return latches failure until reset; subsequent words remain counted.
  */
-void frameDecoder::setOutput(outputCallback callback, void* context)
+void FrameDecoder::setOutput(outputCallback callback, void* context)
 {
-    output = callback;
-    outputContext = context;
+    _output = callback;
+    _outputContext = context;
 }
 
 /**
@@ -347,12 +347,12 @@ void frameDecoder::setOutput(outputCallback callback, void* context)
  * this outputWords array can be reused immediately; it is not a queued pointer
  * to the raw input block. A false result latches outputBroken until reset().
  */
-void frameDecoder::flushOutput()
+void FrameDecoder::flushOutput()
 {
-    if (outputCount != 0)
+    if (_outputCount != 0)
     {
-        outputBroken = !output(outputWords, outputCount, outputContext);
-        outputCount = 0;
+        _outputBroken = !_output(_outputWords, _outputCount, _outputContext);
+        _outputCount = 0;
     }
 }
 
@@ -360,22 +360,22 @@ void frameDecoder::flushOutput()
  * @brief True if a batch was refused since reset(); later batches are then withheld.
  * Call on the decoder task or after it has finished all queued blocks.
  */
-bool frameDecoder::outputFailed() const
+bool FrameDecoder::outputFailed() const
 {
-    return outputBroken;
+    return _outputBroken;
 }
 
 /**
  * @brief Borrow the counters without copying them; decoding can change them.
  * Core 0 must wait for all queued decoding to finish before reading this reference.
  */
-const captureStats& frameDecoder::stats() const
+const CaptureStats& FrameDecoder::stats() const
 {
-    return counts;
+    return _captureStats;
 }
 
 /** @brief Return unfinished word bits at the captured tail, or zero if complete. */
-uint32_t frameDecoder::pendingBits() const
+uint32_t FrameDecoder::pendingBits() const
 {
-    return synchronized && bits < 32 ? bits : 0;
+    return _synchronized && _bits < 32 ? _bits : 0;
 }

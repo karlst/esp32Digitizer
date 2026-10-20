@@ -13,7 +13,7 @@
  */
 
 /**
- * @file ads127l18.cpp
+ * @file Ads127L18.cpp
  * @brief Read the ADS127L18 registers, allowing for its one-frame reply delay.
  * Reading path: begin() prepares the Feather bus; readRegister() requests a
  * value; transferFrame() performs the actual SPI.transfer() calls. A frame is one
@@ -22,7 +22,7 @@
  * two bytes per frame with CRC disabled. A requested value arrives in the FIRST
  * byte of the NEXT frame, not alongside the request that selected it.
  */
-#include "ads127l18.h"
+#include "Ads127L18.h"
 #include <Arduino.h>
 
 /**
@@ -30,8 +30,8 @@
  * inputPin is Feather MISO (reply), outputPin is MOSI (command), clockPin is
  * SCLK and selectPin is CS. The SPIClass reference must outlive this object.
  */
-ads127l18::ads127l18(SPIClass& bus, int clockPin, int inputPin, int outputPin, int selectPin)
-    : bus(bus), clockPin(clockPin), inputPin(inputPin), outputPin(outputPin), selectPin(selectPin)
+Ads127L18::Ads127L18(SPIClass& spiClass, int clockPin, int inputPin, int outputPin, int selectPin)
+    : _spiClass(spiClass), _clockPin(clockPin), _inputPin(inputPin), _outputPin(outputPin), _selectPin(selectPin)
 {
 
     // Startup is deferred so constructing a global object sends no signals.
@@ -43,17 +43,17 @@ ads127l18::ads127l18(SPIClass& bus, int clockPin, int inputPin, int outputPin, i
  * under our explicit control so every two-byte frame ends at the required point.
  * Returning does not establish ADC presence: SPI has no acknowledgement signal.
  */
-void ads127l18::begin()
+void Ads127L18::begin()
 {
-    if (!initialized)
+    if (!_initialized)
     {
 
         // Preload the output level before enabling it to avoid selecting the ADC
         // unnecessarily while clock/data pins are being assigned to the bus.
-        digitalWrite(selectPin, HIGH);
-        pinMode(selectPin, OUTPUT);
-        bus.begin(clockPin, inputPin, outputPin, -1);
-        initialized = true;
+        digitalWrite(_selectPin, HIGH);
+        pinMode(_selectPin, OUTPUT);
+        _spiClass.begin(_clockPin, _inputPin, _outputPin, -1);
+        _initialized = true;
     }
 }
 
@@ -64,14 +64,14 @@ void ads127l18::begin()
  * simultaneously sends a byte on MOSI and receives one on MISO. Two-microsecond
  * margins around CS greatly exceed TI's nanosecond timing minima at 100 kHz.
  */
-uint8_t ads127l18::transferFrame(uint8_t command, uint8_t data)
+uint8_t Ads127L18::transferFrame(uint8_t command, uint8_t data)
 {
-    digitalWrite(selectPin, LOW);
+    digitalWrite(_selectPin, LOW);
     delayMicroseconds(2);
-    const uint8_t retVal = bus.transfer(command);
-    bus.transfer(data);
+    const uint8_t retVal = _spiClass.transfer(command);
+    _spiClass.transfer(data);
     delayMicroseconds(2);
-    digitalWrite(selectPin, HIGH);
+    digitalWrite(_selectPin, HIGH);
     delayMicroseconds(2);
     return retVal;
 }
@@ -82,22 +82,22 @@ uint8_t ads127l18::transferFrame(uint8_t command, uint8_t data)
  * True means the transfer was performed, NOT that the ADC replied correctly.
  * The diagnostic must check identification and repeatability to judge the link.
  */
-bool ads127l18::readRegister(uint8_t address, uint8_t& value)
+bool Ads127L18::readRegister(uint8_t address, uint8_t& value)
 {
     bool retVal = false;
-    if (initialized && address <= 0x50)
+    if (_initialized && address <= 0x50)
     {
 
         // 100,000 clock bits/s is intentionally slow for initial wiring checks.
         // Mode 1 idles clock low and samples on falling clock edges. No other
         // task uses this bus; begin/endTransaction also establish its settings.
-        bus.beginTransaction(SPISettings(100000, MSBFIRST, SPI_MODE1));
+        _spiClass.beginTransaction(SPISettings(100000, MSBFIRST, SPI_MODE1));
         transferFrame(address, 0);
 
         // Repeat the same harmless request to clock out the first reply. This
         // leaves another read pending; the next call discards that stale reply.
         value = transferFrame(address, 0);
-        bus.endTransaction();
+        _spiClass.endTransaction();
         retVal = true;
     }
     return retVal;
@@ -110,19 +110,19 @@ bool ads127l18::readRegister(uint8_t address, uint8_t& value)
  * not that sample clocks reached the receiver. Reject invalid/read-only addresses and
  * changes that enable SPI CRC, which this two-byte transport does not implement.
  */
-bool ads127l18::writeRegister(uint8_t address, uint8_t value)
+bool Ads127L18::writeRegister(uint8_t address, uint8_t value)
 {
     bool retVal = false;
     const bool writable = address == 2 || (address >= 5 && address <= 0x50);
-    if (initialized && writable && !(address == 0x0a && (value & 0x02)))
+    if (_initialized && writable && !(address == 0x0a && (value & 0x02)))
     {
-        bus.beginTransaction(SPISettings(100000, MSBFIRST, SPI_MODE1));
+        _spiClass.beginTransaction(SPISettings(100000, MSBFIRST, SPI_MODE1));
         transferFrame(static_cast<uint8_t>(0x80 | address), value);
 
         // A harmless ID read clocks out the previous write's echo. TI inverts
         // that echo for rejected writes; no automatic retry conceals a failure.
         retVal = transferFrame(0, 0) == value;
-        bus.endTransaction();
+        _spiClass.endTransaction();
     }
     return retVal;
 }

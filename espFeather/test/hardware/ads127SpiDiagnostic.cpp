@@ -23,11 +23,11 @@
  */
 #include <Arduino.h>
 #include <driver/dac.h>
-#include "ads127l18.h"
+#include "Ads127L18.h"
 #include "ads127Pins.h"
 
 // Global construction only stores references. SPI begins on the first USB 'r'.
-static ads127l18 adc(SPI, ads127Pins::featherClock, ads127Pins::featherMiso,
+static Ads127L18 ads127L18(SPI, ads127Pins::featherClock, ads127Pins::featherMiso,
                      ads127Pins::featherMosi, ads127Pins::featherSelect);
 
 /**
@@ -49,7 +49,7 @@ static void printHelp()
  */
 static void runCheck()
 {
-    adc.begin();
+    ads127L18.begin();
     bool identityOk = true;
     uint8_t firstRevision = 0;
     uint8_t combinedStatus = 0;
@@ -57,8 +57,8 @@ static void runCheck()
     for (unsigned pass = 0; pass < 3; ++pass)
     {
         uint8_t device = 0, revision = 0, status = 0;
-        const bool transferred = adc.readRegister(0x00, device) &&
-            adc.readRegister(0x01, revision) && adc.readRegister(0x02, status);
+        const bool transferred = ads127L18.readRegister(0x00, device) &&
+            ads127L18.readRegister(0x01, revision) && ads127L18.readRegister(0x02, status);
         if (pass == 0)
         {
             firstRevision = revision;

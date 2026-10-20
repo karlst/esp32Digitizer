@@ -13,7 +13,7 @@
  */
 
 /**
- * @file benchDac.h
+ * @file BenchDac.h
  * @brief Opt-in Feather DAC source for the external-input P4 recording test.
  * This is separate from the web application's DAC/ADC loopback service: no
  * Wi-Fi, browser, local analog sampling, or graph allocation is required here.
@@ -31,7 +31,7 @@
  * No DAC output is enabled by construction or initialize(). Objects live for
  * the firmware lifetime; timer/mutex storage is reused between finite runs.
  */
-class benchDac
+class BenchDac
 {
 public:
     bool initialize();
@@ -40,11 +40,11 @@ public:
     bool failed();
 private:
     static void tick(void* context);
-    SemaphoreHandle_t mutex = nullptr;
-    esp_timer_handle_t timer = nullptr;
-    bool enabled = false, broken = false;
-    int64_t beganAt = 0, lastAt = 0;
-    uint32_t updates = 0, missed = 0;
-    uint64_t maxGapUs = 0;
+    SemaphoreHandle_t _mutex = nullptr;
+    esp_timer_handle_t _timer = nullptr;
+    bool _enabled = false, _broken = false;
+    int64_t _beganAt = 0, _lastAt = 0;
+    uint32_t _updates = 0, _missed = 0;
+    uint64_t _maxGapUs = 0;
 };
 #endif

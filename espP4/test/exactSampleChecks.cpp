@@ -23,7 +23,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <vector>
-#include "frameDecoder.h"
+#include "FrameDecoder.h"
 #include "recordingFormat.h"
 
 /** @brief Convert a low-24-bit test pattern into its signed numeric meaning. */
@@ -133,10 +133,10 @@ static void checkCase(const std::vector<int32_t>& expected, unsigned frameClocks
 {
     auto wire = encodeWire(expected, frameClocks, phase);
     wire.insert(wire.begin(), memoryOffset, 0xa5);
-    frameDecoder decoder;
+    FrameDecoder frameDecoder;
     std::vector<uint32_t> words;
-    decoder.setOutput(collectWords, &words);
-    decoder.reset(frameClocks);
+    frameDecoder.setOutput(collectWords, &words);
+    frameDecoder.reset(frameClocks);
     const size_t descriptors[] = {4032,4032,4032,4032,4032,4032,4032,2240,2304};
     size_t position = memoryOffset, block = 0;
     while (position < wire.size())
@@ -147,14 +147,14 @@ static void checkCase(const std::vector<int32_t>& expected, unsigned frameClocks
         else if (mode == 2) { length = 4032; }
         else if (mode == 3) { length = descriptors[block % 9]; }
         length = std::min(length, wire.size() - position);
-        decoder.feed(wire.data() + position, length);
+        frameDecoder.feed(wire.data() + position, length);
         position += length;
         ++block;
     }
     require(words.size() == expected.size(), "decoded sample count differs (missing/extra output)");
-    const auto& stats = decoder.stats();
-    require(stats.words == expected.size() && stats.badHeaders == 0 && stats.badPeriods == 0 &&
-            stats.shortWords == 0 && !decoder.outputFailed(), "decoder counters report a fault");
+    const auto& captureStats = frameDecoder.stats();
+    require(captureStats._words == expected.size() && captureStats._badHeaders == 0 && captureStats._badPeriods == 0 &&
+            captureStats._shortWords == 0 && !frameDecoder.outputFailed(), "decoder counters report a fault");
 
     // Check raw status+sample words directly, before testing the recording packer.
     std::vector<int32_t> actual;
@@ -205,16 +205,16 @@ static void checkChangedWireBit(const std::vector<int32_t>& expected)
     auto wire = encodeWire(expected, 32, 1);
     const size_t clock = 5 + 10 * 32 + 31;
     wire[clock / 4] ^= static_cast<uint8_t>(1U << (2 * (clock % 4)));
-    frameDecoder decoder;
+    FrameDecoder frameDecoder;
     std::vector<uint32_t> words;
-    decoder.setOutput(collectWords, &words);
-    decoder.reset(32);
-    decoder.feed(wire.data(), wire.size());
+    frameDecoder.setOutput(collectWords, &words);
+    frameDecoder.reset(32);
+    frameDecoder.feed(wire.data(), wire.size());
     require(words.size() == expected.size(), "bit-change control unexpectedly changed sample count");
     std::vector<int32_t> actual;
     for (uint32_t word : words) { actual.push_back(signedPattern(word)); }
     require(mismatchAt(expected, actual) == 10, "known-sequence check missed a changed wire data bit");
-    require(decoder.stats().badHeaders == 0, "bit-change control accidentally altered a header");
+    require(frameDecoder.stats()._badHeaders == 0, "bit-change control accidentally altered a header");
 }
 
 /** @brief Run all boundary cases plus deliberately altered sequence checks. */

@@ -13,7 +13,7 @@
  */
 
 /**
- * @file ads127BenchRate.h
+ * @file Ads127BenchRate.h
  * @brief Shared ADC/receiver timing for capture qualification through 1.024 Msample/s.
  * The EVM clock is 32.768 MHz and the modulator uses half that frequency.
  * OSR is how many modulator readings the filter combines per output sample.
@@ -24,16 +24,16 @@
 #include <cstdint>
 
 /** @brief ADC clock/OSR choices; S3 reception passed through 256k and failed above it. */
-struct ads127BenchRate
+struct Ads127BenchRate
 {
-    uint32_t samplesPerSecond;
-    uint16_t osr;
-    uint8_t filterCode;
-    uint8_t clockDividerCode;
-    uint8_t slots;
+    uint32_t _samplesPerSecond;
+    uint16_t _osr;
+    uint8_t _filterCode;
+    uint8_t _clockDividerCode;
+    uint8_t _slots;
 };
 
-static constexpr ads127BenchRate ads127BenchRates[] = {
+static constexpr Ads127BenchRate ads127BenchRates[] = {
     {16000, 1024, 0x10, 0x60, 8},
     {32000, 512, 0x0f, 0x60, 4},
     {64000, 256, 0x0e, 0x60, 2},

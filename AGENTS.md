@@ -7,7 +7,22 @@ These conventions apply throughout this project and may be updated as developmen
 - Document logical paragraphs or blocks of code with `//` comments from the start. Explain their purpose and non-obvious decisions rather than simply repeating the code.
 - Separate logical paragraphs with a blank line before standalone comment blocks.
 - Update comments whenever the corresponding code changes so they remain accurate.
-- Use camelCase for C++ and JavaScript identifiers.
+- Use PascalCase for project-owned C++ class and struct names. Class files match
+  the class name (for example, `SdRecorder.h` and `SdRecorder.cpp`). Small nested
+  record types may remain with the owning class.
+- Prefix every class/struct data member, including static members, with `_`.
+  Use a lowercase first letter after the underscore; avoid reserved double
+  underscores and underscore-uppercase names.
+- Use camelCase for methods, functions, ordinary variables and JavaScript identifiers.
+  Name class instances after their type (`SdRecorder sdRecorder`), adding a
+  meaningful qualifier when needed (`sdRecorderBackup`). Member instances combine
+  both rules (`SdRecorder _sdRecorder`). Collection names may be plural; result
+  variables may remain `retVal`. Preserve names required by framework APIs,
+  including Arduino's Serial/Serial1/ESP globals and fake SDK interfaces.
+- Production startup files construct application services and invoke the real
+  application class. Test startup supplies test services through ordinary
+  interfaces. Do not instantiate concrete test/profile classes in production
+  or duplicate the recording/acquisition implementation.
 - Prefer a single return point in each function. For functions that return a value, assign the result to `retVal` and return it at the end. Multiple return points are allowed when a single return point would make the code awkward.
 - Do not use `continue` statements.
 - Always use curly brackets for `if` statements, including single-statement bodies. Use braces for associated `else` branches as well.
@@ -16,9 +31,10 @@ These conventions apply throughout this project and may be updated as developmen
 
 ## Required explanation level (confirmed by Karl, 2026-09-30)
 
-- Use the explanatory level approved in `espS3/src/ads1256.cpp` and
-  `espS3/src/acquisition.cpp` as the baseline for ALL project code, including
-  future changes. Do this during implementation; do not wait to be asked again.
+- Apply the explanatory requirements below to ALL code, including tests and
+  future changes. The original S3 examples were removed with that project;
+  `espP4/main/src/RecordingApplication.cpp` documents the current transfer path.
+  Do this during implementation; do not wait to be asked again.
 - Write for a capable reader who does not already know embedded systems or the
   framework. Explain the execution sequence, who calls each function, what its
   arguments and return value mean, and what success does and does not establish.

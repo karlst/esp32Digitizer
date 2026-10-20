@@ -13,36 +13,17 @@
  */
 
 /**
- * @file frameDecoder.h
+ * @file FrameDecoder.h
  * @brief Reconstruct ADC samples from saved data-pin and sample-start-pin values.
  * Read feed() first, then beginFrame(), appendBits() and finishWord(). No hardware or RTOS
  * dependency: the same decoder is exercised by the desktop test program.
  */
 #pragma once
+#include "CaptureStats.h"
 #include <cstddef>
 #include <cstdint>
 
-/**
- * @brief Counts of what arrived, not proof that every ADC bit arrived.
- * clocks counts captured clock positions; frames counts FSYNC rising edges;
- * words counts complete 32-bit status+sample values. badPeriods counts wrong
- * distances between frame starts; shortWords counts a new start interrupting
- * an unfinished word. headers counts each possible status byte; badExamples
- * keeps the first eight words whose status failed the mask in finishWord().
- */
-struct captureStats
-{
-    uint64_t clocks = 0;
-    uint32_t frames = 0;
-    uint32_t words = 0;
-    uint32_t badHeaders = 0;
-    uint32_t badPeriods = 0;
-    uint32_t shortWords = 0;
-    uint32_t latestWord = 0;
-    int32_t latestSample = 0;
-    uint32_t headers[256] = {};
-    uint32_t badExamples[8] = {};
-};
+
 
 /**
  * @brief Core 1's decoder keeps unfinished samples between raw input blocks.
@@ -60,7 +41,7 @@ struct captureStats
  * This class owns no DMA buffer or ready/free queue. main.cpp supplies each raw
  * block and must not return it to freeBlocks until feed() has finished reading.
  */
-class frameDecoder
+class FrameDecoder
 {
 public:
     using outputCallback = bool (*)(const uint32_t*, size_t, void*);
@@ -68,24 +49,24 @@ public:
     bool outputFailed() const;
     void reset(uint32_t clocksPerFrame);
     void feed(const uint8_t* data, size_t length);
-    const captureStats& stats() const;
+    const CaptureStats& stats() const;
     uint32_t pendingBits() const;
 private:
     void flushOutput();
-    outputCallback output = nullptr;
-    void* outputContext = nullptr;
-    uint32_t outputWords[512] = {};
-    size_t outputCount = 0;
-    bool outputBroken = false;
+    outputCallback _output = nullptr;
+    void* _outputContext = nullptr;
+    uint32_t _outputWords[512] = {};
+    size_t _outputCount = 0;
+    bool _outputBroken = false;
     void beginFrame(uint64_t position);
     void appendBits(uint32_t value, unsigned count);
     void clockBit(unsigned pair);
     void finishWord();
-    captureStats counts = {};
-    uint64_t lastRise = 0;
-    uint32_t frameClocks = 0;
-    uint32_t word = 0;
-    uint32_t bits = 0;
-    bool previousHigh = true;
-    bool synchronized = false;
+    CaptureStats _captureStats = {};
+    uint64_t _lastRise = 0;
+    uint32_t _frameClocks = 0;
+    uint32_t _word = 0;
+    uint32_t _bits = 0;
+    bool _previousHigh = true;
+    bool _synchronized = false;
 };

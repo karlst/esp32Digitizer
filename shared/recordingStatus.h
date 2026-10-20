@@ -13,7 +13,7 @@
  */
 
 /**
- * @file recordingStatus.h
+ * @file RecordingStatus.h
  * @brief Recording values shared by S3 storage and Feather's status receiver.
  * UART version 5 adds opening time and space quality to version 4 recording fields.
  * Positions are byte offsets; totals and times belong to the current/last recording.
@@ -28,7 +28,7 @@
  * firmware or a disconnected board. bytesWritten counts successful file writes,
  * including headers; samplesWritten counts only complete sample payloads.
  */
-struct recordingStatus
+struct RecordingStatus
 {
     // State: idle, preparing, recording, saving, saved, failed, deleting.
     // Card: unknown, ready, missing, unsupported filesystem, I/O failure.
@@ -50,7 +50,7 @@ struct recordingStatus
     // lostSamples counts explicitly rejected/unsaved records, not unseen ADC events.
     // writeErrors counts failed measured operations; deletedFiles counts successful
     // removals in the latest delete request, including progress before any failure.
-    uint64_t values[26] = {};
+    uint64_t _values[26] = {};
     // Numeric field indexes are shared so the two boards cannot quietly disagree
     // about column order. A fixed session/part pair generates the safe filename.
     enum field : size_t
@@ -60,8 +60,8 @@ struct recordingStatus
         readPosition, bytesPerSecond, latestDelayUs, maxDelayUs, maxDelayAtMs,
         maxDelayKind, overflows, lostSamples, writeErrors, deletedFiles, fileOpenUs, freeSpaceMode
     };
-    static constexpr size_t legacyFieldCount = 24;
-    static constexpr size_t fieldCount = 26;
+    static constexpr size_t _legacyFieldCount = 24;
+    static constexpr size_t _fieldCount = 26;
     // 0 unavailable/older firmware, 1 measured, 2 estimated during recording,
     // 3 stale after a failed scan. A stale number is never labeled measured.
     enum spaceCode : uint32_t { spaceUnknown, spaceMeasured, spaceEstimated, spaceStale };
@@ -73,7 +73,7 @@ struct recordingStatus
      */
     static const char* fieldName(size_t index)
     {
-        static const char* const names[fieldCount] = {
+        static const char* const names[_fieldCount] = {
             "state", "card", "enabled", "session", "part", "elapsedMs", "bytesWritten", "samplesWritten",
             "cardBytes", "freeBytes", "bufferBytes", "usedBytes", "peakBytes", "writePosition",
             "readPosition", "bytesPerSecond", "latestDelayUs", "maxDelayUs", "maxDelayAtMs",
@@ -100,7 +100,7 @@ struct recordingStatus
     {
         // Use a short local name for the same array; no copy is made. All values
         // are already unsigned, so validation focuses on limits and relationships.
-        const auto* v = values;
+        const auto* v = _values;
         const bool retVal = v[state] <= deleting && v[card] <= ioFailure && v[enabled] <= 1 &&
             v[session] <= UINT32_MAX && v[part] <= UINT32_MAX && v[maxDelayKind] <= 2 &&
             v[freeSpaceMode] <= spaceStale && v[freeBytes] <= v[cardBytes] && v[bufferBytes] <= UINT32_MAX &&

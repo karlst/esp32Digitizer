@@ -13,7 +13,7 @@
  */
 
 /**
- * @file byteSink.h
+ * @file ByteSink.h
  * @brief Small storage interface used by the reusable buffered writer.
  */
 #pragma once
@@ -30,13 +30,13 @@
  * supplies them for this project; a different project can supply another class
  * without changing the buffer. The default destructor does not save/close data.
  */
-class byteSink
+class ByteSink
 {
 public:
     /**
      * @brief Allow destruction through the interface after the writer stops.
      */
-    virtual ~byteSink() = default;
+    virtual ~ByteSink() = default;
 
     // The ring calls this from its consumer task. Read length bytes at data and
     // return how many the storage API accepted. Do not retain data after returning:

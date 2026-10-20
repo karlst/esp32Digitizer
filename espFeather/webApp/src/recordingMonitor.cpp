@@ -13,10 +13,10 @@
  */
 
 /**
- * @file recordingMonitor.cpp
+ * @file RecordingMonitor.cpp
  * @brief Convert validated recording numbers to exact decimal JSON strings.
  */
-#include "recordingMonitor.h"
+#include "RecordingMonitor.h"
 #include <cstdio>
 
 /**
@@ -35,22 +35,22 @@
  * quoted strings for a consistent schema. JavaScript Number cannot represent all
  * 64-bit integer totals exactly, so totals must not be sent as unquoted numbers.
  */
-String recordingMonitor::stateJson(bool connected) const
+String RecordingMonitor::stateJson(bool connected) const
 {
     String retVal = "null";
-    if (connected && available)
+    if (connected && _available)
     {
         retVal = "{";
         // Translate the shared numeric field order into named JSON properties.
         // The fixed field names and decimal-only values need no arbitrary text escaping.
-        for (size_t index = 0; index < recordingStatus::fieldCount; ++index)
+        for (size_t index = 0; index < RecordingStatus::_fieldCount; ++index)
         {
             // An unsigned 64-bit number needs at most 20 digits plus a terminator.
             // Format through an unsigned long long to match the %llu conversion.
             char value[24];
-            snprintf(value, sizeof(value), "%llu", static_cast<unsigned long long>(status.values[index]));
+            snprintf(value, sizeof(value), "%llu", static_cast<unsigned long long>(_recordingStatus._values[index]));
             if (index) { retVal += ','; }
-            retVal += "\"" + String(recordingStatus::fieldName(index)) + "\":\"" + String(value) + "\"";
+            retVal += "\"" + String(RecordingStatus::fieldName(index)) + "\":\"" + String(value) + "\"";
         }
         retVal += '}';
     }

@@ -13,18 +13,19 @@
 # Add bench implementations to the existing receiver without copying its decoder
 # or recorder. CMAKE_CURRENT_LIST_DIR is this test directory, not main/.
 target_sources(${COMPONENT_LIB} PRIVATE
-    "${CMAKE_CURRENT_LIST_DIR}/hardware/sdWriteTest.cpp"
-    "${CMAKE_CURRENT_LIST_DIR}/hardware/ramWaveform.cpp")
+    "${CMAKE_CURRENT_LIST_DIR}/hardware/RecordingHarness.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/hardware/SdWriteTest.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/hardware/RamWaveform.cpp")
 target_include_directories(${COMPONENT_LIB} PRIVATE
     "${CMAKE_CURRENT_LIST_DIR}/hardware"
     "${CMAKE_CURRENT_LIST_DIR}/profile")
 
 # Only the profiling build collects CPU use and selects the shorter duration.
 if(CONFIG_P4_HARDWARE_SMOKE)
-    target_sources(${COMPONENT_LIB} PRIVATE "${CMAKE_CURRENT_LIST_DIR}/hardware/sdSmokeSummary.cpp")
+    target_sources(${COMPONENT_LIB} PRIVATE "${CMAKE_CURRENT_LIST_DIR}/hardware/SdSmokeSummary.cpp")
     target_compile_definitions(${COMPONENT_LIB} PRIVATE ADS127_HARDWARE_SMOKE=1)
 elseif(CONFIG_P4_CAPTURE_PROFILE)
-    target_sources(${COMPONENT_LIB} PRIVATE "${CMAKE_CURRENT_LIST_DIR}/profile/captureProfile.cpp")
+    target_sources(${COMPONENT_LIB} PRIVATE "${CMAKE_CURRENT_LIST_DIR}/profile/CaptureProfile.cpp")
     target_compile_definitions(${COMPONENT_LIB} PRIVATE ADS127_P4_LONG_RUN=1)
 else()
     target_compile_definitions(${COMPONENT_LIB} PRIVATE ADS127_P4_ENDURANCE=1)

@@ -13,11 +13,11 @@
  */
 
 /**
- * @file bufferedWriter.h
+ * @file BufferedWriter.h
  * @brief Reusable byte recording with an owned ring buffer and measured disk delays.
  */
 #pragma once
-#include "byteSink.h"
+#include "ByteSink.h"
 #include <atomic>
 #ifndef BUFFERED_WRITER_CAPACITY
 #define BUFFERED_WRITER_CAPACITY 65536
@@ -52,51 +52,51 @@ static_assert(ATOMIC_INT_LOCK_FREE == 2 && ATOMIC_BOOL_LOCK_FREE == 2,
  * be inaccessible when flash operations disable the cache. Keep the control
  * object/atomic counters in internal RAM in either case.
  */
-class bufferedWriter
+class BufferedWriter
 {
 public:
     // Configuration is in bytes; power-of-two capacity permits cheap wraparound.
     // All translation units must use the same build flags (including consumers).
-    static constexpr uint32_t capacity = BUFFERED_WRITER_CAPACITY;
-    static constexpr uint32_t blockBytes = BUFFERED_WRITER_BLOCK_BYTES;
-    static_assert(capacity && !(capacity & (capacity - 1)) && capacity < 0x80000000u,
+    static constexpr uint32_t _capacity = BUFFERED_WRITER_CAPACITY;
+    static constexpr uint32_t _blockBytes = BUFFERED_WRITER_BLOCK_BYTES;
+    static_assert(_capacity && !(_capacity & (_capacity - 1)) && _capacity < 0x80000000u,
         "Ring capacity must be a power of two below 2 GiB");
-    static_assert(blockBytes && capacity % blockBytes == 0, "Blocks must divide the ring");
+    static_assert(_blockBytes && _capacity % _blockBytes == 0, "Blocks must divide the ring");
 #if BUFFERED_WRITER_EXTERNAL
 
     /** @brief Create an unallocated writer; initializeMemory must precede start. */
-    bufferedWriter() = default;
-    ~bufferedWriter();
+    BufferedWriter() = default;
+    ~BufferedWriter();
     bool initializeMemory(uint8_t* (*allocate)(uint32_t), void (*release)(uint8_t*));
-    bufferedWriter(const bufferedWriter&) = delete;
-    bufferedWriter& operator=(const bufferedWriter&) = delete;
+    BufferedWriter(const BufferedWriter&) = delete;
+    BufferedWriter& operator=(const BufferedWriter&) = delete;
 #endif
 
     /**
      * @brief Consumer-owned totals; bytes are payload, independent of record format.
      */
-    struct statistics
+    struct Statistics
     {
         // Payload bytes accepted by write(), excluding file headers the adapter writes.
-        uint64_t bytes = 0;
+        uint64_t _bytes = 0;
 
         // Microseconds since writer.start(); excludes earlier file preparation, includes final saving.
-        uint64_t elapsedUs = 0;
-        uint64_t maxAtUs = 0;
+        uint64_t _elapsedUs = 0;
+        uint64_t _maxAtUs = 0;
 
         // Bytes explicitly offered but refused by submit(); not unseen ADC events.
         // The producer accumulator is 32-bit; this widened snapshot does not extend it.
-        uint64_t rejectedBytes = 0;
-        uint32_t unsavedBytes = 0; // Retained bytes not accepted after a partial write.
-        uint32_t used = 0, peak = 0, readPosition = 0, writePosition = 0;
-        uint32_t latestUs = 0, maxUs = 0, maxKind = 0;
+        uint64_t _rejectedBytes = 0;
+        uint32_t _unsavedBytes = 0; // Retained bytes not accepted after a partial write.
+        uint32_t _used = 0, _peak = 0, _readPosition = 0, _writePosition = 0;
+        uint32_t _latestUs = 0, _maxUs = 0, _maxKind = 0;
 
         // overflows is a latched 0/1 incident flag per recording. errors counts failed
         // measured storage calls; neither counter estimates every possible physical loss.
-        uint32_t overflows = 0, errors = 0;
+        uint32_t _overflows = 0, _errors = 0;
     };
-    void start(byteSink& destination, uint64_t (*clockUs)());
-    // Place submit's instructions in internal RAM for the S3 interrupt caller.
+    void start(ByteSink& byteSink, uint64_t (*clockUs)());
+    // Keep submit in internal RAM for platforms that permit interrupt submissions.
     // The definition inherits this attribute. Repeating it there would generate
     // a different ESP-IDF section label and cause a compiler conflict.
     bool BUFFERED_IRAM submit(const uint8_t* data, uint32_t length);
@@ -104,7 +104,7 @@ public:
     bool finish();
     void cancel();
     bool failed() const;
-    statistics snapshot();
+    Statistics snapshot();
     uint32_t queuedBytes() const;
     void measure(uint64_t startedUs, uint32_t kind, bool success);
 private:
@@ -114,10 +114,10 @@ private:
 
     // Owned allocation, not a borrowed mutable array. The platform supplies the
     // allocation/free functions; this reusable library has no PSRAM dependency.
-    uint8_t* buffer = nullptr;
-    void (*releaseMemory)(uint8_t*) = nullptr;
+    uint8_t* _buffer = nullptr;
+    void (*_releaseMemory)(uint8_t*) = nullptr;
 #else
-    alignas(4) uint8_t buffer[capacity] = {};
+    alignas(4) uint8_t _buffer[_capacity] = {};
 #endif
 
     // Monotonic unsigned counters wrap naturally. Their difference is occupied
@@ -125,19 +125,19 @@ private:
     // Producer writes head/peak/rejected; consumer writes tail. Atomic means the
     // other CPU cannot observe half of an update. This does NOT make an entire
     // operation atomic; correctness also depends on exactly one producer/consumer.
-    std::atomic<uint32_t> head{0}, tail{0}, peak{0}, rejected{0};
+    std::atomic<uint32_t> _head{0}, _tail{0}, _peak{0}, _rejected{0};
 
     // Both sides can report failure through broken. overflowed specifically
     // remembers running out of ring space, even if a later flush also fails.
-    std::atomic<bool> broken{false}, overflowed{false};
+    std::atomic<bool> _broken{false}, _overflowed{false};
 
     // Borrowed destination; all fields below are used by the disk task only.
-    byteSink* sink = nullptr;
-    uint64_t (*clockUs)() = nullptr;
-    uint64_t startedUs = 0;
-    bool active = false;
+    ByteSink* _byteSink = nullptr;
+    uint64_t (*_clockUs)() = nullptr;
+    uint64_t _startedUs = 0;
+    bool _active = false;
 
     // Accepted prefix of a failed block. Used for accounting, never automatic retry.
-    uint32_t partialBytes = 0;
-    statistics totals;
+    uint32_t _partialBytes = 0;
+    Statistics _statistics;
 };

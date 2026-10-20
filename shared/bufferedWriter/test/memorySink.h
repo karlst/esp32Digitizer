@@ -13,11 +13,11 @@
  */
 
 /**
- * @file memorySink.h
+ * @file MemorySink.h
  * @brief In-memory byte destination for the reusable writer's desktop tests.
  */
 #pragma once
-#include <bufferedWriter.h>
+#include <BufferedWriter.h>
 #include <vector>
 #include <cassert>
 extern uint64_t writerTestUs;
@@ -25,12 +25,12 @@ extern uint64_t writerTestUs;
 /**
  * @brief In-memory storage with controllable latency and failures.
  */
-class memorySink : public byteSink
+class MemorySink : public ByteSink
 {
 public:
-    std::vector<uint8_t> bytes;
-    bool shortWrite = false, flushOk = true;
-    bufferedWriter* duringWrite = nullptr;
+    std::vector<uint8_t> _bytes;
+    bool _shortWrite = false, _flushOk = true;
+    BufferedWriter* _bufferedWriterDuringWrite = nullptr;
 
     /**
      * @brief Copy accepted bytes; optionally force producer activity while blocked.
@@ -44,21 +44,21 @@ public:
         // Retain a reference copy to detect whether concurrent submissions illegally
         // reused the block still being written.
         const std::vector<uint8_t> before(data, data + length);
-        if (duringWrite)
+        if (_bufferedWriterDuringWrite)
         {
             const uint8_t sample[4] = {9, 8, 7, 6};
-            while (duringWrite->submit(sample, 4)) {}
+            while (_bufferedWriterDuringWrite->submit(sample, 4)) {}
 
             // Buffer space must not be released until this call returns.
             assert(std::vector<uint8_t>(data, data + length) == before);
-            duringWrite = nullptr;
+            _bufferedWriterDuringWrite = nullptr;
         }
 
         // Pretend the write took 12 ms and accept either the full span or a short
         // prefix. The real writer should report exactly those simulated results.
         writerTestUs += 12000;
-        const size_t retVal = shortWrite ? length - 1 : length;
-        bytes.insert(bytes.end(), data, data + retVal);
+        const size_t retVal = _shortWrite ? length - 1 : length;
+        _bytes.insert(_bytes.end(), data, data + retVal);
         return retVal;
     }
 
@@ -67,6 +67,6 @@ public:
      * Advance simulated time, not real wall-clock time; no 45-ms sleep occurs.
      * Returning flushOk lets the test prove a failed synchronization is not hidden.
      */
-    bool flush() override { writerTestUs += 45000; return flushOk; }
+    bool flush() override { writerTestUs += 45000; return _flushOk; }
 };
 

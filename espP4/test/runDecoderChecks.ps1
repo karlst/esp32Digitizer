@@ -26,15 +26,15 @@ $batch = @"
 @echo off
 call "$environmentScript" >nul
 if %errorlevel% neq 0 exit /b 1
-cl /nologo /std:c++17 /O2 /EHsc /W4 /DADS127_P4_ENDURANCE=1 /I"$projectRoot/main/include" /I"$projectRoot/test/hardware" /I"$projectRoot/test/profile" /I"$projectRoot/../shared" "$projectRoot/test/decoderChecks.cpp" "$projectRoot/main/src/frameDecoder.cpp" /Fe:decoderChecks.exe
+cl /nologo /std:c++17 /O2 /EHsc /W4 /DADS127_P4_ENDURANCE=1 /I"$projectRoot/main/include" /I"$projectRoot/test/hardware" /I"$projectRoot/test/profile" /I"$projectRoot/../shared" "$projectRoot/test/decoderChecks.cpp" "$projectRoot/main/src/FrameDecoder.cpp" /Fe:decoderChecks.exe
 if %errorlevel% neq 0 exit /b 1
 decoderChecks.exe
 if %errorlevel% neq 0 exit /b 1
-cl /nologo /std:c++17 /O2 /EHsc /W4 /DBUFFERED_WRITER_EXTERNAL=1 /DBUFFERED_WRITER_CAPACITY=4194304 /DBUFFERED_WRITER_BLOCK_BYTES=131072 /I"$writerRoot/src" "$writerRoot/test/main.cpp" "$writerRoot/test/bufferedWriterChecks.cpp" "$writerRoot/src/bufferedWriter.cpp" /Fe:externalWriterChecks.exe
+cl /nologo /std:c++17 /O2 /EHsc /W4 /DBUFFERED_WRITER_EXTERNAL=1 /DBUFFERED_WRITER_CAPACITY=4194304 /DBUFFERED_WRITER_BLOCK_BYTES=131072 /I"$writerRoot/src" "$writerRoot/test/main.cpp" "$writerRoot/test/bufferedWriterChecks.cpp" "$writerRoot/src/BufferedWriter.cpp" /Fe:externalWriterChecks.exe
 if %errorlevel% neq 0 exit /b 1
 externalWriterChecks.exe
 if %errorlevel% neq 0 exit /b 1
-cl /nologo /std:c++17 /O2 /EHsc /W4 /DBUFFERED_WRITER_EXTERNAL=1 /DBUFFERED_WRITER_CAPACITY=4194304 /DBUFFERED_WRITER_BLOCK_BYTES=131072 /I"$writerRoot/src" "$projectRoot/test/writerRolloverChecks.cpp" "$writerRoot/src/bufferedWriter.cpp" /Fe:writerRolloverChecks.exe
+cl /nologo /std:c++17 /O2 /EHsc /W4 /DBUFFERED_WRITER_EXTERNAL=1 /DBUFFERED_WRITER_CAPACITY=4194304 /DBUFFERED_WRITER_BLOCK_BYTES=131072 /I"$writerRoot/src" "$projectRoot/test/writerRolloverChecks.cpp" "$writerRoot/src/BufferedWriter.cpp" /Fe:writerRolloverChecks.exe
 if %errorlevel% neq 0 exit /b 1
 writerRolloverChecks.exe
 exit /b %errorlevel%

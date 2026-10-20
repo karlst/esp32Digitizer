@@ -1,8 +1,0 @@
-Reusable recording core: bufferedWriter/
-
-Read bufferedWriter/src/bufferedWriter.h for ownership and concurrency rules.
-The library owns the ring and writes bytes through byteSink. It has no ADC,
-Feather, SD wiring, filesystem, sample encoding, or FreeRTOS dependency.
-
-Project integration and the reading guide live in ../src/backend/.
-Desktop failure/wraparound tests live in ../test/writerChecks.cpp.

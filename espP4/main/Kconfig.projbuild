@@ -12,6 +12,15 @@
 
 menu "P4 capture diagnostics"
 
+config P4_DIAGNOSTICS
+    bool "Include manual RAM and generated-data SD tests"
+    default n
+    help
+        Select test startup with w/t/u/s commands. Ordinary recording leaves
+        this disabled and contains no test generator or RAM summary objects.
+        Smoke and profiling builds select test startup automatically.
+
+
 config P4_HARDWARE_SMOKE
     bool "Thirty-second DAC-to-SD hardware smoke test"
     default n

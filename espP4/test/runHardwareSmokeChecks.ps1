@@ -24,7 +24,7 @@ $batch = @"
 @echo off
 call "$environmentScript" >nul
 if %errorlevel% neq 0 exit /b 1
-cl /nologo /std:c++17 /O2 /EHsc /W4 /DADS127_HARDWARE_SMOKE=1 /I"$projectRoot/../espFeather/test/hardware" /I"$projectRoot/main/include" /I"$projectRoot/test/hardware" /I"$projectRoot/test/profile" /I"$projectRoot/../shared" "$projectRoot/test/hardwareSmokeChecks.cpp" "$projectRoot/test/hardware/sdSmokeSummary.cpp" /Fe:hardwareSmokeChecks.exe
+cl /nologo /std:c++17 /O2 /EHsc /W4 /DADS127_HARDWARE_SMOKE=1 /I"$projectRoot/../espFeather/test/hardware" /I"$projectRoot/main/include" /I"$projectRoot/test/hardware" /I"$projectRoot/test/profile" /I"$projectRoot/../shared" "$projectRoot/test/hardwareSmokeChecks.cpp" "$projectRoot/test/hardware/SdSmokeSummary.cpp" /Fe:hardwareSmokeChecks.exe
 if %errorlevel% neq 0 exit /b 1
 hardwareSmokeChecks.exe
 exit /b %errorlevel%

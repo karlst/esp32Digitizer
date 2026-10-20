@@ -12,7 +12,7 @@
  * Public License in the repository LICENSE file or <https://www.gnu.org/licenses/>.
  */
 
-/** @file sdSmokeSummary.h
+/** @file SdSmokeSummary.h
  * @brief Summarize actual SD readback bytes for the thirty-second hardware test.
  * The SD writer task owns this object after capture stops. accept() receives
  * only bytes returned by f_read, never the live decoder or its RAM samples.
@@ -20,6 +20,7 @@
  * recorder checksum check. This class does not decide analog accuracy.
  */
 #pragma once
+#include "RecordingReadback.h"
 #include <cstddef>
 #include <cstdint>
 
@@ -28,7 +29,7 @@
  * A partial sample survives read boundaries: FF FF followed by FF means -1.
  * No allocation or hardware access occurs; the caller owns read-buffer memory.
  */
-class sdSmokeSummary
+class SdSmokeSummary : public RecordingReadback
 {
 public:
     void reset(uint32_t samplesPerSecond);
@@ -38,10 +39,10 @@ public:
     uint64_t sampleCount() const;
     void report(uint32_t run, bool storageClean) const;
 private:
-    int64_t sums[300] = {};
-    uint32_t counts[300] = {};
-    uint64_t samples = 0;
-    uint32_t rate = 0, partial = 0;
-    unsigned partialBytes = 0;
-    uint64_t clipped = 0;
+    int64_t _sums[300] = {};
+    uint32_t _counts[300] = {};
+    uint64_t _samples = 0;
+    uint32_t _rate = 0, _partial = 0;
+    unsigned _partialBytes = 0;
+    uint64_t _clipped = 0;
 };

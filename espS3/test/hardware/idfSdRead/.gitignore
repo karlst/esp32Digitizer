@@ -1,4 +1,0 @@
-# Machine-generated ESP-IDF configurations and build outputs.
-sdkconfig.*
-!sdkconfig.defaults
-build/

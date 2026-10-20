@@ -6,7 +6,6 @@
 | --- | --- | --- |
 | `espP4` | Espressif ESP-IDF, using `idf.py` | ESP-IDF directly |
 | `espFeather` | PlatformIO | Arduino for ESP32 |
-| `espS3` | PlatformIO | Arduino for ESP32; legacy recorder |
 | `shared` | Compiled by the board projects | No separate firmware build |
 
 ESP-IDF means **Espressif IoT Development Framework**. Espressif makes the ESP32
@@ -91,7 +90,11 @@ see [current setup](../espP4/CURRENT-SETUP.md).
 
 ESP-IDF still finds its application component in `main`. Implementations are in
 `main/src`; headers are in `main/include`; `main/CMakeLists.txt` lists both.
-Tests and profiling remain under `test` and use the same decoder and recorder.
+Tests and profiling remain under `test` and use the same application, decoder and
+recorder. Ordinary startup contains no test objects. Smoke/profile select test
+startup automatically. To enable manual RAM/SD speed commands in another test
+build, enable `P4_DIAGNOSTICS` through menuconfig in a separate configuration.
+See [source layout](../espP4/test/SOURCE-LAYOUT.md).
 
 ## Feather: ordinary PowerShell
 
@@ -106,6 +109,18 @@ set of sources and compiler settings; see [current setup](../espP4/CURRENT-SETUP
 The environments live in `espFeather/test/platformio.ini`. Application sources
 are in `src`, headers in `include`, and hardware test entry points in `test`.
 
+### Ordinary external-input recording controller
+
+This build has no test DAC or local A2 measurement service. It expects an external
+signal and runs a selected sampling rate for 30 minutes, matching ordinary P4:
+
+```powershell
+& "$env:USERPROFILE\.platformio\penv\Scripts\platformio.exe" run --project-dir .\espFeather -e recording
+```
+
+The default remains the previously selected constant-input test; choose `-e`
+explicitly when switching between ordinary recording and diagnostics.
+
 ### Separate web application
 
 The preserved web interface is its own project under `espFeather/webApp`.
@@ -119,17 +134,6 @@ Its sources, headers, and browser assets are under `webApp/src`, `webApp/include
 and `webApp/data`. Assets require a separate filesystem upload when changed.
 This interface controls the older S3 application; it does not control the P4.
 
-## Legacy S3: ordinary PowerShell
-
-From the repository root:
-
-```powershell
-& "$env:USERPROFILE\.platformio\penv\Scripts\platformio.exe" run --project-dir .\espS3 -e esp32-s3-devkitc-1
-```
-
-Test environments live in `espS3/test/platformio.ini`. This is the historical S3
-recorder; building it does not establish that it meets the P4 capture rate.
-
 ## PC checks after source moves
 
 For the active P4 and Feather projects, run the combined smoke check first:
@@ -138,8 +142,8 @@ For the active P4 and Feather projects, run the combined smoke check first:
 .\test\runSmokeChecks.ps1
 ```
 
-See [smoke-check coverage and requirements](../test/README.md). S3 remains a
-separate legacy check. The individual commands below are useful for isolation.
+See [smoke-check coverage and requirements](../test/README.md). The individual
+commands below are useful for isolation.
 
 Run these individually from the repository root in ordinary PowerShell:
 
@@ -149,7 +153,7 @@ Run these individually from the repository root in ordinary PowerShell:
 .\espP4\test\runRamWaveformChecks.ps1
 .\espP4\test\runProfileChecks.ps1
 .\espFeather\test\runBenchDacChecks.ps1
-.\espS3\test\runNativeChecks.ps1
+.\espFeather\test\runAdcDriverChecks.ps1
 ```
 
 The C++ runners locate Microsoft's installed C++ build tools. They exercise code

@@ -24,7 +24,7 @@ $batch = @"
 @echo off
 call "$environmentScript" >nul
 if %errorlevel% neq 0 exit /b 1
-cl /nologo /std:c++17 /O2 /EHsc /W4 /I"$projectRoot/main/include" /I"$projectRoot/test/hardware" /I"$projectRoot/test/profile" "$projectRoot/test/exactSampleChecks.cpp" "$projectRoot/main/src/frameDecoder.cpp" /Fe:exactSampleChecks.exe
+cl /nologo /std:c++17 /O2 /EHsc /W4 /I"$projectRoot/main/include" /I"$projectRoot/test/hardware" /I"$projectRoot/test/profile" "$projectRoot/test/exactSampleChecks.cpp" "$projectRoot/main/src/FrameDecoder.cpp" /Fe:exactSampleChecks.exe
 if %errorlevel% neq 0 exit /b 1
 exactSampleChecks.exe
 exit /b %errorlevel%

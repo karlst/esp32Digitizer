@@ -13,7 +13,7 @@
  */
 
 /**
- * @file captureProfile.cpp
+ * @file CaptureProfile.cpp
  * @brief Estimate how busy each P4 core is during capture; print results after stopping.
  * The operating system counts time spent running each task (software thread).
  * Each core has an idle task that runs when no other task needs it. Busy time
@@ -28,7 +28,7 @@
  * counters must be 64-bit. The build refuses other settings instead of silently
  * reporting cycle counts as microseconds or risking a long-idle clock rollover.
  */
-#include "captureProfile.h"
+#include "CaptureProfile.h"
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
 #include <cstdio>
@@ -45,15 +45,15 @@ static_assert(sizeof(configRUN_TIME_COUNTER_TYPE) == 8,
  * interval includes ARM/START handshake and ends at stop entry, excluding file
  * preparation and post-stop CRC verification. This is not an ADC sample timer.
  */
-void captureProfile::begin(TaskHandle_t control, TaskHandle_t decoder, TaskHandle_t writer)
+void CaptureProfile::begin(TaskHandle_t control, TaskHandle_t decoder, TaskHandle_t writer)
 {
-    *this = captureProfile{};
-    handles[0] = xTaskGetIdleTaskHandleForCore(0);
-    handles[1] = xTaskGetIdleTaskHandleForCore(1);
-    handles[2] = decoder;
-    handles[3] = writer;
-    handles[4] = control;
-    running = true;
+    *this = CaptureProfile{};
+    _handles[0] = xTaskGetIdleTaskHandleForCore(0);
+    _handles[1] = xTaskGetIdleTaskHandleForCore(1);
+    _handles[2] = decoder;
+    _handles[3] = writer;
+    _handles[4] = control;
+    _running = true;
     sample(true);
 }
 
@@ -62,18 +62,18 @@ void captureProfile::begin(TaskHandle_t control, TaskHandle_t decoder, TaskHandl
  * Main calls this during capture. Actual window lengths expose delayed polling;
  * no attempt is made to fabricate missed one-second windows after a stall.
  */
-void captureProfile::poll()
+void CaptureProfile::poll()
 {
-    if (running && esp_timer_get_time() - previousAt >= 1000000) { sample(false); }
+    if (_running && esp_timer_get_time() - _previousAt >= 1000000) { sample(false); }
 }
 
 /** @brief Take the remaining partial interval before DMA teardown, then freeze totals. */
-void captureProfile::finish()
+void CaptureProfile::finish()
 {
-    if (running)
+    if (_running)
     {
         sample(false);
-        running = false;
+        _running = false;
     }
 }
 
@@ -88,19 +88,19 @@ void captureProfile::finish()
  * runtime is committed at task switches, not atomically with our timestamp.
  * Memory minima are sampled during this run, not heap minima since boot.
  */
-void captureProfile::sample(bool baseline)
+void CaptureProfile::sample(bool baseline)
 {
     const int64_t began = esp_timer_get_time();
-    uint64_t current[taskCount] = {};
+    uint64_t current[_taskCount] = {};
     bool valid = true;
-    for (unsigned index = 0; index < taskCount; ++index)
+    for (unsigned index = 0; index < _taskCount; ++index)
     {
-        if (handles[index] != nullptr)
+        if (_handles[index] != nullptr)
         {
             TaskStatus_t info = {};
-            vTaskGetInfo(handles[index], &info, pdFALSE, eInvalid);
+            vTaskGetInfo(_handles[index], &info, pdFALSE, eInvalid);
             current[index] = info.ulRunTimeCounter;
-            if (!baseline && current[index] < previousRuntime[index]) { valid = false; }
+            if (!baseline && current[index] < _previousRuntime[index]) { valid = false; }
         }
         else { valid = false; }
     }
@@ -108,39 +108,39 @@ void captureProfile::sample(bool baseline)
     // Include both cores' complete scheduled activity through their idle tasks.
     // Five snapshots are sequential, so boundary precision is not sub-tick.
     const int64_t now = esp_timer_get_time();
-    const uint64_t duration = static_cast<uint64_t>(now - previousAt);
+    const uint64_t duration = static_cast<uint64_t>(now - _previousAt);
     if (!baseline && valid && duration != 0)
     {
-        for (unsigned index = 0; index < taskCount; ++index)
+        for (unsigned index = 0; index < _taskCount; ++index)
         {
-            const uint64_t delta = current[index] - previousRuntime[index];
-            taskTotals[index].add(duration, delta);
-            if (delta > duration) { ++boundaryOvershoots; }
+            const uint64_t delta = current[index] - _previousRuntime[index];
+            _intervalTotalsTasks[index].add(duration, delta);
+            if (delta > duration) { ++_boundaryOvershoots; }
             if (index < 2)
             {
                 const uint64_t idle = delta < duration ? delta : duration;
-                busyTotals[index].add(duration, duration - idle);
+                _intervalTotalsBusy[index].add(duration, duration - idle);
             }
         }
-        if (intervals == 0 || duration < minWindowUs) { minWindowUs = duration; }
-        if (duration > maxWindowUs) { maxWindowUs = duration; }
-        ++intervals;
+        if (_intervals == 0 || duration < _minWindowUs) { _minWindowUs = duration; }
+        if (duration > _maxWindowUs) { _maxWindowUs = duration; }
+        ++_intervals;
     }
-    else if (!valid || (!baseline && duration == 0)) { ++invalidIntervals; }
+    else if (!valid || (!baseline && duration == 0)) { ++_invalidIntervals; }
 
     // Use these readings as the next starting point even after an invalid
     // interval, so a bad reading does not contaminate every later interval.
-    for (unsigned index = 0; index < taskCount; ++index)
+    for (unsigned index = 0; index < _taskCount; ++index)
     {
-        previousRuntime[index] = current[index];
+        _previousRuntime[index] = current[index];
     }
-    previousAt = now;
+    _previousAt = now;
     const size_t internalFree = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     const size_t psramFree = heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (baseline || internalFree < minInternalFree) { minInternalFree = internalFree; }
-    if (baseline || psramFree < minPsramFree) { minPsramFree = psramFree; }
+    if (baseline || internalFree < _minInternalFree) { _minInternalFree = internalFree; }
+    if (baseline || psramFree < _minPsramFree) { _minPsramFree = psramFree; }
     const uint64_t cost = static_cast<uint64_t>(esp_timer_get_time() - began);
-    if (cost > maxSnapshotUs) { maxSnapshotUs = cost; }
+    if (cost > _maxSnapshotUs) { _maxSnapshotUs = cost; }
 }
 
 /**
@@ -150,43 +150,43 @@ void captureProfile::sample(bool baseline)
  * not this run only. Idle task stacks are included. No claim is made about the
  * separate interrupt stack. printf uses integer tenths to avoid float formatting.
  */
-void captureProfile::report()
+void CaptureProfile::report()
 {
-    const char* names[taskCount] = {"idle0", "idle1", "decode", "sdWriter", "control"};
+    const char* names[_taskCount] = {"idle0", "idle1", "decode", "sdWriter", "control"};
     printf("PROFILE capture intervals=%lu invalid=%lu boundaryOvershoots=%lu measuredUs=%llu\n",
-           static_cast<unsigned long>(intervals), static_cast<unsigned long>(invalidIntervals),
-           static_cast<unsigned long>(boundaryOvershoots),
-           static_cast<unsigned long long>(busyTotals[0].elapsedUs));
-    if (intervals == 0)
+           static_cast<unsigned long>(_intervals), static_cast<unsigned long>(_invalidIntervals),
+           static_cast<unsigned long>(_boundaryOvershoots),
+           static_cast<unsigned long long>(_intervalTotalsBusy[0]._elapsedUs));
+    if (_intervals == 0)
     {
         printf("PROFILE unavailable: no valid runtime intervals; do not infer CPU headroom.\n");
     }
-    for (unsigned core = 0; core < 2 && intervals != 0; ++core)
+    for (unsigned core = 0; core < 2 && _intervals != 0; ++core)
     {
-        const auto& totals = busyTotals[core];
-        const uint32_t busy = profileMath::percentTenths(totals.executedUs, totals.elapsedUs);
+        const auto& intervalTotals = _intervalTotalsBusy[core];
+        const uint32_t busy = profileMath::percentTenths(intervalTotals._executedUs, intervalTotals._elapsedUs);
         const uint32_t idle = 1000 - busy;
         printf("PROFILE core=%u busy=%lu.%lu%% idle=%lu.%lu%% worstBusy=%lu.%lu%% peakWindows=%lu\n",
                core, static_cast<unsigned long>(busy / 10), static_cast<unsigned long>(busy % 10),
                static_cast<unsigned long>(idle / 10), static_cast<unsigned long>(idle % 10),
-               static_cast<unsigned long>(totals.maxTenths / 10),
-               static_cast<unsigned long>(totals.maxTenths % 10),
-               static_cast<unsigned long>(totals.peakWindows));
+               static_cast<unsigned long>(intervalTotals._maxTenths / 10),
+               static_cast<unsigned long>(intervalTotals._maxTenths % 10),
+               static_cast<unsigned long>(intervalTotals._peakWindows));
     }
-    for (unsigned index = 0; index < taskCount && intervals != 0; ++index)
+    for (unsigned index = 0; index < _taskCount && _intervals != 0; ++index)
     {
-        const auto& totals = taskTotals[index];
-        const uint32_t used = profileMath::percentTenths(totals.executedUs, totals.elapsedUs);
-        const UBaseType_t freeStack = handles[index] != nullptr ?
-            uxTaskGetStackHighWaterMark(handles[index]) : 0;
+        const auto& intervalTotals = _intervalTotalsTasks[index];
+        const uint32_t used = profileMath::percentTenths(intervalTotals._executedUs, intervalTotals._elapsedUs);
+        const UBaseType_t freeStack = _handles[index] != nullptr ?
+            uxTaskGetStackHighWaterMark(_handles[index]) : 0;
         printf("PROFILE task=%s oneCore=%lu.%lu%% stackMinFreeBytes=%lu\n", names[index],
                static_cast<unsigned long>(used / 10), static_cast<unsigned long>(used % 10),
                static_cast<unsigned long>(freeStack));
     }
     printf("PROFILE windowUs min=%llu max=%llu snapshotMaxUs=%llu internalMinFree=%lu psramMinFree=%lu\n",
-           static_cast<unsigned long long>(minWindowUs), static_cast<unsigned long long>(maxWindowUs),
-           static_cast<unsigned long long>(maxSnapshotUs), static_cast<unsigned long>(minInternalFree),
-           static_cast<unsigned long>(minPsramFree));
+           static_cast<unsigned long long>(_minWindowUs), static_cast<unsigned long long>(_maxWindowUs),
+           static_cast<unsigned long long>(_maxSnapshotUs), static_cast<unsigned long>(_minInternalFree),
+           static_cast<unsigned long>(_minPsramFree));
     printf("PROFILE estimates include measurement overhead; ISR time is not separated. "
            "Worst uses windows >=0.5s; no valid intervals means unavailable. "
            "Review TIMING, queueHigh, SD ringPeak and errors as well.\n");

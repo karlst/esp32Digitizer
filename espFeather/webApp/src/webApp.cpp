@@ -13,7 +13,7 @@
  */
 
 /**
- * @file webApp.cpp
+ * @file WebApp.cpp
  * @brief Bring up the Feather services and keep them running from Arduino loop().
  *
  * main.cpp owns one webApp. It owns the HTTP server, local DAC generator, legacy
@@ -23,16 +23,16 @@
  */
 #include <LittleFS.h>
 #include <WiFi.h>
-#include "webApp.h"
+#include "WebApp.h"
 
 /**
  * @brief Connect the application objects without starting hardware during construction.
  *
  * server(80) listens on the standard HTTP port. monitor(Serial1) uses the physical
  * serial connection to S3. controller receives references to these existing objects;
- * it does not make copies. Declaration order in webApp.h creates dependencies first.
+ * it does not make copies. Declaration order in WebApp.h creates dependencies first.
  */
-webApp::webApp() : server(80), monitor(Serial1), controller(server, blinker, generator, monitor)
+WebApp::WebApp() : _webServer(80), _s3Monitor(Serial1), _webController(_webServer, _ledBlinker, _dacGenerator, _s3Monitor)
 {
     // Defer hardware initialization until Arduino calls setup.
 }
@@ -46,13 +46,13 @@ webApp::webApp() : server(80), monitor(Serial1), controller(server, blinker, gen
  * named ESP32-Digitizer; it does not join a home router. The UI remains available
  * if DAC initialization fails so it can show the fault and offer reboot.
  */
-bool webApp::begin()
+bool WebApp::begin()
 {
     // Keep outputs disabled at startup; expose the UI even if analog startup fails.
     bool retVal = false;
-    blinker.begin();
-    generator.begin();
-    monitor.begin();
+    _ledBlinker.begin();
+    _dacGenerator.begin();
+    _s3Monitor.begin();
 
     // LittleFS is the web-file storage in flash. true allows formatting if mounting
     // fails; that can leave an empty filesystem that needs the web files uploaded.
@@ -73,9 +73,9 @@ bool webApp::begin()
         else
         {
             // Register handlers before accepting requests.
-            controller.begin();
-            server.begin();
-            serverStarted = true;
+            _webController.begin();
+            _webServer.begin();
+            _serverStarted = true;
             retVal = true;
 
             // Report connection details for the browser client.
@@ -96,15 +96,15 @@ bool webApp::begin()
  * The DAC has its own worker and mutex; it does not depend on this loop for ticks.
  * S3 input is drained even if web startup failed. HTTP is served only after success.
  */
-void webApp::update()
+void WebApp::update()
 {
     // Drain S3 telemetry in this task; the independent DAC worker never accesses it.
-    monitor.update();
+    _s3Monitor.update();
     // Service HTTP only after startup, while always advancing hardware activity.
-    if (serverStarted)
+    if (_serverStarted)
     {
-        server.handleClient();
+        _webServer.handleClient();
     }
-    blinker.update();
-    controller.update();
+    _ledBlinker.update();
+    _webController.update();
 }

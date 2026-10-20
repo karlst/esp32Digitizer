@@ -358,7 +358,7 @@ The source now includes a tutorial reading path: start with the overview in
 `main/src/main.cpp`, then `receiveBlock()`, `decodeTask()`,
 `frameDecoder::feed()/finishWord()`, and
 `sdRecorder::submitSamples()/write()/finishFile()`. The shared ring implementation
-is `../shared/bufferedWriter/src/bufferedWriter.cpp`; its comments cover
+is `../shared/bufferedWriter/src/BufferedWriter.cpp`; its comments cover
 both the S3 and P4 callers.
 
 ### Hardware capture versus software work
@@ -483,10 +483,10 @@ and longer-duration testing are required before production claims.
 ## Reading path and references
 
 - `main/src/main.cpp`: UART handshake, memory ownership, timeout and reporting.
-- `main/include/frameDecoder.h` / `main/src/frameDecoder.cpp`: unpacking, FSYNC alignment and header checks.
+- `main/include/FrameDecoder.h` / `main/src/FrameDecoder.cpp`: unpacking, FSYNC alignment and header checks.
 - `test/decoderChecks.cpp`: desktop checks and explicit payload-check limitation.
-- `../shared/ads127BenchRate.h`: rate table shared with unchanged Feather code.
-- [TI ADS127L18 datasheet](https://www.ti.com/lit/ds/symlink/ads127l18.pdf),
+- `../shared/Ads127BenchRate.h`: rate table shared with unchanged Feather code.
+- [TI ADS127L18 datasheet](https://www.ti.com/lit/ds/symlink/ads127L18.pdf),
   sections 7.4.10.3–7.4.10.6: header bits, FSYNC, rising-edge data capture.
 - Installed IDF 5.5.6 `components/esp_driver_parlio/src/parlio_rx.c` and
   `components/hal/include/hal/parlio_types.h`: DMA behavior and pair packing.

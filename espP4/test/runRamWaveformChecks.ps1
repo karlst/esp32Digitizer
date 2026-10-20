@@ -24,7 +24,7 @@ $batch = @"
 @echo off
 call "$environmentScript" >nul
 if %errorlevel% neq 0 exit /b 1
-cl /nologo /std:c++17 /O2 /EHsc /W4 /I"$projectRoot/main/include" /I"$projectRoot/test/hardware" /I"$projectRoot/test/profile" /I"$projectRoot/../shared" "$projectRoot/test/ramWaveformChecks.cpp" "$projectRoot/test/hardware/ramWaveform.cpp" /Fe:ramWaveformChecks.exe
+cl /nologo /std:c++17 /O2 /EHsc /W4 /I"$projectRoot/main/include" /I"$projectRoot/test/hardware" /I"$projectRoot/test/profile" /I"$projectRoot/../shared" "$projectRoot/test/ramWaveformChecks.cpp" "$projectRoot/test/hardware/RamWaveform.cpp" /Fe:ramWaveformChecks.exe
 if %errorlevel% neq 0 exit /b 1
 ramWaveformChecks.exe
 exit /b %errorlevel%

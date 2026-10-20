@@ -27,7 +27,7 @@ $batch = @"
 @echo off
 call "$environmentScript" >nul
 if %errorlevel% neq 0 exit /b 1
-cl /nologo /std:c++17 /EHsc /W4 /I"$projectRoot/test/fakes" /I"$projectRoot/webApp/include" "$projectRoot/test/monitorChecks.cpp" "$projectRoot/webApp/src/s3Monitor.cpp" "$projectRoot/webApp/src/recordingMonitor.cpp" /Fe:monitorChecks.exe
+cl /nologo /std:c++17 /EHsc /W4 /I"$projectRoot/test/fakes" /I"$projectRoot/webApp/include" "$projectRoot/test/monitorChecks.cpp" "$projectRoot/webApp/src/S3Monitor.cpp" "$projectRoot/webApp/src/RecordingMonitor.cpp" /Fe:monitorChecks.exe
 if %errorlevel% neq 0 exit /b 1
 monitorChecks.exe
 exit /b %errorlevel%

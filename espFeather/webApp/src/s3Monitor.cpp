@@ -13,7 +13,7 @@
  */
 
 /**
- * @file s3Monitor.cpp
+ * @file S3Monitor.cpp
  * @brief Feather-side serial receiver and command tracker for the S3 board.
  *
  * webApp calls begin() once and update() on each Arduino loop pass. update()
@@ -26,7 +26,7 @@
  * A constant input voltage can produce identical values but advancing counts.
  * No full sample recording passes through this monitor.
  */
-#include "s3Monitor.h"
+#include "S3Monitor.h"
 #include <cstring>
 #include <cstdio>
 #include <esp_system.h>
@@ -38,7 +38,7 @@
  * The constructor can run before Arduino startup, so hardware work waits for begin().
  * This object is used only by the loop task, not the DAC worker or an interrupt.
  */
-s3Monitor::s3Monitor(HardwareSerial& serialPort) : serialPort(serialPort)
+S3Monitor::S3Monitor(HardwareSerial& hardwareSerial) : _hardwareSerial(hardwareSerial)
 {
     // Configuration waits until Arduino setup so its runtime is initialized.
 }
@@ -50,18 +50,18 @@ s3Monitor::s3Monitor(HardwareSerial& serialPort) : serialPort(serialPort)
  * deliberately avoid the original Feather's incompatible GPIO16/17 assignments.
  * RX is pulled up so a missing cable rests at the UART's idle-high level.
  */
-void s3Monitor::begin()
+void S3Monitor::begin()
 {
     // Buffer bursts while the same loop task is occupied serving an HTTP request.
     // RX receives S3 pin 17; TX sends commands to S3 pin 18, with common ground.
-    serialPort.setRxBufferSize(4096);
+    _hardwareSerial.setRxBufferSize(4096);
     // Set the idle pull-up before the UART owns the pin's peripheral function.
     pinMode(RX, INPUT_PULLUP);
-    serialPort.begin(115200, SERIAL_8N1, RX, TX);
+    _hardwareSerial.begin(115200, SERIAL_8N1, RX, TX);
     // Randomize the ID sequence per boot to reduce the chance that an old S3
     // reply matches a new request after restart. This is not a uniqueness
     // guarantee. Zero is reserved for 'no command'.
-    commandId = esp_random();
+    _commandId = esp_random();
     Serial.println("S3 monitor: 115200 baud, Feather RX=GPIO7, TX=GPIO8; waiting for S3.");
 }
 
@@ -71,7 +71,7 @@ void s3Monitor::begin()
  * @param value Written only when the entire field is valid.
  * @return True for a nonempty sequence of digits within range.
  */
-bool s3Monitor::readUnsigned(const char* text, uint64_t maximum, uint64_t& value)
+bool S3Monitor::readUnsigned(const char* text, uint64_t maximum, uint64_t& value)
 {
     bool retVal = *text != '\0';
     uint64_t parsed = 0;
@@ -115,20 +115,20 @@ bool s3Monitor::readUnsigned(const char* text, uint64_t maximum, uint64_t& value
  * Malformed/unsupported traffic cannot refresh 'connected'. Keeping temporary values
  * until all checks pass prevents a partial line from corrupting the displayed state.
  */
-bool s3Monitor::acceptLine(uint32_t nowMs)
+bool S3Monitor::acceptLine(uint32_t nowMs)
 {
-    char* fields[45] = {line};
+    char* fields[45] = {_line};
     size_t fieldCount = 1;
     bool retVal = true;
     // Split in place, preserving empty fields so missing values are rejected.
-    for (size_t index = 0; index < lineLength; ++index)
+    for (size_t index = 0; index < _lineLength; ++index)
     {
-        if (line[index] == ',')
+        if (_line[index] == ',')
         {
-            line[index] = '\0';
+            _line[index] = '\0';
             if (fieldCount < 45)
             {
-                fields[fieldCount++] = &line[index + 1];
+                fields[fieldCount++] = &_line[index + 1];
             }
             else
             {
@@ -142,17 +142,17 @@ bool s3Monitor::acceptLine(uint32_t nowMs)
     retVal = retVal && strcmp(fields[0], "S3") == 0 &&
         (hasDiagnostics || (fieldCount == 13 && strcmp(fields[1], "2") == 0));
     uint64_t parsed[17] = {};
-    recordingStatus nextRecording;
+    RecordingStatus recordingStatusNext;
     // Validate recording fields into temporary storage. A corrupt extended field
     // must reject the whole frame, including its acquisition values and heartbeat.
     if (hasRecording)
     {
-        const size_t columns = hasSpaceDetails ? recordingStatus::fieldCount : recordingStatus::legacyFieldCount;
+        const size_t columns = hasSpaceDetails ? RecordingStatus::_fieldCount : RecordingStatus::_legacyFieldCount;
         for (size_t index = 0; index < columns && retVal; ++index)
         {
-            retVal = readUnsigned(fields[19 + index], UINT64_MAX, nextRecording.values[index]);
+            retVal = readUnsigned(fields[19 + index], UINT64_MAX, recordingStatusNext._values[index]);
         }
-        retVal = retVal && nextRecording.valid();
+        retVal = retVal && recordingStatusNext.valid();
     }
     bool negative = false;
     if (retVal)
@@ -189,63 +189,63 @@ bool s3Monitor::acceptLine(uint32_t nowMs)
         // across two frames within the current connection before reporting samples.
         // Counter reset or a backward uptime jump starts observation again; unsigned
         // uptime subtraction handles the normal millis() wrap without a false restart.
-        const bool sameSession = receivedFrame && nowMs - lastFrameMs < connectionTimeoutMs &&
-            static_cast<uint32_t>(parsed[0] - uptimeMs) < 0x80000000UL && parsed[2] >= sampleCount;
+        const bool sameSession = _receivedFrame && nowMs - _lastFrameMs < _connectionTimeoutMs &&
+            static_cast<uint32_t>(parsed[0] - _uptimeMs) < 0x80000000UL && parsed[2] >= _sampleCount;
         if (!sameSession || parsed[1] == 0)
         {
-            observedProgress = false;
+            _observedProgress = false;
         }
-        else if (parsed[2] > sampleCount)
+        else if (parsed[2] > _sampleCount)
         {
-            lastProgressMs = nowMs;
-            observedProgress = true;
+            _lastProgressMs = nowMs;
+            _observedProgress = true;
         }
         // Commit the complete validated snapshot at once. parsed indexes follow
         // wire-field order after the S3 tag and version; keep them aligned with
         // shared/s3StatusProtocol.md when extending the message.
-        uptimeMs = static_cast<uint32_t>(parsed[0]);
-        adcReady = parsed[1] != 0;
-        sampleCount = parsed[2];
-        diagnosticsAvailable = hasDiagnostics;
-        missedEdges = parsed[11];
-        rejectedReads = parsed[12];
-        readFailures = parsed[13];
-        overlapReads = parsed[14];
-        readyTimeouts = parsed[15];
-        readFault = static_cast<uint32_t>(parsed[16]);
-        samplesPerSecond = static_cast<uint32_t>(parsed[3]);
-        latestRaw = negative ? -static_cast<int32_t>(parsed[4]) : static_cast<int32_t>(parsed[4]);
-        sampleAgeMs = static_cast<uint32_t>(parsed[5]);
-        errorCode = static_cast<uint32_t>(parsed[6]);
-        acquisitionRunning = parsed[7] != 0;
-        appliedRate = static_cast<uint32_t>(parsed[8]);
-        recording.available = hasRecording;
-        recording.status = nextRecording;
+        _uptimeMs = static_cast<uint32_t>(parsed[0]);
+        _adcReady = parsed[1] != 0;
+        _sampleCount = parsed[2];
+        _diagnosticsAvailable = hasDiagnostics;
+        _missedEdges = parsed[11];
+        _rejectedReads = parsed[12];
+        _readFailures = parsed[13];
+        _overlapReads = parsed[14];
+        _readyTimeouts = parsed[15];
+        _readFault = static_cast<uint32_t>(parsed[16]);
+        _samplesPerSecond = static_cast<uint32_t>(parsed[3]);
+        _latestRaw = negative ? -static_cast<int32_t>(parsed[4]) : static_cast<int32_t>(parsed[4]);
+        _sampleAgeMs = static_cast<uint32_t>(parsed[5]);
+        _errorCode = static_cast<uint32_t>(parsed[6]);
+        _acquisitionRunning = parsed[7] != 0;
+        _appliedRate = static_cast<uint32_t>(parsed[8]);
+        _recordingMonitor._available = hasRecording;
+        _recordingMonitor._recordingStatus = recordingStatusNext;
         // A matching id alone is insufficient: a successful Start must also report
         // the requested running rate, and Stop/Reboot must report stopped acquisition.
-        if (commandStatus == "pending" && parsed[9] == commandId && parsed[10] != 0)
+        if (_commandStatus == "pending" && parsed[9] == _commandId && parsed[10] != 0)
         {
-            const bool applied = commandAction == "start" ?
-                acquisitionRunning && appliedRate == requestedRate &&
-                (!requestedRecording || (hasRecording && nextRecording.values[recordingStatus::state] == recordingStatus::recording)) :
-                !acquisitionRunning && (!hasRecording ||
-                (nextRecording.values[recordingStatus::state] != recordingStatus::saving &&
-                 nextRecording.values[recordingStatus::state] != recordingStatus::deleting));
-            commandStatus = parsed[10] == 1 && applied ? "confirmed" : "rejected";
+            const bool applied = _commandAction == "start" ?
+                _acquisitionRunning && _appliedRate == _requestedRate &&
+                (!_requestedRecording || (hasRecording && recordingStatusNext._values[RecordingStatus::state] == RecordingStatus::recording)) :
+                !_acquisitionRunning && (!hasRecording ||
+                (recordingStatusNext._values[RecordingStatus::state] != RecordingStatus::saving &&
+                 recordingStatusNext._values[RecordingStatus::state] != RecordingStatus::deleting));
+            _commandStatus = parsed[10] == 1 && applied ? "confirmed" : "rejected";
         }
         // Preparing/saving/deleting may take longer than a short command. A fresh
         // report bearing OUR pending request ID proves progress, not completion.
         // Keep waiting while that operation reports busy; loss of reports still
         // times out. An unrelated operation cannot extend this command's deadline.
-        if (commandStatus == "pending" && parsed[9] == commandId && parsed[10] == 0 && hasRecording &&
-            (nextRecording.values[recordingStatus::state] == recordingStatus::preparing ||
-             nextRecording.values[recordingStatus::state] == recordingStatus::saving ||
-             nextRecording.values[recordingStatus::state] == recordingStatus::deleting))
+        if (_commandStatus == "pending" && parsed[9] == _commandId && parsed[10] == 0 && hasRecording &&
+            (recordingStatusNext._values[RecordingStatus::state] == RecordingStatus::preparing ||
+             recordingStatusNext._values[RecordingStatus::state] == RecordingStatus::saving ||
+             recordingStatusNext._values[RecordingStatus::state] == RecordingStatus::deleting))
         {
-            commandSentMs = nowMs;
+            _commandSentMs = nowMs;
         }
-        lastFrameMs = nowMs;
-        receivedFrame = true;
+        _lastFrameMs = nowMs;
+        _receivedFrame = true;
     }
     return retVal;
 }
@@ -264,46 +264,46 @@ bool s3Monitor::acceptLine(uint32_t nowMs)
  * That means its outcome is unknown, not that S3 definitely did nothing. Do not
  * retry automatically: the next status can still show what S3 is actually doing.
  */
-void s3Monitor::update()
+void S3Monitor::update()
 {
     const uint32_t nowMs = millis();
     // Missing acknowledgements become an explicit outcome; never automatically
     // retry Start/Reboot after an uncertain response. Polls still recover device state.
-    if (commandStatus == "pending" && nowMs - commandSentMs >= 5000)
+    if (_commandStatus == "pending" && nowMs - _commandSentMs >= 5000)
     {
-        commandStatus = "timeout";
+        _commandStatus = "timeout";
     }
     // After expiry discard through newline; otherwise a later fragment could
     // accidentally be interpreted as the continuation of an unrelated report.
-    if (lineLength && nowMs - lastByteMs > 500)
+    if (_lineLength && nowMs - _lastByteMs > 500)
     {
-        lineLength = 0;
-        discardLine = true;
+        _lineLength = 0;
+        _discardLine = true;
     }
-    for (size_t budget = 0; budget < 256 && serialPort.available(); ++budget)
+    for (size_t budget = 0; budget < 256 && _hardwareSerial.available(); ++budget)
     {
-        const char nextByte = static_cast<char>(serialPort.read());
-        lastByteMs = nowMs;
+        const char nextByte = static_cast<char>(_hardwareSerial.read());
+        _lastByteMs = nowMs;
         // Newline is the only point where a report may replace displayed state.
         if (nextByte == '\n')
         {
-            line[lineLength] = '\0';
-            if (discardLine || (lineLength && !acceptLine(nowMs)))
+            _line[_lineLength] = '\0';
+            if (_discardLine || (_lineLength && !acceptLine(nowMs)))
             {
-                ++rejectedFrames;
+                ++_rejectedFrames;
             }
-            lineLength = 0;
-            discardLine = false;
+            _lineLength = 0;
+            _discardLine = false;
         }
-        else if (nextByte != '\r' && !discardLine)
+        else if (nextByte != '\r' && !_discardLine)
         {
-            if (nextByte < ' ' || nextByte > '~' || lineLength >= lineCapacity - 1)
+            if (nextByte < ' ' || nextByte > '~' || _lineLength >= _lineCapacity - 1)
             {
-                discardLine = true;
+                _discardLine = true;
             }
             else
             {
-                line[lineLength++] = nextByte;
+                _line[_lineLength++] = nextByte;
             }
         }
     }
@@ -322,27 +322,27 @@ void s3Monitor::update()
  * Version-2 reports lack diagnostics and show them as null. Command outcome fields
  * remain available even when live measurements become unknown.
  */
-String s3Monitor::stateJson() const
+String S3Monitor::stateJson() const
 {
     const uint32_t nowMs = millis();
-    const uint32_t ageMs = nowMs - lastFrameMs;
-    const bool connected = receivedFrame && ageMs < connectionTimeoutMs;
-    const bool receiving = connected && acquisitionRunning && adcReady && observedProgress &&
-        nowMs - lastProgressMs < connectionTimeoutMs &&
-        static_cast<uint64_t>(sampleAgeMs) + ageMs < connectionTimeoutMs;
+    const uint32_t ageMs = nowMs - _lastFrameMs;
+    const bool connected = _receivedFrame && ageMs < _connectionTimeoutMs;
+    const bool receiving = connected && _acquisitionRunning && _adcReady && _observedProgress &&
+        nowMs - _lastProgressMs < _connectionTimeoutMs &&
+        static_cast<uint64_t>(_sampleAgeMs) + ageMs < _connectionTimeoutMs;
     String retVal = "{\"connected\":" + String(connected ? "true" : "false");
-    retVal += ",\"lastMessageAgeMs\":" + (receivedFrame ? String(ageMs) : String("null"));
-    retVal += ",\"rejectedFrames\":" + String(rejectedFrames);
-    retVal += ",\"commandId\":" + String(commandId);
-    retVal += ",\"commandStatus\":\"" + commandStatus + "\"";
-    retVal += ",\"commandAction\":\"" + commandAction + "\"";
-    retVal += ",\"recording\":" + recording.stateJson(connected);
+    retVal += ",\"lastMessageAgeMs\":" + (_receivedFrame ? String(ageMs) : String("null"));
+    retVal += ",\"rejectedFrames\":" + String(_rejectedFrames);
+    retVal += ",\"commandId\":" + String(_commandId);
+    retVal += ",\"commandStatus\":\"" + _commandStatus + "\"";
+    retVal += ",\"commandAction\":\"" + _commandAction + "\"";
+    retVal += ",\"recording\":" + _recordingMonitor.stateJson(connected);
     // A counter is a decimal JSON string so browsers cannot round large totals.
     // Missing old-firmware diagnostics and disconnected values are explicitly null.
-    const bool showDiagnostics = connected && diagnosticsAvailable;
+    const bool showDiagnostics = connected && _diagnosticsAvailable;
     retVal += ",\"diagnosticsAvailable\":" + String(showDiagnostics ? "true" : "false");
     const char* names[] = {"missedEdges", "rejectedReads", "readFailures", "overlapReads", "readyTimeouts"};
-    const uint64_t totals[] = {missedEdges, rejectedReads, readFailures, overlapReads, readyTimeouts};
+    const uint64_t totals[] = {_missedEdges, _rejectedReads, _readFailures, _overlapReads, _readyTimeouts};
     for (size_t index = 0; index < 5; ++index)
     {
         retVal += ",\"" + String(names[index]) + "\":";
@@ -357,19 +357,19 @@ String s3Monitor::stateJson() const
             retVal += "null";
         }
     }
-    retVal += ",\"readFault\":" + (showDiagnostics ? String(readFault) : String("null"));
+    retVal += ",\"readFault\":" + (showDiagnostics ? String(_readFault) : String("null"));
     if (connected)
     {
         char countText[24];
-        snprintf(countText, sizeof(countText), "%llu", static_cast<unsigned long long>(sampleCount));
-        retVal += ",\"adcReady\":" + String(adcReady ? "true" : "false");
+        snprintf(countText, sizeof(countText), "%llu", static_cast<unsigned long long>(_sampleCount));
+        retVal += ",\"adcReady\":" + String(_adcReady ? "true" : "false");
         retVal += ",\"receiving\":" + String(receiving ? "true" : "false");
         retVal += ",\"sampleCount\":\"" + String(countText) + "\"";
-        retVal += ",\"samplesPerSecond\":" + String(samplesPerSecond);
-        retVal += ",\"latestRaw\":" + (sampleCount ? String(latestRaw) : String("null"));
-        retVal += ",\"errorCode\":" + String(errorCode);
-        retVal += ",\"acquisitionRunning\":" + String(acquisitionRunning ? "true" : "false");
-        retVal += ",\"appliedRate\":" + String(appliedRate);
+        retVal += ",\"samplesPerSecond\":" + String(_samplesPerSecond);
+        retVal += ",\"latestRaw\":" + (_sampleCount ? String(_latestRaw) : String("null"));
+        retVal += ",\"errorCode\":" + String(_errorCode);
+        retVal += ",\"acquisitionRunning\":" + String(_acquisitionRunning ? "true" : "false");
+        retVal += ",\"appliedRate\":" + String(_appliedRate);
     }
     else
     {
@@ -388,7 +388,7 @@ String s3Monitor::stateJson() const
  * This matches S3's commandProtocol::rateRegister choices. Neither this test nor
  * the dropdown establishes that acquisition can sustain every offered rate.
  */
-bool s3Monitor::validRate(uint32_t rate)
+bool S3Monitor::validRate(uint32_t rate)
 {
     const uint32_t supported[] = {100, 500, 1000, 2000, 7500, 15000, 30000};
     bool retVal = false;
@@ -413,48 +413,48 @@ bool s3Monitor::validRate(uint32_t rate)
  * The five-second timeout is handled in update(); there is no automatic retransmit.
  * An already running acquisition cannot be retuned to a different rate with Start.
  */
-bool s3Monitor::sendCommand(const char* action, uint32_t rate, bool record)
+bool S3Monitor::sendCommand(const char* action, uint32_t rate, bool record)
 {
     const uint32_t nowMs = millis();
     const bool isStart = strcmp(action, "start") == 0;
     const bool isDelete = strcmp(action, "delete") == 0;
     const bool knownAction = isStart || isDelete || strcmp(action, "stop") == 0 || strcmp(action, "reboot") == 0;
-    const auto recordingState = recording.status.values[recordingStatus::state];
-    const bool storageBusy = recording.available && (recordingState == recordingStatus::preparing ||
-        recordingState == recordingStatus::saving || recordingState == recordingStatus::deleting);
+    const auto recordingState = _recordingMonitor._recordingStatus._values[RecordingStatus::state];
+    const bool storageBusy = _recordingMonitor._available && (recordingState == RecordingStatus::preparing ||
+        recordingState == RecordingStatus::saving || recordingState == RecordingStatus::deleting);
     bool retVal = false;
-    if (knownAction && receivedFrame && nowMs - lastFrameMs < connectionTimeoutMs &&
-        commandStatus != "pending" && !storageBusy && (!record || (isStart && recording.available)) &&
-        (!isDelete || (recording.available && !acquisitionRunning &&
-            recording.status.values[recordingStatus::card] == recordingStatus::ready)) &&
-        (!isStart || (adcReady && validRate(rate) &&
-        (!acquisitionRunning || rate == appliedRate))))
+    if (knownAction && _receivedFrame && nowMs - _lastFrameMs < _connectionTimeoutMs &&
+        _commandStatus != "pending" && !storageBusy && (!record || (isStart && _recordingMonitor._available)) &&
+        (!isDelete || (_recordingMonitor._available && !_acquisitionRunning &&
+            _recordingMonitor._recordingStatus._values[RecordingStatus::card] == RecordingStatus::ready)) &&
+        (!isStart || (_adcReady && validRate(rate) &&
+        (!_acquisitionRunning || rate == _appliedRate))))
     {
         // Each request gets a new ID so an old reply cannot complete this one.
         // Skip zero after 32-bit wrap: zero means "no command" in the protocol.
-        uint32_t nextId = commandId + 1;
+        uint32_t nextId = _commandId + 1;
         if (nextId == 0)
         {
             nextId = 1;
         }
         // Older S3s keep receiving their original command format. Version 3 adds
         // the recording flag; version-4 or version-5 status advertises support.
-        const String command = "CMD," + String(recording.available ? "3," : "2,") + String(nextId) + "," +
+        const String command = "CMD," + String(_recordingMonitor._available ? "3," : "2,") + String(nextId) + "," +
             action + "," + String(isStart ? rate : 0) +
-            (recording.available ? String(record ? ",1" : ",0") : String("")) + "\n";
+            (_recordingMonitor._available ? String(record ? ",1" : ",0") : String("")) + "\n";
         // Require space for the whole line before writing. Remember pending state
         // only if every character was accepted, including the ending newline.
-        if (serialPort.availableForWrite() >= static_cast<int>(command.length()))
+        if (_hardwareSerial.availableForWrite() >= static_cast<int>(command.length()))
         {
-            retVal = serialPort.print(command) == command.length();
+            retVal = _hardwareSerial.print(command) == command.length();
             if (retVal)
             {
-                commandId = nextId;
-                commandAction = action;
-                requestedRate = rate;
-                requestedRecording = record;
-                commandSentMs = nowMs;
-                commandStatus = "pending";
+                _commandId = nextId;
+                _commandAction = action;
+                _requestedRate = rate;
+                _requestedRecording = record;
+                _commandSentMs = nowMs;
+                _commandStatus = "pending";
             }
         }
     }

@@ -12,7 +12,7 @@
  * Public License in the repository LICENSE file or <https://www.gnu.org/licenses/>.
  */
 
-/** @file sdRecorder.h
+/** @file SdRecorder.h
  * @brief P4 board adapter around the reusable buffered writer.
  * CPU1 packs ADC samples to three bytes; synthetic tests retain four-byte words.
  * A CPU0 disk task alone owns the file and card.
@@ -20,14 +20,13 @@
  */
 #pragma once
 #include <atomic>
-#include "bufferedWriter.h"
+#include "BufferedWriter.h"
 #include "ff.h"
 #include "sdmmc_cmd.h"
-#include "sdkconfig.h"
-#if CONFIG_P4_CAPTURE_PROFILE
+#include "RecordingLayout.h"
+#include "RecordingReadback.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#endif
 
 /** @brief One recording whose card operations run in a separate background task.
  * Requests change a state variable shared with that task: ready permits claim(),
@@ -41,23 +40,24 @@
  * not mean the asynchronous disk work is complete. Console READY/SAVED/FAILED
  * is printed by the disk task after the corresponding operation finishes.
  */
-class sdRecorder : public byteSink
+class SdRecorder : public ByteSink
 {
 public:
+    explicit SdRecorder(uint64_t reservedBytes = 10000000000ULL, RecordingReadback* recordingReadback = nullptr);
     bool initialize();
     bool prepare();
-    bool claim(uint32_t run, uint32_t stage, uint32_t rate);
-    bool submitWords(const uint32_t* words, size_t count);
+    bool claim(uint32_t run, uint32_t stage, uint32_t rate, const RecordingLayout* recordingLayout = nullptr);
+    bool submitBytes(const uint8_t* data, uint32_t bytes);
     bool submitSamples(const uint32_t* words, size_t count);
     bool failed() const;
     void finish(bool captureClean, uint32_t expectedSamples = 0);
-#if CONFIG_P4_CAPTURE_PROFILE
-    TaskHandle_t profileTask() const;
-#endif
+    TaskHandle_t taskHandle() const;
 private:
-#if CONFIG_P4_CAPTURE_PROFILE
-    TaskHandle_t diskTask = nullptr;
-#endif
+    const uint64_t _reservedBytes;
+    RecordingReadback* _recordingReadback;
+    RecordingLayout _recordingLayoutDefault;
+    const RecordingLayout* _recordingLayout = &_recordingLayoutDefault;
+    TaskHandle_t _diskTask = nullptr;
     enum class phase { idle, preparing, ready, running, finishing, complete, error, blocked };
     static void taskEntry(void* context);
     void work();
@@ -65,22 +65,21 @@ private:
     void finishFile();
     size_t write(const uint8_t* data, size_t length) override;
     bool flush() override;
-    bool submitBytes(const uint8_t* data, uint32_t bytes);
-    std::atomic<phase> state{phase::idle};
-    std::atomic<bool> storageBroken{false};
-    bufferedWriter writer;
-    FIL file = {};
-    sdmmc_card_t* card = nullptr;
-    uint8_t* scratch = nullptr;
-    bool opened = false;
-    bool clean = false;
-    uint32_t runId = 0, stageId = 0, sampleRate = 0;
-    uint32_t submittedCrc = 0;
-    uint64_t submittedBytes = 0, writtenBytes = 0;
-    uint64_t writeUs = 0;
-    char path[32] = {};
+    std::atomic<phase> _state{phase::idle};
+    std::atomic<bool> _storageBroken{false};
+    BufferedWriter _bufferedWriter;
+    FIL _file = {};
+    sdmmc_card_t* _card = nullptr;
+    uint8_t* _scratch = nullptr;
+    bool _opened = false;
+    bool _clean = false;
+    uint32_t _runId = 0, _stageId = 0, _sampleRate = 0;
+    uint32_t _submittedCrc = 0;
+    uint64_t _submittedBytes = 0, _writtenBytes = 0;
+    uint64_t _writeUs = 0;
+    char _path[32] = {};
 
     // CPU1's decoder exclusively owns this batch while capturing. Keep it in
     // the global object's internal RAM, not on the decoder's small task stack.
-    uint8_t packedSamples[512 * 3] = {};
+    uint8_t _packedSamples[512 * 3] = {};
 };

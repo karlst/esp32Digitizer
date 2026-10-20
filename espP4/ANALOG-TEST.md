@@ -41,7 +41,7 @@ polarity). GEN_CFG1 at 0x08 now changes from 0x00 to 0x04 for external input,
 enabling the ADC midpoint-voltage output connected to the EVM amplifiers.
 All writes are still echoed/read back. The filter, sample rate,
 channel power states and status+sample serial format remain unchanged.
-[TI ADC datasheet table 8-20](https://www.ti.com/lit/ds/symlink/ads127l18.pdf)
+[TI ADC datasheet table 8-20](https://www.ti.com/lit/ds/symlink/ads127L18.pdf)
 defines these settings.
 
 October 18 follow-up: CardP run 3866327264 saved P4c7fe62.BIN with CRC 46f24c94,

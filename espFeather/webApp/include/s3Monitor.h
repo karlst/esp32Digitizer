@@ -13,12 +13,12 @@
  */
 
 /**
- * @file s3Monitor.h
+ * @file S3Monitor.h
  * @brief Receive bounded S3 status messages without disturbing DAC sampling.
  */
 #pragma once
 #include <Arduino.h>
-#include "recordingMonitor.h"
+#include "RecordingMonitor.h"
 
 /**
  * @brief Own the UART receive buffer and last validated S3 acquisition status.
@@ -29,13 +29,13 @@
  * per loop pass so a noisy/disconnected link cannot monopolize web servicing.
  * Wire format and pin assignments are documented in shared/s3StatusProtocol.md.
  */
-class s3Monitor
+class S3Monitor
 {
 public:
     /**
      * @brief Retain the dedicated serial port; USB debugging uses a different UART.
      */
-    explicit s3Monitor(HardwareSerial& serialPort);
+    explicit S3Monitor(HardwareSerial& hardwareSerial);
     /**
      * @brief Configure Feather RX/TX header pins for 115200-baud 3.3 V UART.
      */
@@ -70,51 +70,51 @@ private:
 
     // No dynamic receive allocation: oversize/corrupt lines are discarded through
     // their newline. Partial lines expire, preventing old fragments joining new data.
-    HardwareSerial& serialPort;
+    HardwareSerial& _hardwareSerial;
     // Room for 45 fields even when every 64-bit number uses its full decimal width.
-    static constexpr size_t lineCapacity = 1536;
-    static constexpr uint32_t connectionTimeoutMs = 3000;
-    char line[lineCapacity] = {};
-    size_t lineLength = 0;
-    bool discardLine = false;
-    uint32_t lastByteMs = 0;
+    static constexpr size_t _lineCapacity = 1536;
+    static constexpr uint32_t _connectionTimeoutMs = 3000;
+    char _line[_lineCapacity] = {};
+    size_t _lineLength = 0;
+    bool _discardLine = false;
+    uint32_t _lastByteMs = 0;
     // Connection age and sample-progress age are different: messages can continue
     // arriving while the digitizer is stopped or stuck on one count.
-    bool receivedFrame = false;
-    bool observedProgress = false;
-    uint32_t lastFrameMs = 0;
-    uint32_t lastProgressMs = 0;
+    bool _receivedFrame = false;
+    bool _observedProgress = false;
+    uint32_t _lastFrameMs = 0;
+    uint32_t _lastProgressMs = 0;
     // Bad serial reports, not rejected ADC reads. This belongs to the Feather
     // link receiver and resets when Feather reboots, not when S3 reboots.
-    uint32_t rejectedFrames = 0;
+    uint32_t _rejectedFrames = 0;
 
     // These values all belong to the same validated frame. Counters describe ADC
     // conversions read by S3, not UART bytes, DRDY edges, or generated mock readings.
-    uint32_t uptimeMs = 0;
-    bool adcReady = false;
-    uint64_t sampleCount = 0;
+    uint32_t _uptimeMs = 0;
+    bool _adcReady = false;
+    uint64_t _sampleCount = 0;
     // Version 2 has no loss diagnostics: show unknown, never invented zero totals.
-    bool diagnosticsAvailable = false;
-    uint64_t missedEdges = 0;
-    uint64_t rejectedReads = 0;
-    uint64_t readFailures = 0;
-    uint64_t overlapReads = 0;
-    uint64_t readyTimeouts = 0;
-    uint32_t readFault = 0;
-    uint32_t samplesPerSecond = 0;
-    int32_t latestRaw = 0;
-    uint32_t sampleAgeMs = UINT32_MAX;
-    uint32_t errorCode = 0;
+    bool _diagnosticsAvailable = false;
+    uint64_t _missedEdges = 0;
+    uint64_t _rejectedReads = 0;
+    uint64_t _readFailures = 0;
+    uint64_t _overlapReads = 0;
+    uint64_t _readyTimeouts = 0;
+    uint32_t _readFault = 0;
+    uint32_t _samplesPerSecond = 0;
+    int32_t _latestRaw = 0;
+    uint32_t _sampleAgeMs = UINT32_MAX;
+    uint32_t _errorCode = 0;
     // Version 2 reports acquisition intent separately from actual arriving samples.
-    bool acquisitionRunning = false;
-    uint32_t appliedRate = 1000;
+    bool _acquisitionRunning = false;
+    uint32_t _appliedRate = 1000;
     // Latest outgoing request and its pending/confirmed/rejected/timeout state.
     // These live in firmware, so refreshing the browser cannot forget a request.
-    uint32_t commandId = 0;
-    uint32_t commandSentMs = 0;
-    uint32_t requestedRate = 0;
-    bool requestedRecording = false;
-    recordingMonitor recording;
-    String commandAction;
-    String commandStatus = "idle";
+    uint32_t _commandId = 0;
+    uint32_t _commandSentMs = 0;
+    uint32_t _requestedRate = 0;
+    bool _requestedRecording = false;
+    RecordingMonitor _recordingMonitor;
+    String _commandAction;
+    String _commandStatus = "idle";
 };

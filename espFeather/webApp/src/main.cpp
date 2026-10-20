@@ -19,14 +19,14 @@
  * their separate setup()/loop() in test/hardware/ads127CaptureControl.cpp.
  * Arduino calls setup() once and then loop() repeatedly. webApp performs the
  * actual service startup/updates; dacGenerator creates its own background task.
- * Read webApp.cpp next for ownership and startup, webController.cpp for routes.
+ * Read WebApp.cpp next for ownership and startup, WebController.cpp for routes.
  */
 #include <Arduino.h>
 #include <version.hpp>
-#include "webApp.h"
+#include "WebApp.h"
 
 // Keep the application alive for the lifetime of the firmware.
-static webApp app;
+static WebApp webApp;
 
 /**
  * @brief Open USB debug output, print the firmware version, and start the application.
@@ -46,7 +46,7 @@ void setup()
     Serial.println(ESP32_DIGITIZER_VERSION);
 
     // Startup failures are reported by the application through serial diagnostics.
-    app.begin();
+    webApp.begin();
 }
 
 /**
@@ -59,5 +59,5 @@ void setup()
 void loop()
 {
     // Advance all application services together.
-    app.update();
+    webApp.update();
 }

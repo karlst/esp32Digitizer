@@ -1,38 +1,37 @@
 # Recording and test source layout
 
-Production implementations stay in `espP4/main/src/` (implementations) and `main/include/` (headers), `espFeather/src/`,
-`espS3/src/`, and `shared/bufferedWriter/src/`. Tests use those implementations;
-there is no copied decoder, disk writer, or ADC driver.
+The application implementation is shared by recording and tests. Only startup
+and the services supplied at startup differ; there is no copied decoder, writer
+or ADC configuration sequence.
 
-| Location | Contents |
-| --- | --- |
-| `espP4/test/hardware/` | SD speed generator, generated-file format/checker, RAM waveform summary and report |
-| `espP4/test/profile/` | Task/CPU profiling, decoder timing, and profiling arithmetic |
-| `espP4/test/firmware.cmake` | Adds bench sources to the existing P4 firmware; enables CPU profiling only when configured |
-| `espFeather/test/hardware/` | ADC bench setup/controller, DAC/loopback tests, retained LED test |
-| `espS3/test/hardware/` | Historical ADS127 receiver, generated-data recording tests, startup storage check and other hardware diagnostics |
-| `shared/test/support/` | Bench serial-line assembly and run-duration choices shared by board tests |
-| Each project's `test/` | PC checks, fake hardware, capture/analysis scripts and test build configuration |
+| Purpose | P4 | Feather |
+| --- | --- | --- |
+| Ordinary startup | `main/src/main.cpp` | `src/main.cpp` |
+| Real application | `main/src/RecordingApplication.cpp` | `src/AcquisitionApplication.cpp` |
+| Application headers | `main/include` | `include` |
+| Test startup | `test/hardware/main.cpp` | `test/hardware/ads127CaptureControl.cpp` |
+| Test services | `RecordingHarness`, `RamCaptureDestination`, `SdWriteTest`, `SdSmokeSummary` | `BenchAcquisitionServices`, `BenchDac`, `InputSnapshot` |
+| Profiling | `test/profile` | No separate CPU profiler |
 
-The main programs retain calls that connect tests to real capture and storage.
-P4 `main.cpp` selects SD or RAM output and starts/stops the existing SD test.
-The recorder calls the separate generated-data verifier only for synthetic files.
-Its ordinary checksum, error reporting, and ADC recording format remain in mainline
-code because they protect real recordings too.
+P4 CMake selects test startup only for smoke, profiling or `CONFIG_P4_DIAGNOSTICS`.
+Ordinary startup creates no test objects or generated-data task. The recorder's
+layout and readback interfaces allow test-specific verification without including
+test classes in the recorder. `CONFIG_P4_DIAGNOSTICS` enables manual RAM and SD
+speed tests in a separate configured build; smoke/profile already include them.
 
-The separate `espFeather/webApp` project links the LED test for its blink routes.
-The parent Feather project builds terminal firmware and excludes the web application.
-The reusable ADS127 SPI driver uses `espFeather/src/adc` and `espFeather/include/adc`.
-S3 application headers are in `espS3/include`, with backend headers in `include/backend`.
+Feather environment `recording` selects ordinary startup and the external ADC
+input. The existing named test environments select their own startup and inject
+test services. The reusable ADC configuration and SPI driver live in `src/adc`
+and `include/adc`. `shared/BenchLine.h` assembles protocol lines for both boards;
+shared test-duration choices remain in `shared/test/support`.
 
-S3 storage-check builds link `storageCheck.cpp`; ordinary builds do not. S3's
-synthetic build uses the real recorder and adds only test generation and metadata.
+The preserved `espFeather/webApp` is a separate PlatformIO project. Its LED
+service lives with its own source and headers; terminal firmware does not link
+web code. Its old S3 status interface has not been converted into P4 control.
+The S3 firmware project was removed; the Feather driver checks and Arduino/SPI
+substitutes it formerly hosted now live in `espFeather/test`.
 
-Build environment names, console commands, recording formats and capture
-limits are unchanged. The root PlatformIO files import `test/platformio.ini`.
-P4's main CMake file imports `test/firmware.cmake`. Generated build directories
-and saved SDK configuration files are not source files and were not relocated.
-
-After source changes, run the PC checks and rebuild the affected firmware before
-uploading. Source/path inspection alone does not establish a successful build or
-unchanged timing on hardware.
+[Data flow](../../docs/DATA-FLOW.md) describes ownership and actual transfer calls.
+[Build instructions](../../docs/BUILDING.md) list ordinary and test builds.
+After source changes, Karl runs PC checks and firmware builds before uploads;
+source inspection alone cannot establish compilation or hardware behavior.

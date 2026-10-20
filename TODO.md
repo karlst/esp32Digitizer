@@ -40,8 +40,11 @@ numbers, factory-calibration details and measurement limitations.
 - [ ] Assess per-core capacity before moving Feather duties. Profile baseline:
   Core 0 busy 40.3%; Core 1 busy 92.6%, including measurement overhead.
 - [ ] Recheck a profiling-disabled build before production use.
-- [ ] Decide whether RAM waveform support should have a compile-time exclusion.
-  It currently remains compiled in and is selected by USB w; profiling has its own switch.
+- [x] Separate ordinary recording startup from test startup. RAM summaries and
+  generated-data SD tests now compile only in test builds; profiling remains optional.
+- [ ] Verify the October 20 application/naming refactor: twelve PC smoke suites,
+  P4 ordinary and test firmware builds, Feather ordinary and test builds, then
+  a fresh hardware smoke run. Earlier passes do not cover the changed source.
 - [ ] Review stack/memory headroom with the eventual production configuration.
   The profile control stack was enlarged after the earlier low-headroom reading;
   do not apply that old minimum-free-stack number to every later build.
@@ -78,8 +81,7 @@ implementation decisions.
 These concerns were recorded during comment review; no fixes are implied.
 
 - [ ] Normal Feather web DAC ignores dac_output_voltage return values in stop/sample paths. Software-reported state is not driver confirmation.
-- [ ] S3 accepted-read totals can include a value rejected by a full recording buffer; storage failure is noticed subsequently.
-- [ ] ADS1256 stop sends STANDBY without readback; true confirms ready checks/command dispatch, not independently measured standby.
 - [ ] Feather HTML initial rec-open-time placeholder appears to contain an encoding replacement character; not changed in comment-only pass.
-- [ ] S3 SD write timing test ignores close result; RESULT ok excludes close failures.
-- [ ] Historical S3 host scripts assume COM4 and installed test firmware without identification. Stop write failure can skip explicit port close.
+
+S3-only review findings were retired with removal of that project, not fixed.
+Its previous code and review notes remain in Git history.

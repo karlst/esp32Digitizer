@@ -1,0 +1,25 @@
+# Load esp32p4 ROM ELF symbols
+define target hookpost-remote
+set confirm off
+  # if $_streq((char *) 0x4fc1d1ac, "Aug 11 2023")
+  if (*(int*) 0x4fc1d1ac) == 0x20677541 && (*(int*) 0x4fc1d1b0) == 0x32203131 && (*(int*) 0x4fc1d1b4) == 0x333230
+    add-symbol-file C:/Espressif/tools/esp-rom-elfs/20260528/esp32p4_rev0_rom.elf
+  else
+    # if $_streq((char *) 0x4fc1d500, "Apr 30 2025")
+    if (*(int*) 0x4fc1d500) == 0x20727041 && (*(int*) 0x4fc1d504) == 0x32203033 && (*(int*) 0x4fc1d508) == 0x353230
+      add-symbol-file C:/Espressif/tools/esp-rom-elfs/20260528/esp32p4_rev300_rom.elf
+    else
+      echo Warning: Unknown esp32p4 ROM revision.\n
+    end
+  end
+set confirm on
+end
+
+
+# Load bootloader symbols
+set confirm off
+    add-symbol-file C:/Users/karls/source/esp32Digitizer/build-profile/bootloader/bootloader.elf
+set confirm on
+
+# Load application symbols
+file C:/Users/karls/source/esp32Digitizer/build-profile/espP4.elf

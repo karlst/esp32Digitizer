@@ -9,7 +9,7 @@ operation is performed automatically by the assistant.
 ## What changes and what stays representative
 
 `CONFIG_P4_CAPTURE_PROFILE` defaults off. When on, CMake compiles
-`captureProfile.cpp`, retains the decoder/writer task handles, and selects the
+`CaptureProfile.cpp`, retains the decoder/writer task handles, and selects the
 shared 60-second run / 65-second receiver timeout. The normal configuration
 retains 1800/1805-second timing. Capture pins, DMA allocation, private queues,
 decoder, three-byte packing, 4 MiB ring, SD transfer sizes and 10 GB reservation

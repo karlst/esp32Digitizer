@@ -13,7 +13,7 @@
  */
 
 /**
- * @file captureProfile.h
+ * @file CaptureProfile.h
  * @brief Optional Core 0-owned capture diagnostics; no new worker or ISR work.
  * Read begin(), poll(), finish(), report() in that order. All calls come from
  * the main control task. Conditional compilation removes this class entirely
@@ -25,6 +25,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "profileMath.h"
+#include "IntervalTotals.h"
 
 /**
  * @brief Sample five persistent tasks and estimate each core's spare time.
@@ -34,7 +35,7 @@
  * so these are scheduling estimates, not precise ISR-separated CPU occupancy.
  * The snapshot calls themselves and enabled runtime bookkeeping add overhead.
  */
-class captureProfile
+class CaptureProfile
 {
 public:
     void begin(TaskHandle_t control, TaskHandle_t decoder, TaskHandle_t writer);
@@ -43,15 +44,15 @@ public:
     void report();
 private:
     void sample(bool baseline);
-    static constexpr unsigned taskCount = 5;
-    TaskHandle_t handles[taskCount] = {};
-    uint64_t previousRuntime[taskCount] = {};
-    profileMath::intervalTotals taskTotals[taskCount] = {};
-    profileMath::intervalTotals busyTotals[2] = {};
-    int64_t previousAt = 0;
-    uint64_t minWindowUs = 0, maxWindowUs = 0, maxSnapshotUs = 0;
-    size_t minInternalFree = 0, minPsramFree = 0;
-    uint32_t intervals = 0, invalidIntervals = 0, boundaryOvershoots = 0;
-    bool running = false;
+    static constexpr unsigned _taskCount = 5;
+    TaskHandle_t _handles[_taskCount] = {};
+    uint64_t _previousRuntime[_taskCount] = {};
+    profileMath::IntervalTotals _intervalTotalsTasks[_taskCount] = {};
+    profileMath::IntervalTotals _intervalTotalsBusy[2] = {};
+    int64_t _previousAt = 0;
+    uint64_t _minWindowUs = 0, _maxWindowUs = 0, _maxSnapshotUs = 0;
+    size_t _minInternalFree = 0, _minPsramFree = 0;
+    uint32_t _intervals = 0, _invalidIntervals = 0, _boundaryOvershoots = 0;
+    bool _running = false;
 };
 #endif

@@ -15,7 +15,7 @@ the signed 24-bit range. Negative Fibonacci, zero, both signed limits, mixed-byt
 patterns, every individual bit and its inverse, and a longer deterministic
 sequence exercise values that small positive numbers would miss.
 
-Those bytes go through the actual espP4/main/src/frameDecoder.cpp on the PC.
+Those bytes go through the actual espP4/main/src/FrameDecoder.cpp on the PC.
 The test copies every callback output into RAM and requires the same count,
 order and values as the original list, with the expected status byte. It then
 calls the actual recordingFormat::packSamples helper and compares all three
@@ -51,4 +51,4 @@ the receiver recomputes it from received data. It cannot establish that whole
 frames were never lost or repeated, and it changes frame-length requirements.
 It must not be silently substituted for this exact expected-sequence test.
 
-Source: https://www.ti.com/lit/ds/symlink/ads127l18.pdf
+Source: https://www.ti.com/lit/ds/symlink/ads127L18.pdf

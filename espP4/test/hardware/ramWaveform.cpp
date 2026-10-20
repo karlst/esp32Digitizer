@@ -12,23 +12,23 @@
  * Public License in the repository LICENSE file or <https://www.gnu.org/licenses/>.
  */
 
-/** @file ramWaveform.cpp
+/** @file RamWaveform.cpp
  * @brief Retain waveform shape without disk I/O or printing during capture.
  */
-#include "ramWaveform.h"
+#include "RamWaveform.h"
 #include <cstdio>
 
 /** @brief Core 0 resets while decoder is idle; supported rates divide by 2000.
  * One second of decoded samples is skipped for analog startup settling.
  * Queue handoff subsequently gives Core 1 access to the initialized state.
  */
-void ramWaveform::reset(uint32_t rate)
+void RamWaveform::reset(uint32_t rate)
 {
-    ready.store(false);
-    skip = rate;
-    samplesPerBin = rate / 2000;
-    inBin = completedBins = 0;
-    for (auto& bin : bins) { bin = waveformBin{}; }
+    _ready.store(false);
+    _skip = rate;
+    _samplesPerBin = rate / 2000;
+    _inBin = _completedBins = 0;
+    for (auto& waveformBin : _waveformBins) { waveformBin = WaveformBin{}; }
 }
 
 /** @brief Core 1 receives decoder batches; strip status and sign-extend bit 23.
@@ -36,34 +36,34 @@ void ramWaveform::reset(uint32_t rate)
  * is full, discard later samples while Core 0 coordinates a normal ADC stop.
  * No pointer to the decoder's reusable batch is retained.
  */
-void ramWaveform::accept(const uint32_t* words, size_t count)
+void RamWaveform::accept(const uint32_t* words, size_t count)
 {
-    for (size_t index = 0; index < count && completedBins < binCount; ++index)
+    for (size_t index = 0; index < count && _completedBins < _binCount; ++index)
     {
-        if (skip != 0) { --skip; }
-        else if (samplesPerBin != 0)
+        if (_skip != 0) { --_skip; }
+        else if (_samplesPerBin != 0)
         {
             const uint32_t raw = words[index] & 0xffffffU;
             const int32_t value = static_cast<int32_t>(raw) -
                 ((raw & 0x800000U) ? 0x1000000 : 0);
-            auto& bin = bins[completedBins];
-            if (value < bin.minimum) { bin.minimum = value; }
-            if (value > bin.maximum) { bin.maximum = value; }
-            bin.sum += value;
-            if (++inBin == samplesPerBin)
+            auto& waveformBin = _waveformBins[_completedBins];
+            if (value < waveformBin._minimum) { waveformBin._minimum = value; }
+            if (value > waveformBin._maximum) { waveformBin._maximum = value; }
+            waveformBin._sum += value;
+            if (++_inBin == _samplesPerBin)
             {
-                inBin = 0;
-                ++completedBins;
-                if (completedBins == binCount) { ready.store(true); }
+                _inBin = 0;
+                ++_completedBins;
+                if (_completedBins == _binCount) { _ready.store(true); }
             }
         }
     }
 }
 
 /** @brief Core 0 polls only this atomic flag until the decoder has drained. */
-bool ramWaveform::complete() const
+bool RamWaveform::complete() const
 {
-    return ready.load();
+    return _ready.load();
 }
 
 /**
@@ -72,17 +72,17 @@ bool ramWaveform::complete() const
  * receiver's error checks. It does not establish analog accuracy. Core 0 calls
  * this only after Core 1 stops changing the bins; no lock is taken here.
  */
-void ramWaveform::report(unsigned long run, uint32_t rate, bool clean) const
+void RamWaveform::report(unsigned long run, uint32_t rate, bool clean) const
 {
     printf("WAVE_BEGIN run=%lu rate=%lu bins=%lu samplesPerBin=%lu clean=%u\n",
            run, static_cast<unsigned long>(rate),
-           static_cast<unsigned long>(completedBins),
-           static_cast<unsigned long>(samplesPerBin), unsigned(clean && complete()));
-    for (unsigned index = 0; index < completedBins; ++index)
+           static_cast<unsigned long>(_completedBins),
+           static_cast<unsigned long>(_samplesPerBin), unsigned(clean && complete()));
+    for (unsigned index = 0; index < _completedBins; ++index)
     {
-        const auto& bin = bins[index];
-        printf("WAVE,%u,%ld,%ld,%.3f\n", index, static_cast<long>(bin.minimum),
-               static_cast<long>(bin.maximum), double(bin.sum) / samplesPerBin);
+        const auto& waveformBin = _waveformBins[index];
+        printf("WAVE,%u,%ld,%ld,%.3f\n", index, static_cast<long>(waveformBin._minimum),
+               static_cast<long>(waveformBin._maximum), double(waveformBin._sum) / _samplesPerBin);
     }
     printf("WAVE_END run=%lu\n", run);
     fflush(stdout);

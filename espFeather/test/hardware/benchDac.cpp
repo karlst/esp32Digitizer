@@ -13,7 +13,7 @@
  */
 
 /**
- * @file benchDac.cpp
+ * @file BenchDac.cpp
  * @brief Set the Feather's analog output to a test sine wave, square wave, or fixed level.
  * A DAC converts an eight-bit number to an analog voltage. This code commands
  * GPIO25/A1; it does not measure whether that voltage was produced correctly.
@@ -23,7 +23,7 @@
  * Read initialize(), start(), tick(), stop(). Timer callbacks never print or
  * issue ADC SPI commands. Arduino loop owns the ADC; this class owns GPIO25.
  */
-#include "benchDac.h"
+#include "BenchDac.h"
 #if ADS127_P4_DAC_TEST
 #include "benchDacWave.h"
 #include <driver/dac.h>
@@ -33,10 +33,10 @@
  * Called once by setup(). Failure refuses future DAC start. The timer fires
  * every nominal 500 us only after start(); task scheduling can delay updates.
  */
-bool benchDac::initialize()
+bool BenchDac::initialize()
 {
-    mutex = xSemaphoreCreateMutex();
-    bool retVal = mutex != nullptr;
+    _mutex = xSemaphoreCreateMutex();
+    bool retVal = _mutex != nullptr;
     if (retVal)
     {
         esp_timer_create_args_t args = {};
@@ -45,12 +45,12 @@ bool benchDac::initialize()
         args.dispatch_method = ESP_TIMER_TASK;
         args.name = "benchDac";
         args.skip_unhandled_events = true;
-        retVal = esp_timer_create(&args, &timer) == ESP_OK;
+        retVal = esp_timer_create(&args, &_timer) == ESP_OK;
     }
-    if (!retVal && mutex != nullptr)
+    if (!retVal && _mutex != nullptr)
     {
-        vSemaphoreDelete(mutex);
-        mutex = nullptr;
+        vSemaphoreDelete(_mutex);
+        _mutex = nullptr;
     }
     return retVal;
 }
@@ -63,21 +63,21 @@ bool benchDac::initialize()
  * periodic updates. True means driver calls
  * succeeded, not measured voltage. Any failure disables the output again.
  */
-bool benchDac::start()
+bool BenchDac::start()
 {
-    bool retVal = mutex != nullptr && timer != nullptr;
+    bool retVal = _mutex != nullptr && _timer != nullptr;
     if (retVal)
     {
-        xSemaphoreTake(mutex, portMAX_DELAY);
-        beganAt = lastAt = esp_timer_get_time();
-        updates = missed = 0;
-        maxGapUs = 0;
-        broken = false;
+        xSemaphoreTake(_mutex, portMAX_DELAY);
+        _beganAt = _lastAt = esp_timer_get_time();
+        _updates = _missed = 0;
+        _maxGapUs = 0;
+        _broken = false;
         retVal = dac_output_enable(DAC_CHANNEL_1) == ESP_OK &&
                  dac_output_voltage(DAC_CHANNEL_1, benchDacWave::codeAt(0)) == ESP_OK;
-        enabled = retVal;
-        xSemaphoreGive(mutex);
-        if (retVal) { retVal = esp_timer_start_periodic(timer, benchDacWave::updateUs) == ESP_OK; }
+        _enabled = retVal;
+        xSemaphoreGive(_mutex);
+        if (retVal) { retVal = esp_timer_start_periodic(_timer, benchDacWave::updateUs) == ESP_OK; }
     }
     if (!retVal) { stop(); }
     return retVal;
@@ -89,25 +89,25 @@ bool benchDac::start()
  * hardware timer losses. A driver error latches broken; loop() requests ADC stop.
  * Pending callbacks after stop see enabled=false and cannot re-enable output.
  */
-void benchDac::tick(void* context)
+void BenchDac::tick(void* context)
 {
-    auto* source = static_cast<benchDac*>(context);
-    xSemaphoreTake(source->mutex, portMAX_DELAY);
-    if (source->enabled)
+    auto* benchDac = static_cast<BenchDac*>(context);
+    xSemaphoreTake(benchDac->_mutex, portMAX_DELAY);
+    if (benchDac->_enabled)
     {
         const int64_t now = esp_timer_get_time();
-        const uint64_t gap = static_cast<uint64_t>(now - source->lastAt);
-        if (gap > source->maxGapUs) { source->maxGapUs = gap; }
+        const uint64_t gap = static_cast<uint64_t>(now - benchDac->_lastAt);
+        if (gap > benchDac->_maxGapUs) { benchDac->_maxGapUs = gap; }
         if (gap >= 2 * benchDacWave::updateUs)
         {
-            source->missed += static_cast<uint32_t>(gap / benchDacWave::updateUs - 1);
+            benchDac->_missed += static_cast<uint32_t>(gap / benchDacWave::updateUs - 1);
         }
-        source->lastAt = now;
-        const uint8_t code = benchDacWave::codeAt(static_cast<uint64_t>(now - source->beganAt));
-        if (dac_output_voltage(DAC_CHANNEL_1, code) != ESP_OK) { source->broken = true; }
-        ++source->updates;
+        benchDac->_lastAt = now;
+        const uint8_t code = benchDacWave::codeAt(static_cast<uint64_t>(now - benchDac->_beganAt));
+        if (dac_output_voltage(DAC_CHANNEL_1, code) != ESP_OK) { benchDac->_broken = true; }
+        ++benchDac->_updates;
     }
-    xSemaphoreGive(source->mutex);
+    xSemaphoreGive(benchDac->_mutex);
 }
 
 /**
@@ -117,17 +117,17 @@ void benchDac::tick(void* context)
  * mutex plus enabled=false does. Output disabled means undriven, not calibrated
  * zero volts. Check the return code instead of claiming a failed disable worked.
  */
-void benchDac::stop()
+void BenchDac::stop()
 {
-    if (timer != nullptr) { esp_timer_stop(timer); }
-    if (mutex != nullptr) { xSemaphoreTake(mutex, portMAX_DELAY); }
-    enabled = false;
+    if (_timer != nullptr) { esp_timer_stop(_timer); }
+    if (_mutex != nullptr) { xSemaphoreTake(_mutex, portMAX_DELAY); }
+    _enabled = false;
     const bool off = dac_output_disable(DAC_CHANNEL_1) == ESP_OK;
-    if (!off) { broken = true; }
-    const uint32_t count = updates, gaps = missed;
-    const uint64_t longest = maxGapUs;
-    const bool fault = broken;
-    if (mutex != nullptr) { xSemaphoreGive(mutex); }
+    if (!off) { _broken = true; }
+    const uint32_t count = _updates, gaps = _missed;
+    const uint64_t longest = _maxGapUs;
+    const bool fault = _broken;
+    if (_mutex != nullptr) { xSemaphoreGive(_mutex); }
     Serial.printf("DAC %s updates=%lu missedIntervals=%lu maxGapUs=%llu driverFault=%u\n",
                   off ? "OFF" : "disable FAILED", static_cast<unsigned long>(count),
                   static_cast<unsigned long>(gaps), static_cast<unsigned long long>(longest),
@@ -135,14 +135,14 @@ void benchDac::stop()
 }
 
 /** @brief Read the callback's failure latch safely from Arduino loop. */
-bool benchDac::failed()
+bool BenchDac::failed()
 {
     bool retVal = true;
-    if (mutex != nullptr)
+    if (_mutex != nullptr)
     {
-        xSemaphoreTake(mutex, portMAX_DELAY);
-        retVal = broken;
-        xSemaphoreGive(mutex);
+        xSemaphoreTake(_mutex, portMAX_DELAY);
+        retVal = _broken;
+        xSemaphoreGive(_mutex);
     }
     return retVal;
 }

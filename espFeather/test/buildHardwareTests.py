@@ -20,7 +20,10 @@ from pathlib import Path
 
 projectRoot = Path(env.subst('$PROJECT_DIR'))
 frameworkRoot = Path(env.PioPlatform().get_package_dir('framework-arduinoespressif32'))
-env.Append(CPPPATH=[str(projectRoot / 'include' / 'adc'),
+# Sources added by this pre-build script need explicit header paths, including
+# the common application headers directly inside include.
+env.Append(CPPPATH=[str(projectRoot / 'include'),
+                   str(projectRoot / 'include' / 'adc'),
                    str(projectRoot / 'test' / 'hardware'),
                    str(projectRoot.parent / 'shared'),
                    str(frameworkRoot / 'libraries' / 'SPI' / 'src')])
@@ -28,5 +31,11 @@ selectedSource = env.GetProjectOption('custom_test_source', 'ads127SpiDiagnostic
 if selectedSource not in ['ads127SpiDiagnostic.cpp', 'ads127CaptureControl.cpp', 'benchDacLoopback.cpp']:
     raise ValueError('Unknown Feather hardware test: ' + selectedSource)
 env.BuildSources('$BUILD_DIR/hardwareTests', str(projectRoot / 'test' / 'hardware'),
-                 src_filter=['-<*>', '+<' + selectedSource + '>', '+<benchDac.cpp>',
-                             '+<inputSnapshot.cpp>', '+<ads127LowRate.cpp>'])
+                 src_filter=['-<*>', '+<' + selectedSource + '>', '+<BenchDac.cpp>',
+                             '+<InputSnapshot.cpp>', '+<BenchAcquisitionServices.cpp>'])
+
+# Compile the real controller only for capture environments. Other diagnostics
+# keep their own entry points and do not need its handshake state machine.
+if selectedSource == 'ads127CaptureControl.cpp':
+    env.BuildSources('$BUILD_DIR/acquisition', str(projectRoot / 'src'),
+                     src_filter=['-<*>', '+<AcquisitionApplication.cpp>'])

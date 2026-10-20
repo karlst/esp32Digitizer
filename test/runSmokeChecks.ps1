@@ -27,6 +27,7 @@ $powerShellExe = (Get-Process -Id $PID).Path
 # Keep test implementations in their board projects. Each entry names an existing
 # runner or test suite; uiSmoke.cjs already delegates to controlsSmoke.cjs.
 $checks = @(
+    @{ Name = 'Feather ADC driver'; Kind = 'PowerShell'; Path = 'espFeather/test/runAdcDriverChecks.ps1' },
     @{ Name = 'P4 decoder, recording format and shared writer'; Kind = 'PowerShell'; Path = 'espP4/test/runDecoderChecks.ps1' },
     @{ Name = 'P4 exact sample values'; Kind = 'PowerShell'; Path = 'espP4/test/runExactSampleChecks.ps1' },
     @{ Name = 'P4 RAM waveform'; Kind = 'PowerShell'; Path = 'espP4/test/runRamWaveformChecks.ps1' },

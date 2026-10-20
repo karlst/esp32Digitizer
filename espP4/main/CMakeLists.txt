@@ -12,8 +12,13 @@
 
 # Compile P4 capture and storage plus the shared byte writer. The reusable writer
 # has no S3 dependency; these include paths expose its interface to sdRecorder.
-idf_component_register(SRCS "src/main.cpp" "src/frameDecoder.cpp" "src/sdRecorder.cpp"
-    "../../shared/bufferedWriter/src/bufferedWriter.cpp"
+# Select one small startup file. Application and storage implementations are shared.
+set(startup "src/main.cpp")
+if(CONFIG_P4_HARDWARE_SMOKE OR CONFIG_P4_CAPTURE_PROFILE OR CONFIG_P4_DIAGNOSTICS)
+    set(startup "../test/hardware/main.cpp")
+endif()
+idf_component_register(SRCS ${startup} "src/RecordingApplication.cpp" "src/FrameDecoder.cpp" "src/SdRecorder.cpp"
+    "../../shared/bufferedWriter/src/BufferedWriter.cpp"
     INCLUDE_DIRS "include" "../../shared" "../../shared/bufferedWriter/src"
     REQUIRES esp_driver_parlio esp_driver_uart esp_driver_gpio esp_timer fatfs sdmmc esp_driver_sdmmc esp_psram esp_rom esp_hw_support)
 # Allocate the ring separately at runtime: 4 MiB total, writes of up to 128 KiB.
@@ -21,6 +26,7 @@ idf_component_register(SRCS "src/main.cpp" "src/frameDecoder.cpp" "src/sdRecorde
 target_compile_definitions(${COMPONENT_LIB} PRIVATE
     BUFFERED_WRITER_EXTERNAL=1 BUFFERED_WRITER_CAPACITY=4194304 BUFFERED_WRITER_BLOCK_BYTES=131072)
 
-# Bench commands remain available in the existing firmware. Their implementations
-# and optional profiling build rules live with the tests, not the recorder.
-include("${CMAKE_CURRENT_LIST_DIR}/../test/firmware.cmake")
+# Test implementations are absent from ordinary recording builds.
+if(CONFIG_P4_HARDWARE_SMOKE OR CONFIG_P4_CAPTURE_PROFILE OR CONFIG_P4_DIAGNOSTICS)
+    include("${CMAKE_CURRENT_LIST_DIR}/../test/firmware.cmake")
+endif()

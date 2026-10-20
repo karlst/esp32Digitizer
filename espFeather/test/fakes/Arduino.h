@@ -15,18 +15,18 @@
 /**
  * @file Arduino.h
  * @brief Desktop substitutes for testing the actual Feather status parser and JSON.
- * Reuse S3's fake clock/serial buffers, then add the small String and HardwareSerial
+ * Reuse the local fake clock/serial buffers, then add the small String and HardwareSerial
  * interfaces needed by Feather code. This is not a general Arduino implementation.
  * The test runner's include order selects it only for monitorChecks.exe.
  */
 #pragma once
-#include "../../../espS3/test/fakes/Arduino.h"
+#include "ArduinoBase.h"
 #include <type_traits>
 #define RX 7
 #define TX 8
 
 /**
- * @brief Provide the small subset of Arduino String used by s3Monitor.cpp.
+ * @brief Provide the small subset of Arduino String used by S3Monitor.cpp.
  */
 class String : public std::string
 {
@@ -46,7 +46,7 @@ public:
 /**
  * @brief Add Arduino's print API to the shared simulated UART.
  */
-class HardwareSerial : public fakeSerial
+class HardwareSerial : public FakeSerial
 {
 public:
     /**
@@ -54,7 +54,7 @@ public:
      */
     size_t print(const String& value)
     {
-        output += value;
+        _output += value;
         return value.size();
     }
 };

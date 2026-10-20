@@ -17,15 +17,60 @@
  * This does not exercise SD hardware, the DAC, or ADC voltage accuracy. Karl
  * runs the test runner before building the two opt-in firmware environments.
  */
-#include "sdSmokeSummary.h"
+#include "SdSmokeSummary.h"
+#include "RecordingLayout.h"
+#include "SyntheticRecordingLayout.h"
 #include "benchDacWave.h"
 #include "test/support/ads127BenchTiming.h"
 #include <cassert>
 #include <cstdio>
 
+/**
+ * @brief Verify that selecting a file policy preserves count checks and file formats.
+ * Calls through the base interface model the recorder's dispatch. The synthetic
+ * policy must find a corrupted word read back at a nonzero file offset; the normal
+ * ADC policy must reject a mismatch between accepted bytes and decoded samples.
+ * These checks use memory only and cannot establish successful SD operations.
+ */
+static void checkRecordingLayouts()
+{
+    RecordingLayout recordingLayout;
+    SyntheticRecordingLayout syntheticRecordingLayout;
+    const RecordingLayout& recordingLayoutSynthetic = syntheticRecordingLayout;
+    assert(recordingLayout.recordBytes() == 3);
+    assert(recordingLayout.countMatches(12, 4));
+    assert(!recordingLayout.countMatches(11, 4));
+    assert(!recordingLayout.countMatches(12, 5));
+    assert(recordingLayoutSynthetic.recordBytes() == 4);
+    assert(recordingLayoutSynthetic.countMatches(16, 0));
+    assert(!recordingLayoutSynthetic.countMatches(15, 0));
+
+    // Build a small interior slice, as a disk read would provide it.
+    uint8_t payload[16] = {};
+    for (unsigned index = 0; index < 4; ++index)
+    {
+        const uint32_t word = sdTestData::word(17 + index);
+        for (unsigned byte = 0; byte < 4; ++byte)
+        {
+            payload[index * 4 + byte] = static_cast<uint8_t>(word >> (byte * 8));
+        }
+    }
+    assert(recordingLayoutSynthetic.check(payload, sizeof(payload), 17 * 4) == 0);
+    payload[5] ^= 1;
+    assert(recordingLayoutSynthetic.check(payload, sizeof(payload), 17 * 4) == 1);
+
+    // Selecting a policy must preserve the header signature expected by readers.
+    uint8_t header[512] = {};
+    recordingLayout.makeHeader(header, true, 7, 6, 1024000, 12, 123);
+    assert(std::memcmp(header, "P4ADC03", 8) == 0);
+    recordingLayoutSynthetic.makeHeader(header, true, 7, sdTestData::stage, 1024000, 16, 123);
+    assert(std::memcmp(header, "P4SYN01", 8) == 0);
+}
+
 /** @brief Check byte splits, sign, full duration, and rejection of incomplete tails. */
 int main()
 {
+    checkRecordingLayouts();
     assert(ads127BenchTiming::runMs == 30000);
     assert(ads127BenchTiming::receiverTimeoutMs == 35000);
     assert(benchDacWave::codeAt(0) == 110);
@@ -35,22 +80,22 @@ int main()
     assert(benchDacWave::codeAt(29999999) == 135);
 
     // One sample per bin exposes sign extension and two separate read splits.
-    sdSmokeSummary summary;
-    summary.reset(10);
+    SdSmokeSummary sdSmokeSummary;
+    sdSmokeSummary.reset(10);
     const uint8_t signedValues[] = {255,255,255, 0,0,128, 255,255,127, 1,0,0};
-    summary.accept(signedValues, 1);
-    summary.accept(signedValues + 1, 3);
-    summary.accept(signedValues + 4, 8);
-    assert(summary.sampleCount() == 4);
-    assert(summary.mean(0) == -1);
-    assert(summary.mean(1) == -8388608);
-    assert(summary.mean(2) == 8388607);
-    assert(summary.mean(3) == 1);
-    assert(!summary.complete());
+    sdSmokeSummary.accept(signedValues, 1);
+    sdSmokeSummary.accept(signedValues + 1, 3);
+    sdSmokeSummary.accept(signedValues + 4, 8);
+    assert(sdSmokeSummary.sampleCount() == 4);
+    assert(sdSmokeSummary.mean(0) == -1);
+    assert(sdSmokeSummary.mean(1) == -8388608);
+    assert(sdSmokeSummary.mean(2) == 8388607);
+    assert(sdSmokeSummary.mean(3) == 1);
+    assert(!sdSmokeSummary.complete());
 
     // Feed a complete 30-second file in awkward 4093-byte reads (not divisible
     // by three). This crosses both sample and 100-ms bin boundaries repeatedly.
-    summary.reset(1024000);
+    sdSmokeSummary.reset(1024000);
     uint8_t block[4093] = {};
     const uint64_t bytes = uint64_t{1024000} * 30 * 3;
     for (uint64_t offset = 0; offset < bytes;)
@@ -63,19 +108,19 @@ int main()
             const uint32_t code = ((position / 3) / 1024000) % 2 == 0 ? 1000000 : 2000000;
             block[index] = static_cast<uint8_t>(code >> (8 * (position % 3)));
         }
-        summary.accept(block, amount);
+        sdSmokeSummary.accept(block, amount);
         offset += amount;
     }
-    assert(summary.complete());
-    assert(summary.sampleCount() == 30720000);
+    assert(sdSmokeSummary.complete());
+    assert(sdSmokeSummary.sampleCount() == 30720000);
     for (unsigned index = 0; index < 300; ++index)
     {
-        assert(summary.mean(index) == (index / 10 % 2 == 0 ? 1000000 : 2000000));
+        assert(sdSmokeSummary.mean(index) == (index / 10 % 2 == 0 ? 1000000 : 2000000));
     }
-    summary.accept(block, 1);
-    assert(!summary.complete());
-    summary.reset(1024000);
-    assert(summary.sampleCount() == 0 && !summary.complete());
+    sdSmokeSummary.accept(block, 1);
+    assert(!sdSmokeSummary.complete());
+    sdSmokeSummary.reset(1024000);
+    assert(sdSmokeSummary.sampleCount() == 0 && !sdSmokeSummary.complete());
     std::puts("PASS: SD byte boundaries, signed samples, duration, square-wave timing and incomplete-file rejection");
     return 0;
 }

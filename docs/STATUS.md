@@ -47,19 +47,19 @@ as the last uploaded smoke environment. Always select the intended experiment.
 ## Where to start
 
 - [Build tools and commands](BUILDING.md): ESP-IDF 5.5.6 for P4; PlatformIO/Arduino
-  for Feather and historical S3. Includes PowerShell environment activation.
+  for Feather. Includes PowerShell environment activation.
 - [Hardware smoke test](HARDWARE-SMOKE.md): wiring, dedicated builds/uploads,
   one run command, report meanings, and acceptance limits.
 - [Experiment selection](../espP4/CURRENT-SETUP.md): matching Feather/P4 firmware
   choices for SD, RAM comparison, constant input, and endurance work.
-- [PC smoke checks](../test/README.md): eleven suites; these do not operate boards.
+- [PC smoke checks](../test/README.md): twelve suites; these do not operate boards.
 - [Test history](P4-EARLY-TEST-HISTORY.md) and [retained evidence](evidence/README.md):
   dated results and supporting material.
 - [Open work](../TODO.md): proposed work and unresolved decisions.
 - [Working agreements](../AGENTS.md): coding conventions and Karl's control of
   Git, build/upload commands, and hardware operations.
 
-Application code is under `espP4`, `espFeather`, and historical `espS3`; reusable
+Application code is under `espP4` and `espFeather`; reusable
 components live under `shared`. Hardware tests and profiling live with tests.
 The Feather web interface is preserved separately in `espFeather/webApp` and is
 excluded from the current terminal build.
@@ -81,7 +81,7 @@ excluded from the current terminal build.
 - Intermittent post-upload READY/DONE handshake trouble has been cleared by
   resetting P4, but its cause has not been diagnosed.
 - The S3 high-rate receiver failed at 512k and 1.024M samples/s because of its
-  I2S clock constraint. It remains historical code; P4 is the active receiver.
+  I2S clock constraint. Its firmware was removed; earlier versions remain in Git history. P4 is the active receiver.
 - Production error policy, card qualification, and migration of Feather duties
   remain open. ADC data CRC and a physical known-digital-sequence test are proposals.
 
@@ -96,3 +96,16 @@ Karl accepted the smoke-test output and plot as sufficient for the current task
 and intends to commit/push. Git operations remain his responsibility. Continue
 source review and discuss further changes before implementing them; no additional
 hardware experiment is scheduled by this document.
+
+## Source refactor awaiting verification
+
+October 20 source changes introduce `RecordingApplication` on P4 and
+`AcquisitionApplication` on Feather, with separate ordinary/test startup files.
+Classes and their filenames use PascalCase; members use leading underscores;
+instances use the class name in camelCase. The S3 project was removed after
+moving its retained Feather ADC checks and fake hardware into Feather tests.
+[Data flow](DATA-FLOW.md) documents the actual transfer and verification calls.
+
+The successful hardware results above predate these edits. PC checks, both
+firmware builds and a fresh hardware smoke run must verify the changed source.
+No new build, upload or hardware result is claimed here.
