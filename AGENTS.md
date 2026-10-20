@@ -16,8 +16,8 @@ These conventions apply throughout this project and may be updated as developmen
 
 ## Required explanation level (confirmed by Karl, 2026-09-30)
 
-- Use the explanatory level approved in `s3Recorder/src/ads1256.cpp` and
-  `s3Recorder/src/acquisition.cpp` as the baseline for ALL project code, including
+- Use the explanatory level approved in `espS3/src/ads1256.cpp` and
+  `espS3/src/acquisition.cpp` as the baseline for ALL project code, including
   future changes. Do this during implementation; do not wait to be asked again.
 - Write for a capable reader who does not already know embedded systems or the
   framework. Explain the execution sequence, who calls each function, what its

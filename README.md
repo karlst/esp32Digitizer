@@ -1,5 +1,7 @@
 # ESP32 Digitizer
 
+Build tools and current commands: [Building the firmware](docs/BUILDING.md).
+
 ## License
 
 Copyright (C) 2026 Karl Stock.
@@ -18,24 +20,24 @@ license by the source-file headers.
 
 ## Project overview
 
-The current recorder is in `p4Capture/`, with Feather control firmware in
-`featherUi/`. Start with [the current setup](p4Capture/CURRENT-SETUP.md) and
+The current recorder is in `espP4/`, with Feather control firmware in
+`espFeather/`. Start with [the current setup](espP4/CURRENT-SETUP.md) and
 [October 19 results](docs/STATUS-2026-10-19-P4.md).
 
 `shared/bufferedWriter/` contains the reusable ring buffer, byte writer, and its
 PC tests. P4 uses this directly; its firmware and tests need no S3 source files.
-`s3Recorder/` retains the legacy S3 implementation and S3-specific tests. The
+`espS3/` retains the legacy S3 implementation and S3-specific tests. The
 S3 project also uses the shared writer, so there is only one implementation.
 
 Test implementations live under each project's `test/` directory. P4 hardware
-tests are in `p4Capture/test/hardware/`; CPU and decoder timing measurements are
-in `p4Capture/test/profile/`. Shared bench command/timing helpers are in
+tests are in `espP4/test/hardware/`; CPU and decoder timing measurements are
+in `espP4/test/profile/`. Shared bench command/timing helpers are in
 `shared/test/support/`. Test build environments for Feather and S3 live in
 `test/platformio.ini`, imported by each project's main configuration.
 
 The existing bench firmware still connects these helpers to the real recorder:
 source separation does not remove commands or create a second recording path.
-See [the source layout](p4Capture/test/SOURCE-LAYOUT.md) for details.
+See [the source layout](espP4/test/SOURCE-LAYOUT.md) for details.
 
 The S3 build and experiment notes below are historical. The current data path is:
 
@@ -85,12 +87,12 @@ Primary source: [Espressif revision 3.2 upgrade and revision 1.3 end-of-life pla
 
 ```text
 esp32Digitizer/
-    p4Capture/      Current ESP32-P4 capture/recorder firmware and tests
-    s3Recorder/     Legacy ESP32-S3 firmware and S3-specific tests
-    featherUi/      ESP32 Feather UI/control firmware
-    shared/         Reusable bufferedWriter library/tests, shared headers and protocol
-    backups/        Local firmware/reference backups
-    docs/           Project documentation
+    espFeather/     Feather control, web application and tests
+    espS3/          Legacy S3 firmware and tests
+    espP4/          P4 firmware: main/src, main/include and test
+    shared/         Reusable writer, shared headers and test support
+    docs/           Build guide, reference documents and selected evidence
+    captures/       Generated capture output; created on demand and ignored by Git
 ```
 
 ## Development Environment
@@ -99,12 +101,12 @@ Primary development environment:
 
 - Windows 11
 - Visual Studio Code
-- PlatformIO
-- Arduino framework
+- ESP-IDF 5.5.6 for P4
+- PlatformIO and Arduino framework for Feather/S3
 - Git / GitHub
 
 Feather and legacy S3 use PlatformIO. P4 uses ESP-IDF; see
-[p4Capture/CURRENT-SETUP.md](p4Capture/CURRENT-SETUP.md) for its build commands.
+[Building the firmware](docs/BUILDING.md) for tools and build commands.
 
 ## Branches
 
@@ -119,18 +121,9 @@ edit -> build -> upload -> test -> commit -> push
 
 ## Building
 
-Open either PlatformIO project in VS Code:
-
-```text
-s3Recorder/
-featherUi/
-```
-
-Then use:
-
-```text
-PlatformIO -> Project Tasks -> General -> Build
-```
+Use [Building the firmware](docs/BUILDING.md) for each board's terminal, build
+commands, PC checks, and the fresh P4 build directories required after renaming.
+Builds run on the PC and do not upload or start hardware tests.
 
 ## Uploading
 
@@ -157,7 +150,7 @@ Both projects currently use a serial monitor rate of:
 The current program counts accepted samples and keeps the latest value. The ring
 buffer and microSD recording in the target architecture above are future work.
 
-Read `s3Recorder/src/acquisition.cpp` first for the execution sequence. Below
+Read `espS3/src/acquisition.cpp` first for the execution sequence. Below
 30,000 samples/second, the Data Ready interrupt wakes the core-0 acquisition task,
 which reads three bytes through `ads1256.cpp`. At 30,000, `fastCapture.cpp` reads
 those bytes immediately inside the interrupt, using the S3 SPI2 hardware. The
@@ -204,7 +197,7 @@ stopped, not waveform accuracy or future recording-throughput tests. At 30k the
 CPU spends roughly half of core 0's time in these short reads, plus interrupt
 overhead; this implementation is not a design for a future 1M-sample/s ADC.
 
-Run desktop checks with `./s3Recorder/test/runNativeChecks.ps1`; add
+Run desktop checks with `./espS3/test/runNativeChecks.ps1`; add
 `-LegacyStatus` to check the older UART format. They cover acquisition/restart,
 signed byte decoding, overlap rejection, bounded controller failure, command
 framing, status parsing, and reboot ordering. They do not replace board tests.
@@ -502,7 +495,7 @@ The 4-MHz Choke run then failed after 31.147 seconds at a 1.5-Mbps target:
 peaked at 32,904 of 65,536 bytes; this was a transfer failure, not buffer overflow
 or an established throughput ceiling. The last complete ten-second stage was
 1.25 Mbps, but even 4 MHz is not qualified for sustained recording. Log (local, ignored):
-`s3Recorder/.pio/sdio-direct-choke-4mhz.log`. The failed recording is incomplete.
+`espS3/.pio/sdio-direct-choke-4mhz.log`. The failed recording is incomplete.
 
 Expanded newer-driver comparison: ESP-IDF 5.5 passed the first six-sector run
 and 17 repeats, then failed CRC on sector 65654 at 20 MHz on repeat 18. Returning
@@ -535,7 +528,7 @@ words drained. File header/size/tail checks passed, with 28,757,808 payload byte
 Maximum disk latency was 138.155 ms. This is a limit observed with this buffer,
 card and workload, not proof of the card's average bandwidth or sustained 3.25
 Mbps endurance. Logs: `short-terminals-choke10-boot.log` and
-`short-terminals-choke-10mhz.log` in `s3Recorder/.pio/`. Current S3 firmware is
+`short-terminals-choke-10mhz.log` in `espS3/.pio/`. Current S3 firmware is
 `choke-test-10mhz`, stopped after overflow; earlier current-firmware statements
 below are historical. No separate readback test preceded this ramp.
 
@@ -552,7 +545,7 @@ source at 250 kbps (31,250 bytes/s). A host Stop ends each run after approximate
 150 seconds. These explicit diagnostic builds leave the standard ramp unchanged.
 The one-bit run completed 150.711 seconds, saved 1,177,437 words, and reported
 zero loss/write errors. Its file header, size and final word were checked after
-close; this is not full-payload readback. Logs are local under `s3Recorder/.pio/`.
+close; this is not full-payload readback. Logs are local under `espS3/.pio/`.
 
 The matching four-bit fixed-rate run failed after 125.984 seconds, again with
 exactly 983,040 words saved (3.75 MiB of sample payload). The failing write was
@@ -570,7 +563,7 @@ fixed 250-kbps diagnostic, not the ordinary Choke ramp or ADC acquisition. The
 incomplete test files are retained. The eight native check suites pass, including
 fixed-source timing/content and the unchanged normal ramp. Detailed logs:
 `fixed-width1-4mhz.log`, `fixed-width4-4mhz.log`, `choke-width1-4mhz.log`, and
-`choke-width4-4mhz.log` under `s3Recorder/.pio/` (local, ignored).
+`choke-width4-4mhz.log` under `espS3/.pio/` (local, ignored).
 
 Shortened screw-terminal wiring follow-up: with the SAME installed four-bit
 fixed-rate firmware (no upload or code change), the 4-MHz/250-kbps test completed
@@ -578,7 +571,7 @@ fixed-rate firmware (no upload or code change), the 4-MHz/250-kbps test complete
 previous 983,040-word failure point. No transfer errors or sample loss occurred;
 the ring drained and header/size/tail checks passed. Maximum reported disk delay
 was 297.499 ms. Logs: `short-terminals-width4-boot.log` and
-`short-terminals-width4-4mhz.log` in `s3Recorder/.pio/`. This supports the wiring
+`short-terminals-width4-4mhz.log` in `espS3/.pio/`. This supports the wiring
 change improving communication but does not yet qualify higher clock/rate or
 long-term endurance. S3 remains in `sd-width-fourbit`, now stopped after a
 successful run; Start still selects the fixed 250-kbps diagnostic.
@@ -592,7 +585,7 @@ maximum disk operation delay was 28.013 ms. This run crossed the former CRC
 failure point and ended on buffer capacity instead. It measures this recorder
 implementation at 4 MHz, not the card's independent maximum throughput.
 Logs: `short-terminals-choke-boot.log` and `short-terminals-choke-4mhz.log` in
-`s3Recorder/.pio/`. Current firmware is `choke-test-slow`, stopped after overflow;
+`espS3/.pio/`. Current firmware is `choke-test-slow`, stopped after overflow;
 Start now runs the ordinary ramp, not the fixed-rate comparison. 20 MHz remains
 untested with the shortened wiring.
 
@@ -605,7 +598,7 @@ this is a transfer failure, not throughput exhaustion. A subsequent operation
 timed out. The small file check therefore did not qualify this workload at
 20 MHz. Logs: `short-terminals-verify-20mhz.log`,
 `short-terminals-choke20-boot.log`, `short-terminals-choke-20mhz.log` under
-`s3Recorder/.pio/`. Current S3 firmware is `choke-test` (20 MHz), stopped after
+`espS3/.pio/`. Current S3 firmware is `choke-test` (20 MHz), stopped after
 failure. No card formatting or deletion was performed.
 
 Improved-ground retry: register-verified four-bit 20 MHz still failed the first
@@ -614,7 +607,7 @@ Only the header was saved; ring peak was 4312 bytes and later operations timed
 out. This reproduced the previous first-block failure, with no demonstrated
 improvement. The conditional 40-MHz test was not run because 20 MHz failed.
 Logs: `improved-ground-choke20-boot.log` and `improved-ground-choke-20mhz.log`
-under `s3Recorder/.pio/`. Current firmware is `choke-test` (verified 20 MHz),
+under `espS3/.pio/`. Current firmware is `choke-test` (verified 20 MHz),
 stopped after failure. The 10-MHz results above remain the last CRC-free ramp.
 
 ### Fixed 4-KiB write timing, 2026-10-07
@@ -635,7 +628,7 @@ bytes. No full payload readback was performed. Ten-second progress output is
 outside per-write timings but included in elapsed throughput.
 
 File `/write_timing_000001.bin` retained; existing files preserved. Full log:
-`s3Recorder/.pio/write-timing-4k-10mhz.log`. Installed diagnostic is now idle;
+`espS3/.pio/write-timing-4k-10mhz.log`. Installed diagnostic is now idle;
 Feather acquisition commands are unavailable in this isolated build. Only 4 KiB
 was tested. This is a two-minute isolated benchmark, not proof of sustained
 24-Mbps acquisition or a controlled comparison of individual recorder overheads.
@@ -661,7 +654,7 @@ card locations and durations mean this is not a controlled endurance comparison.
 16-KiB average exceeded 24 Mbps in this minute, but 148.822-ms stalls remain and
 this isolated benchmark has no concurrent ADC capture or ring buffer.
 
-Logs in `s3Recorder/.pio/write-timing-8k-10mhz.log` and
+Logs in `espS3/.pio/write-timing-8k-10mhz.log` and
 `write-timing-16k-10mhz.log`. S3 now has `sd-write-timing-16k` installed and idle;
 COM4 closed. USB R repeats 16 KiB/60 seconds. No 2-KiB test, no code committed.
 
@@ -675,7 +668,7 @@ Latency: min 7.666 ms, max 52.749 ms, mean 8.770758 ms, population standard
  deviation 1.557096 ms. Opening 3.303 ms, final sync 2.948 ms, both separate.
 No reported write errors, sync succeeded, file size matched; no full readback.
 Retained `/write_timing_000004.bin`; no existing files changed or deleted.
-Log: `s3Recorder/.pio/write-timing-32k-10mhz.log`. S3 now idle with this diagnostic
+Log: `espS3/.pio/write-timing-32k-10mhz.log`. S3 now idle with this diagnostic
 installed; USB R repeats 32 KiB/60 seconds. COM4 closed. No normal recorder change.
 This one-minute average is 24.4% above 24 Mbps, but below 32 Mbps. The lower
 observed maximum delay does not guarantee future writes cannot pause longer;
@@ -691,7 +684,7 @@ maximum 179.032 ms, mean 16.116688 ms, population standard deviation 10.648488 m
 Opening 3.276 ms and final sync 2.658 ms measured separately. No reported write
 errors; sync successful and file size matches, but no full payload readback.
 Retained `/write_timing_000005.bin`; no formatting/deletion. Log:
-`s3Recorder/.pio/write-timing-64k-10mhz.log`. Current firmware is this diagnostic,
+`espS3/.pio/write-timing-64k-10mhz.log`. Current firmware is this diagnostic,
 idle; COM4 closed. R repeats the 64-KiB/60-second test.
 Average was 8.9% above the 32-KiB run and 35.5% above 24 Mbps. It only marginally
 exceeded 32 Mbps; concurrent capture remains untested. The 179-ms maximum shows
@@ -717,7 +710,7 @@ Nine native suites passed, including allocation failure, both wraparound copy
 spans, concurrent ordering across multiple 2-MiB wraps, overflow, partial writes
 and flush failure. Test-runner error checks now catch negative assertion exit
 codes as well as positive errors. Firmware built/uploaded COM4. Logs are
-`s3Recorder/.pio/psram-choke-boot.log` and `psram-choke-10mhz.log`.
+`espS3/.pio/psram-choke-boot.log` and `psram-choke-10mhz.log`.
 The ramp remains 750 kbps initially, +250 kbps every ten seconds, counting actual
 stored bits (four bytes per generated sample). Results will be appended below.
 
@@ -769,7 +762,7 @@ last in-flight write completed after production stopped. No producerBehind,
 CRC or I/O fault. Different run/card positions mean the small improvement over
 2MiB does not isolate buffer size as the only variable or prove24Mbps endurance.
 
-Logs: `s3Recorder/.pio/psram4-choke-boot.log`, `psram4-choke-20start.log`.
+Logs: `espS3/.pio/psram4-choke-boot.log`, `psram4-choke-20start.log`.
 Current S3 firmware `choke-test-psram` STOPPED; Start repeats4MiB/20Mbps ramp.
 COM4 released. Existing files preserved; no formatting/deletion/commit.
 
@@ -798,6 +791,6 @@ means the buffer absorbed that stage; it is NOT sustained32.5Mbps disk throughpu
 An earlier slow burst peaked2395600bytes and recovered. This supports further
 fixed24Mbps endurance testing, not a guarantee of end-to-end ADC acquisition.
 
-Logs `s3Recorder/.pio/psram4-block128-boot.log` and
+Logs `espS3/.pio/psram4-block128-boot.log` and
 `psram4-block128-24start.log`. Current S3 firmwareSTOPPED; Start repeats this
 128KiB/4MiB/24Mbps ramp. COM4closed. No cardfiles deleted/formatted; no commit.

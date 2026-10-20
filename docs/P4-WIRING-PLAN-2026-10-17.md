@@ -1,9 +1,9 @@
 # P4 capture wiring plan - October 17, 2026
 
 Status: Karl has moved the signal wires and verified common ground continuity.
-The standalone `p4Capture` diagnostic is implemented, but has not yet been
+The standalone `espP4` diagnostic is implemented, but has not yet been
 compiled or uploaded. P4 currently runs Hello World. See
-[capture instructions](../p4Capture/README.md) for the next steps and limitations.
+[capture instructions](../espP4/README.md) for the next steps and limitations.
 
 ## Hardware and purpose
 
@@ -79,6 +79,6 @@ configuration. Header matches alone do not prove every payload bit is correct.
 
 - [Waveshare board and header pinout](https://docs.waveshare.com/ESP32-P4-Module-DEV-KIT)
 - [Waveshare schematic](https://files.waveshare.com/wiki/ESP32-P4-Module-DEV-KIT/ESP32-P4-Module-DEV-KIT.pdf)
-- Existing project: shared/ads127Pins.h, featherUi/test/hardware/ads127CaptureControl.cpp,
-  s3Recorder/test/hardware/ads127CaptureDiagnostic.cpp, docs/STATUS-2026-10-12.md.
+- Existing project: shared/ads127Pins.h, espFeather/test/hardware/ads127CaptureControl.cpp,
+  espS3/test/hardware/ads127CaptureDiagnostic.cpp, docs/STATUS-2026-10-12.md.
 - Installed ESP-IDF: components/esp_driver_parlio/src/parlio_rx.c (GPIO routing).

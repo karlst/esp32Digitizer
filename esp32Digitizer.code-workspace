@@ -1,12 +1,20 @@
 {
-	"folders": [
-		{
-			"path": "s3Recorder"
-		},
-		{
-			"name": "featherUi",
-			"path": "featherUi"
-		}
-	],
-	"settings": {}
+    "folders": [
+        {
+            "path": "espFeather"
+        },
+        {
+            "path": "espS3"
+        },
+        {
+            "path": "espP4"
+        },
+        {
+            "path": "shared"
+        },
+        {
+            "path": "docs"
+        }
+    ],
+    "settings": {}
 }

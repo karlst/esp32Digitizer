@@ -1,6 +1,6 @@
 # Project TODO
 
-Current build/commands: [P4 setup](p4Capture/CURRENT-SETUP.md).
+Current build/commands: [P4 setup](espP4/CURRENT-SETUP.md).
 Completed experiments: [October 19 checkpoint](docs/STATUS-2026-10-19-P4.md).
 Items below are proposals or unfinished work, not automatic implementation authorization.
 Karl handles Git and runs builds, checks, uploads and hardware operations.
@@ -72,3 +72,14 @@ Power-event and saturation bits are counted in the header histogram but do not
 alone increment `badHeaders`. Per-sample status bytes are omitted from the file.
 Production policy remains undecided; the alternatives above are not approved
 implementation decisions.
+
+## Code-review findings to resolve
+
+These concerns were recorded during comment review; no fixes are implied.
+
+- [ ] Normal Feather web DAC ignores dac_output_voltage return values in stop/sample paths. Software-reported state is not driver confirmation.
+- [ ] S3 accepted-read totals can include a value rejected by a full recording buffer; storage failure is noticed subsequently.
+- [ ] ADS1256 stop sends STANDBY without readback; true confirms ready checks/command dispatch, not independently measured standby.
+- [ ] Feather HTML initial rec-open-time placeholder appears to contain an encoding replacement character; not changed in comment-only pass.
+- [ ] S3 SD write timing test ignores close result; RESULT ok excludes close failures.
+- [ ] Historical S3 host scripts assume COM4 and installed test firmware without identification. Stop write failure can skip explicit port close.
