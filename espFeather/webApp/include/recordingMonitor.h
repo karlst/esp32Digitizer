@@ -18,7 +18,7 @@
  */
 #pragma once
 #include <Arduino.h>
-#include "../../shared/recordingStatus.h"
+#include "../../../shared/recordingStatus.h"
 
 /**
  * @brief Format S3 recording telemetry without claiming stale data is current.

@@ -1,7 +1,7 @@
 # Project TODO
 
 Current build/commands: [P4 setup](espP4/CURRENT-SETUP.md).
-Completed experiments: [October 19 checkpoint](docs/STATUS-2026-10-19-P4.md).
+Completed experiments: [current status](docs/STATUS.md).
 Items below are proposals or unfinished work, not automatic implementation authorization.
 Karl handles Git and runs builds, checks, uploads and hardware operations.
 

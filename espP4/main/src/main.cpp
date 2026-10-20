@@ -865,7 +865,9 @@ extern "C" void app_main()
     // Announce available commands after all required setup has succeeded.
     // The build option chooses optional CPU profiling and test duration;
     // it does not itself begin acquisition or prepare an SD file.
-#if CONFIG_P4_CAPTURE_PROFILE
+#if CONFIG_P4_HARDWARE_SMOKE
+    printf("P4 capture IDLE (sd-smoke-30s). Press p and wait for SD READY. "
+#elif CONFIG_P4_CAPTURE_PROFILE
     printf("P4 capture IDLE (sd-profile-60s). Profiling ON; use Feather 60s firmware.\n");
     printf("Press p here and wait for SD READY before starting. "
 #else
@@ -888,6 +890,16 @@ extern "C" void app_main()
         char consoleKey = 0;
         if (read(STDIN_FILENO, &consoleKey, 1) == 1)
         {
+#if CONFIG_P4_HARDWARE_SMOKE
+            // The PC runner asks for a fresh idle SD-mode identity before it
+            // prepares a file. A previously selected mode requires a reset.
+            if (consoleKey == 'h')
+            {
+                printf("SMOKE_P4 version=1 ready=%u seconds=30\n",
+                       unsigned(!active && !modeLocked && !ramMode));
+            }
+            else
+#endif
             if (consoleKey == 'w')
             {
                 if (!modeLocked && !active)

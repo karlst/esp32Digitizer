@@ -1,7 +1,7 @@
 # Simultaneous input/output waveform comparison without SD
 
 Karl completed PC checks, build/upload and simultaneous captures on October 18.
-See [results](../docs/STATUS-2026-10-19-P4.md) and [current firmware choices](CURRENT-SETUP.md).
+See [results](../docs/STATUS.md) and [current firmware choices](CURRENT-SETUP.md).
 The current reader requires DAC MODE identification; rebuild older Feather
 comparison firmware before using it. A successful capture is not ADC calibration.
 

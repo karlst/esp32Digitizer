@@ -22,7 +22,7 @@ license by the source-file headers.
 
 The current recorder is in `espP4/`, with Feather control firmware in
 `espFeather/`. Start with [the current setup](espP4/CURRENT-SETUP.md) and
-[October 19 results](docs/STATUS-2026-10-19-P4.md).
+[current status](docs/STATUS.md).
 
 `shared/bufferedWriter/` contains the reusable ring buffer, byte writer, and its
 PC tests. P4 uses this directly; its firmware and tests need no S3 source files.
@@ -91,6 +91,7 @@ esp32Digitizer/
     espS3/          Legacy S3 firmware and tests
     espP4/          P4 firmware: main/src, main/include and test
     shared/         Reusable writer, shared headers and test support
+    test/           Combined P4 and Feather PC smoke-test runner
     docs/           Build guide, reference documents and selected evidence
     captures/       Generated capture output; created on demand and ignored by Git
 ```
@@ -120,6 +121,8 @@ edit -> build -> upload -> test -> commit -> push
 ```
 
 ## Building
+
+PC smoke checks: [test/runSmokeChecks.ps1](test/README.md).
 
 Use [Building the firmware](docs/BUILDING.md) for each board's terminal, build
 commands, PC checks, and the fresh P4 build directories required after renaming.

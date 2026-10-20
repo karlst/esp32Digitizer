@@ -21,16 +21,54 @@ separate actions; this guide does not do either automatically.
 
 ## P4: ESP-IDF terminal
 
-Use the installed **ESP-IDF 5.5.6 PowerShell** terminal. In VS Code with the
-ESP-IDF extension, the command palette offers **ESP-IDF: Open ESP-IDF Terminal**.
-An ordinary PowerShell terminal does not necessarily have the required compiler
-and Python environment. Run `idf.py --version` to check the active environment.
+### Start directly from PowerShell
 
-From the repository root, change to the P4 project:
+In an ordinary PowerShell window, load the installed ESP-IDF environment:
 
 ```powershell
-Set-Location .\espP4
+. C:\Espressif\tools\Microsoft.v5.5.6.PowerShell_profile.ps1
 ```
+
+The leading dot followed by a space loads the script into the current session,
+so its compiler and Python settings remain available there. Then run:
+
+```powershell
+Set-Location C:\Users\karls\source\esp32Digitizer\espP4
+idf.py --version
+```
+
+Expect ESP-IDF 5.5.6. Repeat the activation command in each new PowerShell session
+that needs the IDF tools. This prepares the terminal; it does not build or upload.
+
+Use this installer-generated profile on Karl's PC rather than calling
+`esp-idf/export.ps1` directly. The installation stores its tools and Python
+environment under `C:\Espressif\tools`. Without those settings, the generic export
+script looks under `C:\Users\karls\.espressif` and reports a missing Python
+environment. That error alone does not mean a reinstall is needed.
+
+### Open the terminal, including after restarting Windows
+
+1. Open the project in VS Code.
+2. Press **Ctrl+Shift+P** to open the command palette.
+3. Type **ESP-IDF: Open ESP-IDF Terminal** and select that command.
+4. If VS Code asks which workspace folder to use, choose **espP4**.
+5. In the newly opened terminal, select the P4 directory and check the tools:
+
+```powershell
+Set-Location C:\Users\karls\source\esp32Digitizer\espP4
+idf.py --version
+```
+
+The installed version for this project is **ESP-IDF 5.5.6**. Opening the IDF
+terminal prepares the compiler and Python environment for that terminal session;
+an ordinary PowerShell terminal may not have them. If `idf.py` is not recognized,
+check that you are typing in the newly opened ESP-IDF terminal.
+
+If the command is missing from the palette, check that the **Espressif IDF**
+extension is enabled in VS Code. Opening this terminal does not build, upload,
+or communicate with a board.
+
+### Build the selected firmware
 
 For the 60-second profiling and RAM-comparison firmware:
 
@@ -57,23 +95,29 @@ Tests and profiling remain under `test` and use the same decoder and recorder.
 
 ## Feather: ordinary PowerShell
 
-From the repository root, build the normal web application:
+From the repository root, build the current terminal firmware (the constant-input test):
 
 ```powershell
-& "$env:USERPROFILE\.platformio\penv\Scripts\platformio.exe" run --project-dir .\espFeather -e featheresp32
+& "$env:USERPROFILE\.platformio\penv\Scripts\platformio.exe" run --project-dir .\espFeather
 ```
 
-For the currently documented constant-input diagnostic, replace the environment:
+The default environment is `ads127-p4-constant`. Use `-e` to select another named
+set of sources and compiler settings; see [current setup](../espP4/CURRENT-SETUP.md).
+The environments live in `espFeather/test/platformio.ini`. Application sources
+are in `src`, headers in `include`, and hardware test entry points in `test`.
+
+### Separate web application
+
+The preserved web interface is its own project under `espFeather/webApp`.
+It is excluded from the parent terminal build. Build it explicitly with:
 
 ```powershell
-& "$env:USERPROFILE\.platformio\penv\Scripts\platformio.exe" run --project-dir .\espFeather -e ads127-p4-constant
+& "$env:USERPROFILE\.platformio\penv\Scripts\platformio.exe" run --project-dir .\espFeather\webApp -e featheresp32
 ```
 
-`-e` selects an environment: a named set of source files and compiler settings.
-Other diagnostics are listed in [current setup](../espP4/CURRENT-SETUP.md).
-Test environments live in `espFeather/test/platformio.ini`, imported by the main
-configuration. The web application's browser assets under `data` require a
-separate filesystem upload when those assets change.
+Its sources, headers, and browser assets are under `webApp/src`, `webApp/include`,
+and `webApp/data`. Assets require a separate filesystem upload when changed.
+This interface controls the older S3 application; it does not control the P4.
 
 ## Legacy S3: ordinary PowerShell
 
@@ -87,6 +131,15 @@ Test environments live in `espS3/test/platformio.ini`. This is the historical S3
 recorder; building it does not establish that it meets the P4 capture rate.
 
 ## PC checks after source moves
+
+For the active P4 and Feather projects, run the combined smoke check first:
+
+```powershell
+.\test\runSmokeChecks.ps1
+```
+
+See [smoke-check coverage and requirements](../test/README.md). S3 remains a
+separate legacy check. The individual commands below are useful for isolation.
 
 Run these individually from the repository root in ordinary PowerShell:
 
@@ -111,3 +164,9 @@ Run capture scripts from that root, or pass `--output` to choose another locatio
 This generated folder is ignored by Git. Selected historical evidence is under
 [docs/evidence](evidence/README.md); hardware references are under
 [docs/reference](reference/README.md).
+
+## Thirty-second hardware smoke firmware
+
+Use the separate `ads127-hardware-smoke` Feather environment and P4 `build/smoke`
+configuration. See [hardware smoke test](HARDWARE-SMOKE.md) for build, upload,
+wiring, and the single run command. The normal environments remain unchanged.

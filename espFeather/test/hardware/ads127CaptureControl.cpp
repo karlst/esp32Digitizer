@@ -24,7 +24,8 @@
  * After the shared run duration (or on 's') it stops ADC then receiver. The named
  * P4 environment selects 60 seconds or 30 minutes; legacy S3 retains five.
  * The opt-in ads127-p4-dac-60s build selects external channel-0 input and starts
- * a fixed DAC sine only after receiver READY. The compare variant also samples
+ * a test DAC waveform only after receiver READY. The hardware smoke variant
+ * alternates levels for 30 seconds and retains A2 observations for SD comparison. The compare variant also samples
  * A2; ads127-p4-constant holds code 135 instead of generating a sine. Builds
  * without ADS127_P4_DAC_TEST retain internal short and DAC off. A failed start, requested stop or receiver fault disables the DAC.
  * UART reports are forwarded to USB. This is not the production web application.
@@ -67,13 +68,19 @@ static uint32_t stateMs = 0;
 /** @brief Print operator commands without accessing ADC registers. */
 static void printHelp()
 {
-#if ADS127_COMPARE_INPUT
+#if ADS127_HARDWARE_SMOKE
+    Serial.printf("SMOKE_FEATHER version=1 ready=%u seconds=30\n",
+                  unsigned(dacReady && state == benchState::idle));
+#endif
+#if ADS127_COMPARE_INPUT && !ADS127_HARDWARE_SMOKE
     Serial.println(dacReady ? "COMPARE READY: simultaneous A1->A2 input and P4 RAM output; keep coax connected."
                             : "COMPARE UNAVAILABLE: DAC/input ADC initialization failed.");
 #endif
 #if ADS127_P4_DAC_TEST
     Serial.println("ADS127 DAC TEST: external CH0; A1/GPIO25 -> CH0P, CH0N grounded; SD controlled by P4.");
-#if ADS127_DAC_CONSTANT
+#if ADS127_HARDWARE_SMOKE
+    Serial.println("DAC MODE: SQUARE codes=110,135 levelSeconds=1");
+#elif ADS127_DAC_CONSTANT
     Serial.println("DAC MODE: CONSTANT code=135 nominalVolts=1.747; 500 us repeated writes.");
 #else
     Serial.println("DAC MODE: SINE");
@@ -186,7 +193,9 @@ static void acceptReply(const char* line)
             sourceStarted = signalSource.start();
             if (sourceStarted)
             {
-#if ADS127_DAC_CONSTANT
+#if ADS127_HARDWARE_SMOKE
+                Serial.println("DAC ON: square wave; starting ADC external-input capture.");
+#elif ADS127_DAC_CONSTANT
                 Serial.println("DAC ON: constant code 135; starting ADC external-input capture.");
 #else
                 Serial.println("DAC ON: 10 Hz sine; starting ADC external-input capture.");

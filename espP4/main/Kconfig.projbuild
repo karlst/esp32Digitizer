@@ -12,7 +12,15 @@
 
 menu "P4 capture diagnostics"
 
+config P4_HARDWARE_SMOKE
+    bool "Thirty-second DAC-to-SD hardware smoke test"
+    default n
+    help
+        Adds a readback waveform summary after normal SD integrity checks.
+        Pair with Feather ads127-hardware-smoke. No automatic capture at boot.
+
 config P4_CAPTURE_PROFILE
+    depends on !P4_HARDWARE_SMOKE
     bool "Measure CPU headroom during a 60-second capture"
     default n
     select FREERTOS_GENERATE_RUN_TIME_STATS

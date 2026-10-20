@@ -1,7 +1,7 @@
 # Optional 60-second CPU headroom test
 
 Karl completed the PC checks, build/upload and 60-second hardware run on October 18.
-See [results](../docs/STATUS-2026-10-19-P4.md). The objective is to
+See [results](../docs/STATUS.md). The objective is to
 measure capacity for the Feather's current ADC-control duties, not future web
 or networking features. Karl runs the following PC/build/upload steps; no board
 operation is performed automatically by the assistant.

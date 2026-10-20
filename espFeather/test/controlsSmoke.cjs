@@ -126,7 +126,7 @@ async function runChecks()
             {
                 // Load production page assets from disk, ignoring cache query strings.
                 // API requests above never fall through to external network access.
-                const file = path.join(__dirname, "../data", pathname === "/" ? "index.html" : pathname);
+                const file = path.join(__dirname, "../webApp/data", pathname === "/" ? "index.html" : pathname);
                 await route.fulfill({ body: await fs.readFile(file), contentType:
                     { ".html": "text/html", ".js": "text/javascript", ".css": "text/css" }[path.extname(file)] });
             }

@@ -20,7 +20,7 @@ from pathlib import Path
 
 projectRoot = Path(env.subst('$PROJECT_DIR'))
 frameworkRoot = Path(env.PioPlatform().get_package_dir('framework-arduinoespressif32'))
-env.Append(CPPPATH=[str(projectRoot / 'src' / 'adc'),
+env.Append(CPPPATH=[str(projectRoot / 'include' / 'adc'),
                    str(projectRoot / 'test' / 'hardware'),
                    str(projectRoot.parent / 'shared'),
                    str(frameworkRoot / 'libraries' / 'SPI' / 'src')])

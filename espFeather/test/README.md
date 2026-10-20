@@ -33,7 +33,7 @@ The S3 I2S slave receiver requires an internal clock at least eight times DCLK.
 Our 160-MHz source cannot meet 32.768 MHz * 8 = 262.144 MHz. The high-rate
 stages remain available as historical diagnostics, not supported recording modes.
 Do not resume input-delay experiments to work around this documented limit.
-See [the project handoff](../../docs/STATUS-2026-10-12.md) for the replacement plan.
+See [the test history](../../docs/P4-EARLY-TEST-HISTORY.md) for the replacement plan.
 
 Changing ADC output drive from half to full strength did not solve reception:
 full-drive 512k had 3596 bad headers in 4096 words. Full drive remains in source
@@ -121,7 +121,7 @@ that copies completed DMA data for inspection.
 ## First communication check
 
 This standalone diagnostic replaces the web application only when explicitly
-built/uploaded as `ads127-spi-check`. Ordinary `featheresp32` remains the default.
+built/uploaded as `ads127-spi-check`. The parent project defaults to `ads127-p4-constant`; the separate web application is built from `../webApp`.
 It disables both DAC outputs, starts no web server or S3 commands, and sends no
 SPI traffic at boot. USB diagnostics use 115200 baud. Send `h` for help or `r`
 for one finite, three-pass read test after the electrical checks pass.

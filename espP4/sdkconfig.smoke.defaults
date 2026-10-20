@@ -10,14 +10,7 @@
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General
 # Public License in the repository LICENSE file or <https://www.gnu.org/licenses/>.
 
-"""Link the legacy LED test used by the normal web application's blink routes.
-
-PlatformIO calls this during a web build. Diagnostic environments replace this
-script with buildHardwareTests.py and do not link the web LED service.
-"""
-Import("env")
-from pathlib import Path
-
-env.BuildSources('$BUILD_DIR/legacyBlink',
-                 str(Path(env.subst('$PROJECT_DIR')) / 'test' / 'hardware'),
-                 src_filter=['-<*>', '+<ledBlinker.cpp>'])
+# Thirty-second hardware smoke build; apply after sdkconfig.sd.defaults.
+CONFIG_P4_HARDWARE_SMOKE=y
+# CONFIG_P4_CAPTURE_PROFILE is not set
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=6144

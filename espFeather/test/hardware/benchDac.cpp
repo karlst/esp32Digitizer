@@ -14,7 +14,7 @@
 
 /**
  * @file benchDac.cpp
- * @brief Set the Feather's analog output to a test sine wave or fixed level.
+ * @brief Set the Feather's analog output to a test sine wave, square wave, or fixed level.
  * A DAC converts an eight-bit number to an analog voltage. This code commands
  * GPIO25/A1; it does not measure whether that voltage was produced correctly.
  * Arduino's loop requests start/stop. ESP's timer-service task calls tick()
@@ -59,7 +59,7 @@ bool benchDac::initialize()
  * @brief Enable DAC channel 1 (A1/GPIO25); the caller must first obtain receiver READY.
  * This class cannot check receiver readiness. The standalone loopback test
  * also calls this without any external receiver.
- * Write codeAt(0) first (sine midpoint, or constant-test code 135), then start
+ * Write codeAt(0) first (sine midpoint, square-wave low level, or constant-test code 135), then start
  * periodic updates. True means driver calls
  * succeeded, not measured voltage. Any failure disables the output again.
  */
@@ -84,7 +84,7 @@ bool benchDac::start()
 }
 
 /**
- * @brief Write the selected sine/constant code from ESP's timer-service task.
+ * @brief Write the selected sine, square-wave, or constant code from ESP's timer-service task.
  * Missed counts whole extra nominal intervals in a callback gap, not exact
  * hardware timer losses. A driver error latches broken; loop() requests ADC stop.
  * Pending callbacks after stop see enabled=false and cannot re-enable output.

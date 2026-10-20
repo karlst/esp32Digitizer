@@ -3,7 +3,7 @@
 Authorized October 19, 2026 to investigate jagged Feather A2 readings versus
 smooth ADS127/P4 readings. Karl runs checks, builds, uploads and hardware steps.
 Karl completed checks, build/upload and captures, including calibrated reporting
-in run 1931182800. See [results](../docs/STATUS-2026-10-19-P4.md).
+in run 1931182800. See [results](../docs/STATUS.md).
 
 Separate Feather environment `ads127-p4-constant` holds DAC code 135, nominal
 1.747 V, near the previous sine peak and above the observed flattened region.

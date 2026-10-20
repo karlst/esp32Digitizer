@@ -16,6 +16,6 @@ Reports preserve the analysis shown at the time; they do not assert production q
 SD recording plot of the distorted DAC signal. The large original SD file is
 not stored here; the image is not a replacement for its raw samples.
 
-See [the October 19 results](../STATUS-2026-10-19-P4.md) for interpretation and limits.
+See [the current status](../STATUS.md) for interpretation and limits.
 New capture runs go to the ignored `captures/` directory at the repository root.
 Only deliberately selected evidence belongs here.

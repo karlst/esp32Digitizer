@@ -47,6 +47,12 @@
  * analog accuracy or that hardware delivered every ADC-generated sample.
  */
 #include "sdRecorder.h"
+#if CONFIG_P4_HARDWARE_SMOKE
+#include "sdSmokeSummary.h"
+// Only the SD task accesses this test object. Static storage avoids adding its
+// bin arrays to the task stack. Ordinary builds contain neither object nor code.
+static sdSmokeSummary smokeReadback;
+#endif
 #include "sdTestData.h"
 #include "recordingFormat.h"
 #include "test/support/ads127BenchTiming.h"
@@ -64,9 +70,14 @@
 #include "freertos/task.h"
 
 static constexpr size_t scratchBytes = 16384;
-// Total reserved file length, decimal 10 GB including the 512-byte header.
-// Allocation occurs before READY, never while the ADC is running.
+// Reserve before READY, never during capture. The smoke build needs only
+// 128 MiB, including its header; this also covers the 35-second timeout with
+// 10% sample-rate margin. Longer recording builds retain their 10-GB reserve.
+#if CONFIG_P4_HARDWARE_SMOKE
+static constexpr uint64_t reservedBytes = 128ULL * 1024 * 1024;
+#else
 static constexpr uint64_t reservedBytes = 10000000000ULL;
+#endif
 static_assert(reservedBytes > 512ULL + 1126400ULL * 3 *
               ads127BenchTiming::receiverTimeoutMs / 1000, "Reservation must cover the timeout");
 static_assert(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__, "File words require little endian");
@@ -310,12 +321,13 @@ bool sdRecorder::prepareFile()
         opened = result == FR_OK;
         if (opened && file.obj.fs->fs_type != FS_EXFAT)
         {
-            printf("SD preparation requires exFAT for a 10 GB reservation; no format attempted\n");
+            printf("SD preparation requires exFAT; no format attempted\n");
             result = FR_DENIED;
         }
         if (result == FR_OK)
         {
-            printf("SD reserving 10000000000 bytes (10 GB); wait for SD READY\n");
+            printf("SD reserving %llu bytes; wait for SD READY\n",
+                   static_cast<unsigned long long>(reservedBytes));
             // Reserve contiguous filesystem space before samples start. The
             // final argument 1 allocates it now. Failure leaves preparation
             // failed; work() attempts to close the newly created file.
@@ -414,7 +426,7 @@ void sdRecorder::finishFile()
     ok = ok && clean && submittedBytes != 0 && submittedBytes == writtenBytes &&
          writtenBytes % recordBytes == 0;
     // Keep only the 512-byte header and the bytes actually written; release
-    // the unused end of the 10 GB reservation. Seek back past the header to
+    // the unused end of the reservation. Seek back past the header to
     // read and checksum the payload. Every filesystem result is checked.
     bool ioOk = f_lseek(&file, 512 + writtenBytes) == FR_OK;
     if (ioOk) { ioOk = f_truncate(&file) == FR_OK; }
@@ -424,6 +436,9 @@ void sdRecorder::finishFile()
     uint64_t nextProgress = 256ULL * 1024 * 1024;
     printf("SD verifying %llu bytes; keep card inserted until SD SAVED/FAILED\n",
            static_cast<unsigned long long>(writtenBytes));
+#if CONFIG_P4_HARDWARE_SMOKE
+    smokeReadback.reset(sampleRate);
+#endif
     uint32_t crc = 0;
     uint64_t patternErrors = 0;
     while (ioOk && remaining != 0)
@@ -434,6 +449,11 @@ void sdRecorder::finishFile()
         if (ioOk)
         {
             crc = esp_rom_crc32_le(crc, scratch, actual);
+#if CONFIG_P4_HARDWARE_SMOKE
+            // f_read above is the source of these bytes. Retain a small summary
+            // while the normal full-file checksum verifies every payload byte.
+            if (!synthetic) { smokeReadback.accept(scratch, actual); }
+#endif
             // Synthetic files have a known word at every position. Check bytes
             // read from the card, not a second copy of the submitted RAM buffer.
             if (stageId == sdTestData::stage)
@@ -483,5 +503,8 @@ void sdRecorder::finishFile()
     {
         printf("SD TEST patternErrors=%llu\n", static_cast<unsigned long long>(patternErrors));
     }
+#if CONFIG_P4_HARDWARE_SMOKE
+    if (!synthetic) { smokeReadback.report(runId, ok); }
+#endif
     state.store(ok ? phase::complete : (closeOk ? phase::error : phase::blocked));
 }

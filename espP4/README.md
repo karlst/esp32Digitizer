@@ -4,16 +4,15 @@ Build tools and current commands: [Building the firmware](../docs/BUILDING.md).
 
 Start with [CURRENT-SETUP.md](CURRENT-SETUP.md) for firmware choices, matching
 PC commands, current wiring and diagnostic boundaries. Results and their limits
-are recorded in [the October 19 checkpoint](../docs/STATUS-2026-10-19-P4.md).
+are recorded in [current status](../docs/STATUS.md).
 Open decisions are in [TODO.md](../TODO.md).
 
-The latest uploaded pair is Feather `ads127-p4-constant` and P4 profiling/RAM
-firmware. The constant-voltage comparison completed on October 19 with factory
-reference calibration reported by Feather. This is diagnostic firmware, not a
-production qualification. Full-rate SD recording does not average samples.
+The last reported uploads and most recent hardware results are maintained only
+in [project status](../docs/STATUS.md). This is diagnostic firmware, not production
+qualification. Full-rate SD recording does not average samples.
 
-CardP passed the earlier 30-minute SD run. See [early test history](../docs/P4-EARLY-TEST-HISTORY.md)
-and the [October 17 handoff](../docs/STATUS-2026-10-17-P4.md) for that evidence.
+CardP passed the earlier 30-minute SD run; see
+[test history](../docs/P4-EARLY-TEST-HISTORY.md) for the evidence.
 Historical revision notes later in this document explain implementation changes;
 they do not describe the currently installed firmware.
 

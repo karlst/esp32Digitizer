@@ -21,8 +21,8 @@ Import("env")
 from pathlib import Path
 
 testRoot = Path(env.subst('$PROJECT_DIR')) / 'test' / 'hardware'
-env.Append(CPPPATH=[str(testRoot), env.subst('$PROJECT_DIR/src'),
-                   env.subst('$PROJECT_DIR/src/backend')])
+env.Append(CPPPATH=[str(testRoot), env.subst('$PROJECT_DIR/include'),
+                   env.subst('$PROJECT_DIR/include/backend')])
 # BuildSources captures its include paths before PlatformIO's library discovery.
 # Test sources outside src/ therefore need the same explicitly declared library
 # headers as the application; the libraries themselves are still linked by PIO.

@@ -20,9 +20,10 @@ The recorder calls the separate generated-data verifier only for synthetic files
 Its ordinary checksum, error reporting, and ADC recording format remain in mainline
 code because they protect real recordings too.
 
-The Feather web application still offers its legacy LED routes, so its normal
-build links the LED test from the test folder. The reusable ADS127 SPI driver
-remains in `src/adc/`; only the bench configuration sequence moved out.
+The separate `espFeather/webApp` project links the LED test for its blink routes.
+The parent Feather project builds terminal firmware and excludes the web application.
+The reusable ADS127 SPI driver uses `espFeather/src/adc` and `espFeather/include/adc`.
+S3 application headers are in `espS3/include`, with backend headers in `include/backend`.
 
 S3 storage-check builds link `storageCheck.cpp`; ordinary builds do not. S3's
 synthetic build uses the real recorder and adds only test generation and metadata.

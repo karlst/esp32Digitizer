@@ -15,6 +15,7 @@
 /**
  * @file ads127BenchTiming.h
  * @brief Shared finite-run timing for the ADC controller and P4 receiver.
+ * ADS127_HARDWARE_SMOKE selects 30/35 seconds for the SD smoke test.
  * ADS127_P4_ENDURANCE selects 30 minutes; ADS127_P4_LONG_RUN retains 60 seconds.
  * The historical Feather/S3 build retains its five-second run/eight-second
  * receiver deadline. Feather and P4 must use matching duration selections.
@@ -24,7 +25,10 @@
 
 namespace ads127BenchTiming
 {
-#if defined(ADS127_P4_ENDURANCE) && ADS127_P4_ENDURANCE
+#if defined(ADS127_HARDWARE_SMOKE) && ADS127_HARDWARE_SMOKE
+static constexpr uint32_t runMs = 30000;
+static constexpr uint32_t receiverTimeoutMs = 35000;
+#elif defined(ADS127_P4_ENDURANCE) && ADS127_P4_ENDURANCE
 static constexpr uint32_t runMs = 1800000;
 static constexpr uint32_t receiverTimeoutMs = 1805000;
 #elif defined(ADS127_P4_LONG_RUN) && ADS127_P4_LONG_RUN

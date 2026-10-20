@@ -37,51 +37,51 @@ $batch = @"
 @echo off
 call "$environmentScript" >nul
 if %errorlevel% neq 0 exit /b 1
-cl /nologo /std:c++17 /EHsc /W4 $statusFlag /I"$projectRoot/test/fakes" /I"$projectRoot/src" /I"$projectRoot/src/backend" /I"$projectRoot/test/hardware" /I"$projectRoot/../shared" /I"$projectRoot/../shared/bufferedWriter/src" "$projectRoot/test/nativeChecks.cpp" "$projectRoot/src/commandProtocol.cpp" "$projectRoot/src/commandHistory.cpp" "$projectRoot/src/acquisition.cpp" "$projectRoot/src/fastCapture.cpp" "$projectRoot/src/featherLink.cpp" "$projectRoot/test/fakeRecordingService.cpp" "$projectRoot/src/sampleFormatter.cpp" "$projectRoot/../shared/bufferedWriter/src/bufferedWriter.cpp" /Fe:nativeChecks.exe
+cl /nologo /std:c++17 /EHsc /W4 $statusFlag /I"$projectRoot/test/fakes" /I"$projectRoot/include" /I"$projectRoot/include/backend" /I"$projectRoot/test/hardware" /I"$projectRoot/../shared" /I"$projectRoot/../shared/bufferedWriter/src" "$projectRoot/test/nativeChecks.cpp" "$projectRoot/src/commandProtocol.cpp" "$projectRoot/src/commandHistory.cpp" "$projectRoot/src/acquisition.cpp" "$projectRoot/src/fastCapture.cpp" "$projectRoot/src/featherLink.cpp" "$projectRoot/test/fakeRecordingService.cpp" "$projectRoot/src/sampleFormatter.cpp" "$projectRoot/../shared/bufferedWriter/src/bufferedWriter.cpp" /Fe:nativeChecks.exe
 if %errorlevel% neq 0 exit /b 1
 nativeChecks.exe
 if %errorlevel% neq 0 exit /b 1
-cl /nologo /std:c++17 /EHsc /W4 /I"$projectRoot/test/fakes" /I"$projectRoot/src" /I"$projectRoot/src/backend" /I"$projectRoot/test/hardware" /I"$projectRoot/../shared" /I"$projectRoot/../shared/bufferedWriter/src" "$projectRoot/test/driverChecks.cpp" "$projectRoot/src/ads1256.cpp" "$projectRoot/src/commandProtocol.cpp" /Fe:driverChecks.exe
+cl /nologo /std:c++17 /EHsc /W4 /I"$projectRoot/test/fakes" /I"$projectRoot/include" /I"$projectRoot/include/backend" /I"$projectRoot/test/hardware" /I"$projectRoot/../shared" /I"$projectRoot/../shared/bufferedWriter/src" "$projectRoot/test/driverChecks.cpp" "$projectRoot/src/ads1256.cpp" "$projectRoot/src/commandProtocol.cpp" /Fe:driverChecks.exe
 if %errorlevel% neq 0 exit /b 1
 driverChecks.exe
 if %errorlevel% neq 0 exit /b 1
-cl /nologo /std:c++17 /EHsc /W4 /I"$projectRoot/test/fakes" /I"$projectRoot/src" /I"$projectRoot/src/backend" /I"$projectRoot/test/hardware" /I"$projectRoot/../shared" /I"$projectRoot/../shared/bufferedWriter/src" "$projectRoot/test/fastCaptureChecks.cpp" "$projectRoot/src/fastCapture.cpp" "$projectRoot/src/sampleFormatter.cpp" "$projectRoot/../shared/bufferedWriter/src/bufferedWriter.cpp" /Fe:fastCaptureChecks.exe
+cl /nologo /std:c++17 /EHsc /W4 /I"$projectRoot/test/fakes" /I"$projectRoot/include" /I"$projectRoot/include/backend" /I"$projectRoot/test/hardware" /I"$projectRoot/../shared" /I"$projectRoot/../shared/bufferedWriter/src" "$projectRoot/test/fastCaptureChecks.cpp" "$projectRoot/src/fastCapture.cpp" "$projectRoot/src/sampleFormatter.cpp" "$projectRoot/../shared/bufferedWriter/src/bufferedWriter.cpp" /Fe:fastCaptureChecks.exe
 if %errorlevel% neq 0 exit /b 1
 fastCaptureChecks.exe
 if %errorlevel% neq 0 exit /b 1
-cl /nologo /std:c++17 /EHsc /W4 /I"$projectRoot/../espFeather/test/fakes" /I"$projectRoot/../espFeather/src" "$projectRoot/../espFeather/test/monitorChecks.cpp" "$projectRoot/../espFeather/src/s3Monitor.cpp" "$projectRoot/../espFeather/src/recordingMonitor.cpp" /Fe:monitorChecks.exe
+cl /nologo /std:c++17 /EHsc /W4 /I"$projectRoot/../espFeather/test/fakes" /I"$projectRoot/../espFeather/webApp/include" "$projectRoot/../espFeather/test/monitorChecks.cpp" "$projectRoot/../espFeather/webApp/src/s3Monitor.cpp" "$projectRoot/../espFeather/webApp/src/recordingMonitor.cpp" /Fe:monitorChecks.exe
 if %errorlevel% neq 0 exit /b 1
 monitorChecks.exe
 if %errorlevel% neq 0 exit /b 1
-cl /nologo /std:c++17 /EHsc /W4 /I"$projectRoot/src" /I"$projectRoot/src/backend" /I"$projectRoot/test/hardware" /I"$projectRoot/../shared/bufferedWriter/src" /I"$projectRoot/../shared/bufferedWriter/test" "$projectRoot/test/writerChecks.cpp" "$projectRoot/../shared/bufferedWriter/test/bufferedWriterChecks.cpp" "$projectRoot/src/sampleFormatter.cpp" "$projectRoot/../shared/bufferedWriter/src/bufferedWriter.cpp" /Fe:writerChecks.exe
+cl /nologo /std:c++17 /EHsc /W4 /I"$projectRoot/include" /I"$projectRoot/include/backend" /I"$projectRoot/test/hardware" /I"$projectRoot/../shared/bufferedWriter/src" /I"$projectRoot/../shared/bufferedWriter/test" "$projectRoot/test/writerChecks.cpp" "$projectRoot/../shared/bufferedWriter/test/bufferedWriterChecks.cpp" "$projectRoot/src/sampleFormatter.cpp" "$projectRoot/../shared/bufferedWriter/src/bufferedWriter.cpp" /Fe:writerChecks.exe
 if %errorlevel% neq 0 exit /b 1
-cl /nologo /std:c++17 /O2 /EHsc /W4 /DBUFFERED_WRITER_EXTERNAL=1 /DBUFFERED_WRITER_CAPACITY=4194304 /DBUFFERED_WRITER_BLOCK_BYTES=131072 /I"$projectRoot/src" /I"$projectRoot/src/backend" /I"$projectRoot/test/hardware" /I"$projectRoot/../shared/bufferedWriter/src" /I"$projectRoot/../shared/bufferedWriter/test" "$projectRoot/test/writerChecks.cpp" "$projectRoot/../shared/bufferedWriter/test/bufferedWriterChecks.cpp" "$projectRoot/src/sampleFormatter.cpp" "$projectRoot/../shared/bufferedWriter/src/bufferedWriter.cpp" /Fe:externalWriterChecks.exe
+cl /nologo /std:c++17 /O2 /EHsc /W4 /DBUFFERED_WRITER_EXTERNAL=1 /DBUFFERED_WRITER_CAPACITY=4194304 /DBUFFERED_WRITER_BLOCK_BYTES=131072 /I"$projectRoot/include" /I"$projectRoot/include/backend" /I"$projectRoot/test/hardware" /I"$projectRoot/../shared/bufferedWriter/src" /I"$projectRoot/../shared/bufferedWriter/test" "$projectRoot/test/writerChecks.cpp" "$projectRoot/../shared/bufferedWriter/test/bufferedWriterChecks.cpp" "$projectRoot/src/sampleFormatter.cpp" "$projectRoot/../shared/bufferedWriter/src/bufferedWriter.cpp" /Fe:externalWriterChecks.exe
 if %errorlevel% neq 0 exit /b 1
 externalWriterChecks.exe
 if %errorlevel% neq 0 exit /b 1
 writerChecks.exe
 if %errorlevel% neq 0 exit /b 1
-cl /nologo /std:c++17 /O2 /EHsc /W4 /I"$projectRoot/src" /I"$projectRoot/src/backend" /I"$projectRoot/test/hardware" /I"$projectRoot/../shared/bufferedWriter/src" "$projectRoot/test/chokeChecks.cpp" "$projectRoot/test/hardware/chokeTest.cpp" "$projectRoot/../shared/bufferedWriter/src/bufferedWriter.cpp" /Fe:chokeChecks.exe
+cl /nologo /std:c++17 /O2 /EHsc /W4 /I"$projectRoot/include" /I"$projectRoot/include/backend" /I"$projectRoot/test/hardware" /I"$projectRoot/../shared/bufferedWriter/src" "$projectRoot/test/chokeChecks.cpp" "$projectRoot/test/hardware/chokeTest.cpp" "$projectRoot/../shared/bufferedWriter/src/bufferedWriter.cpp" /Fe:chokeChecks.exe
 if %errorlevel% neq 0 exit /b 1
 chokeChecks.exe
 if %errorlevel% neq 0 exit /b 1
-cl /nologo /std:c++17 /O2 /EHsc /W4 /DS3_CHOKE_FIXED_RATE=1 /I"$projectRoot/src" /I"$projectRoot/src/backend" /I"$projectRoot/test/hardware" /I"$projectRoot/../shared/bufferedWriter/src" "$projectRoot/test/fixedChokeChecks.cpp" "$projectRoot/test/hardware/chokeTest.cpp" "$projectRoot/../shared/bufferedWriter/src/bufferedWriter.cpp" /Fe:fixedChokeChecks.exe
+cl /nologo /std:c++17 /O2 /EHsc /W4 /DS3_CHOKE_FIXED_RATE=1 /I"$projectRoot/include" /I"$projectRoot/include/backend" /I"$projectRoot/test/hardware" /I"$projectRoot/../shared/bufferedWriter/src" "$projectRoot/test/fixedChokeChecks.cpp" "$projectRoot/test/hardware/chokeTest.cpp" "$projectRoot/../shared/bufferedWriter/src/bufferedWriter.cpp" /Fe:fixedChokeChecks.exe
 if %errorlevel% neq 0 exit /b 1
-cl /nologo /std:c++17 /O2 /EHsc /W4 /DS3_CHOKE_INITIAL_BPS=24000000 /I"$projectRoot/src" /I"$projectRoot/src/backend" /I"$projectRoot/test/hardware" /I"$projectRoot/../shared/bufferedWriter/src" "$projectRoot/test/highRateChokeChecks.cpp" "$projectRoot/test/hardware/chokeTest.cpp" "$projectRoot/../shared/bufferedWriter/src/bufferedWriter.cpp" /Fe:highRateChokeChecks.exe
+cl /nologo /std:c++17 /O2 /EHsc /W4 /DS3_CHOKE_INITIAL_BPS=24000000 /I"$projectRoot/include" /I"$projectRoot/include/backend" /I"$projectRoot/test/hardware" /I"$projectRoot/../shared/bufferedWriter/src" "$projectRoot/test/highRateChokeChecks.cpp" "$projectRoot/test/hardware/chokeTest.cpp" "$projectRoot/../shared/bufferedWriter/src/bufferedWriter.cpp" /Fe:highRateChokeChecks.exe
 if %errorlevel% neq 0 exit /b 1
 highRateChokeChecks.exe
 if %errorlevel% neq 0 exit /b 1
 fixedChokeChecks.exe
 if %errorlevel% neq 0 exit /b 1
-cl /nologo /std:c++17 /O2 /EHsc /W4 /DS3_CHOKE_FIXED_RATE=1 /DS3_CHOKE_INITIAL_BPS=26000000 /DS3_CHOKE_DURATION_SECONDS=2 /I"$projectRoot/src" /I"$projectRoot/src/backend" /I"$projectRoot/test/hardware" /I"$projectRoot/../shared/bufferedWriter/src" "$projectRoot/test/timedChokeChecks.cpp" "$projectRoot/test/hardware/chokeTest.cpp" "$projectRoot/../shared/bufferedWriter/src/bufferedWriter.cpp" /Fe:timedChokeChecks.exe
+cl /nologo /std:c++17 /O2 /EHsc /W4 /DS3_CHOKE_FIXED_RATE=1 /DS3_CHOKE_INITIAL_BPS=26000000 /DS3_CHOKE_DURATION_SECONDS=2 /I"$projectRoot/include" /I"$projectRoot/include/backend" /I"$projectRoot/test/hardware" /I"$projectRoot/../shared/bufferedWriter/src" "$projectRoot/test/timedChokeChecks.cpp" "$projectRoot/test/hardware/chokeTest.cpp" "$projectRoot/../shared/bufferedWriter/src/bufferedWriter.cpp" /Fe:timedChokeChecks.exe
 if %errorlevel% neq 0 exit /b 1
 timedChokeChecks.exe
 if %errorlevel% neq 0 exit /b 1
-cl /nologo /std:c++17 /EHsc /W4 /DS3_CHOKE_TEST=1 /I"$projectRoot/test/fakes" /I"$projectRoot/src" /I"$projectRoot/src/backend" /I"$projectRoot/test/hardware" /I"$projectRoot/../shared" /I"$projectRoot/../shared/bufferedWriter/src" "$projectRoot/test/nativeChecks.cpp" "$projectRoot/src/commandProtocol.cpp" "$projectRoot/src/commandHistory.cpp" "$projectRoot/src/acquisition.cpp" "$projectRoot/test/hardware/acquisitionChoke.cpp" "$projectRoot/test/hardware/chokeEvents.cpp" "$projectRoot/test/hardware/chokeTest.cpp" "$projectRoot/src/fastCapture.cpp" "$projectRoot/src/featherLink.cpp" "$projectRoot/test/fakeRecordingService.cpp" "$projectRoot/src/sampleFormatter.cpp" "$projectRoot/../shared/bufferedWriter/src/bufferedWriter.cpp" /Fe:chokeCommandChecks.exe
+cl /nologo /std:c++17 /EHsc /W4 /DS3_CHOKE_TEST=1 /I"$projectRoot/test/fakes" /I"$projectRoot/include" /I"$projectRoot/include/backend" /I"$projectRoot/test/hardware" /I"$projectRoot/../shared" /I"$projectRoot/../shared/bufferedWriter/src" "$projectRoot/test/nativeChecks.cpp" "$projectRoot/src/commandProtocol.cpp" "$projectRoot/src/commandHistory.cpp" "$projectRoot/src/acquisition.cpp" "$projectRoot/test/hardware/acquisitionChoke.cpp" "$projectRoot/test/hardware/chokeEvents.cpp" "$projectRoot/test/hardware/chokeTest.cpp" "$projectRoot/src/fastCapture.cpp" "$projectRoot/src/featherLink.cpp" "$projectRoot/test/fakeRecordingService.cpp" "$projectRoot/src/sampleFormatter.cpp" "$projectRoot/../shared/bufferedWriter/src/bufferedWriter.cpp" /Fe:chokeCommandChecks.exe
 if %errorlevel% neq 0 exit /b 1
 chokeCommandChecks.exe
 if %errorlevel% neq 0 exit /b 1
-cl /nologo /std:c++17 /EHsc /W4 /I"$projectRoot/test/fakes" /I"$projectRoot/../shared" /I"$projectRoot/../espFeather/src/adc" /I"$projectRoot/../espFeather/test/hardware" "$projectRoot/test/ads127DriverChecks.cpp" "$projectRoot/../espFeather/src/adc/ads127l18.cpp" "$projectRoot/../espFeather/test/hardware/ads127LowRate.cpp" /Fe:ads127DriverChecks.exe
+cl /nologo /std:c++17 /EHsc /W4 /I"$projectRoot/test/fakes" /I"$projectRoot/../shared" /I"$projectRoot/../espFeather/include/adc" /I"$projectRoot/../espFeather/test/hardware" "$projectRoot/test/ads127DriverChecks.cpp" "$projectRoot/../espFeather/src/adc/ads127l18.cpp" "$projectRoot/../espFeather/test/hardware/ads127LowRate.cpp" /Fe:ads127DriverChecks.exe
 if %errorlevel% neq 0 exit /b 1
 ads127DriverChecks.exe
 "@

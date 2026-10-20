@@ -20,7 +20,10 @@ target_include_directories(${COMPONENT_LIB} PRIVATE
     "${CMAKE_CURRENT_LIST_DIR}/profile")
 
 # Only the profiling build collects CPU use and selects the shorter duration.
-if(CONFIG_P4_CAPTURE_PROFILE)
+if(CONFIG_P4_HARDWARE_SMOKE)
+    target_sources(${COMPONENT_LIB} PRIVATE "${CMAKE_CURRENT_LIST_DIR}/hardware/sdSmokeSummary.cpp")
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE ADS127_HARDWARE_SMOKE=1)
+elseif(CONFIG_P4_CAPTURE_PROFILE)
     target_sources(${COMPONENT_LIB} PRIVATE "${CMAKE_CURRENT_LIST_DIR}/profile/captureProfile.cpp")
     target_compile_definitions(${COMPONENT_LIB} PRIVATE ADS127_P4_LONG_RUN=1)
 else()

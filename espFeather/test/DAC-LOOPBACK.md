@@ -1,7 +1,7 @@
 # Independent measurement of the bench DAC
 
 Karl completed this diagnostic October 18, both disconnected and connected to
-the TI input. See [results](../../docs/STATUS-2026-10-19-P4.md). Use bench-dac-loopback, not the old web
+the TI input. See [results](../../docs/STATUS.md). Use bench-dac-loopback, not the old web
 application. The exact existing benchDac/benchDacWave source generates the sine.
 No ADS127 register operations, UART commands, P4 capture or SD access occur.
 

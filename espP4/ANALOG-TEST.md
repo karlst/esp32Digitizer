@@ -2,7 +2,7 @@
 
 Karl completed the PC checks, build/upload and real signal recording on October 18.
 The recorded waveform was flattened; capture/storage checks passed on CardP.
-See [results and current status](../docs/STATUS-2026-10-19-P4.md).
+See [results and current status](../docs/STATUS.md).
 
 ## Signal and wiring
 

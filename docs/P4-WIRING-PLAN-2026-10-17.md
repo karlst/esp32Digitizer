@@ -80,5 +80,5 @@ configuration. Header matches alone do not prove every payload bit is correct.
 - [Waveshare board and header pinout](https://docs.waveshare.com/ESP32-P4-Module-DEV-KIT)
 - [Waveshare schematic](https://files.waveshare.com/wiki/ESP32-P4-Module-DEV-KIT/ESP32-P4-Module-DEV-KIT.pdf)
 - Existing project: shared/ads127Pins.h, espFeather/test/hardware/ads127CaptureControl.cpp,
-  espS3/test/hardware/ads127CaptureDiagnostic.cpp, docs/STATUS-2026-10-12.md.
+  espS3/test/hardware/ads127CaptureDiagnostic.cpp, docs/P4-EARLY-TEST-HISTORY.md.
 - Installed ESP-IDF: components/esp_driver_parlio/src/parlio_rx.c (GPIO routing).

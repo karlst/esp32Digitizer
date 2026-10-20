@@ -1,7 +1,7 @@
 # Short waveform capture without SD
 
 Karl completed the PC checks, build/upload and RAM captures on October 18,
-with further simultaneous captures on October 19. See [results](../docs/STATUS-2026-10-19-P4.md).
+with further simultaneous captures on October 19. See [results](../docs/STATUS.md).
 
 Reset P4 and select `w` before any SD commands. This locks RAM mode until reset;
 SD prepare/test commands are rejected. Existing storage tasks allocate their

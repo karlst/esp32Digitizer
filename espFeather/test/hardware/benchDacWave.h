@@ -14,7 +14,7 @@
 
 /**
  * @file benchDacWave.h
- * @brief Functional-test sine or opt-in constant code, independent of hardware APIs.
+ * @brief Functional-test sine, square wave, or opt-in constant code, independent of hardware APIs.
  * Nominal 10 Hz, 1.25 V offset, 0.5 V peak: 0.75..1.75 V before DAC error and
  * output loading. The Feather's 8-bit DAC and nominal 3.3 V supply are not a
  * calibrated signal source. This is not a precision ADC noise/distortion test.
@@ -30,7 +30,7 @@ constexpr uint64_t periodUs = 100000;
 constexpr uint64_t updateUs = 500;
 
 /**
- * @brief Return the current sine code, or fixed 135 in the constant diagnostic.
+ * @brief Return the selected sine, one-second square-wave level, or fixed code 135.
  * A delayed update skips ahead rather than slowing the requested waveform.
  * Modulo before floating conversion preserves phase precision at long uptime.
  * elapsedUs is time since start, not a sample index. The return is an 8-bit DAC
@@ -38,7 +38,11 @@ constexpr uint64_t updateUs = 500;
  */
 inline uint8_t codeAt(uint64_t elapsedUs)
 {
-#if ADS127_DAC_CONSTANT
+#if ADS127_HARDWARE_SMOKE
+    // One second per level. These modest codes avoid the former very low sine
+    // commands; A2 measures the actual loaded voltage, including DAC distortion.
+    const uint8_t retVal = (elapsedUs / 1000000) % 2 == 0 ? 110 : 135;
+#elif ADS127_DAC_CONSTANT
     // Hold the former sine peak (135 * 3.3 / 255 = about 1.747 V).
     // This avoids the observed low-voltage flattening. The timer still writes
     // every 500 us so scheduling remains comparable with the sine experiment.

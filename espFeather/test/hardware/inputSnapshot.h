@@ -13,7 +13,7 @@
  */
 
 /** @file inputSnapshot.h
- * @brief Independent A2 observations during the P4 RAM waveform experiment.
+ * @brief Independent A2 observations during P4 RAM or SD smoke experiments.
  * Arduino loop owns all fields; the DAC timer never accesses this object.
  * The A1->A2 jumper measures the physical voltage, not the requested DAC code.
  */

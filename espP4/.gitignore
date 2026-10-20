@@ -7,3 +7,6 @@
 /build-profile/
 /sdkconfig.profile.old
 /.pio/
+
+/sdkconfig.smoke
+/sdkconfig.smoke.old
