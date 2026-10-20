@@ -145,8 +145,9 @@ export function initializeS3Monitor()
 
     /**
      * Fetch status, or send one action and then display the returned command state.
-     * action is null for a GET poll or start/stop/reboot for POST. body carries the next
-     * Start's sample rate; other actions have no settings body. Allow one request at a
+     * action is null for a GET poll or start/stop/reboot/delete for POST. body carries
+     * Start's sample rate and recording choice, or Delete's confirmation; Stop and
+     * Reboot need no body. Allow one request at a
      * time and reserve one clicked command behind a poll instead of losing that click.
      *
      * A 202 HTTP reply only means Feather accepted a command for delivery. Polling must

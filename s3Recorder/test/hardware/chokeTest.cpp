@@ -14,7 +14,9 @@
 
 /**
  * @file chokeTest.cpp
- * @brief Pace a configurable ramp or fixed-rate source, optionally time-limited.
+ * @brief Generate invented sample values to find when recording cannot keep up.
+ * The "choke" test either increases the offered data rate every ten seconds
+ * (a ramp) or holds a fixed rate, with an optional time limit. No ADC is read.
  * Read start() then feed(): elapsed time determines how many words SHOULD have
  * arrived; only that many are offered. We never wait for ring space or silently
  * lower the requested rate when storage cannot keep up.

@@ -24,7 +24,7 @@
  * Called only by the Feather diagnostic's Arduino task. The ADC driver owns
  * SPI transfers; this class owns their sequence and checks configuration readback.
  * No output starts at construction or configuration time. A separate start()
- * follows the S3 READY reply so the receiver exists before samples are produced.
+ * follows the receiver's READY reply so it is prepared before samples are produced.
  */
 class ads127LowRate
 {

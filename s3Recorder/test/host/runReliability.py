@@ -10,11 +10,16 @@
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General
 # Public License in the repository LICENSE file or <https://www.gnu.org/licenses/>.
 
-"""Log the authorized timed run; the S3 owns the 1800-second deadline.
+"""Start and log the S3 timed storage test on COM4; argv[1] is the log path.
 
-This monitor prints a compact progress snapshot every 45 seconds, retains every
-serial line, and waits for orderly drain/close after the producer stops. A host
-watchdog sends Stop if the device never starts or exceeds its expected duration.
+Assumes the installed Choke test firmware sets an 1800-second duration. It does
+not identify the board or firmware. Start requests recording; normal firmware
+would interpret the same command as ADC capture at 30000 samples/second.
+Progress prints every 45 seconds. After a running report followed by any other
+test result, collect 15 more seconds of logs; this does not confirm file closure.
+A 90-second start timeout or 1920-second overall timeout raises an error. The
+finally block attempts Stop and then closes the port, without waiting for an
+acknowledgment. If that write raises an error, the explicit close is not reached.
 """
 import pathlib
 import serial

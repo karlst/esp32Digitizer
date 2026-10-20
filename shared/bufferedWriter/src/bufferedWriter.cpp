@@ -48,7 +48,8 @@ constexpr uint32_t bufferedWriter::blockBytes;
 /**
  * @brief Allocate owned ring memory before any producer or consumer starts.
  * The platform adapter supplies allocate(bytes) and release(pointer). Failure
- * leaves the writer unusable; callers must not start recording. Repeated setup
+ * to allocate leaves the writer unusable; callers must not start recording.
+ * A true return means memory already exists or was just allocated. Repeated setup
  * reuses the successful allocation, so each Start does not allocate another ring.
  * No ring address is exposed to callers. Desktop tests supply ordinary RAM.
  */
@@ -81,7 +82,7 @@ bufferedWriter::~bufferedWriter()
 #endif
 
 /**
- * @brief Reset one recording while no producer is running.
+ * @brief Prepare an empty recording buffer while submitting and writing are stopped.
  * destination and clock must outlive the recording. The clock returns monotonic
  * microseconds. The adapter may open after this call to measure opening time,
  * but must not enable the producer until the file is ready.
@@ -116,7 +117,7 @@ void bufferedWriter::start(byteSink& destination, uint64_t (*clock)())
 
 /**
  * @brief Copy all supplied bytes or reject the entire submission without waiting.
- * A full buffer latches failure; later submissions are rejected too. This avoids
+ * A full buffer sets a failure flag until start(); later submissions are rejected too. This avoids
  * silently joining data on either side of a missing section. rejectedBytes counts
  * only bytes explicitly offered and rejected, not unseen hardware samples.
  *
@@ -125,6 +126,8 @@ void bufferedWriter::start(byteSink& destination, uint64_t (*clock)())
  * decoder task with batches of packed three-byte samples (four-byte words for
  * its separate synthetic test). There must be ONE producer, never both paths
  * at once. The disk task may be reading other ring bytes simultaneously.
+ * The caller must call start() first and stop submitting before finish() or
+ * cancel(). submit() does not check active and cannot enforce that lifecycle.
  * @param data Bytes to copy. The caller may reuse its memory when this returns.
  * @param length Number of BYTES, not samples; the board adapter chooses the format.
  * @return True means copied into RAM, NOT saved to disk. False means none of this

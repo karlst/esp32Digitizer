@@ -57,7 +57,9 @@ void fastCapture::reset()
  * Clear the current GPIO event before starting. If another falling edge arrives
  * during the transfer, the hardware relatches it even while this ISR is running.
  * Reject that overlap, or a DRDY pin that fails to rise, just as the task path
- * does. A fault freezes capture; the task reports it and puts the ADC in standby.
+ * does. A fault freezes capture; the task reports it and attempts to stop the ADC.
+ * A controller timeout instead calls abandon(), which deselects the chip without
+ * another SPI transfer; it cannot confirm that conversions stopped.
  */
 void IRAM_ATTR fastCapture::onReady()
 {
@@ -126,8 +128,10 @@ void IRAM_ATTR fastCapture::onReady()
                     state.raw = sample;
                     state.sampleUs = started;
 
-                    // Preserve EACH accepted value before the next interrupt. The
-                    // formatter only copies four bytes; disk I/O runs on core 1.
+                    // Try to queue this value before the next interrupt. The formatter
+                    // copies four bytes if space remains; disk I/O runs on core 1.
+                    // The acquisition task notices writer failure and stops later,
+                    // so state.count can include values rejected by a full buffer.
                     if (destination)
                     {
                         sampleFormatter::submit(*destination, sample);

@@ -19,6 +19,8 @@
  * means the ESP32 V2 board; S3 means the separate recorder. All seven digital
  * signals pass through the SN74AXC8T245 translator, A=3.3 V and B=1.8 V.
  * This header only names wires; including it does not configure hardware.
+ * The s3-prefixed inputs are legacy assignments. P4 uses GPIO0/1/2 instead,
+ * configured in p4Capture/main/main.cpp; do not use the S3 numbers for P4.
  */
 #pragma once
 

@@ -28,7 +28,7 @@
 class recordingMonitor
 {
 public:
-    // Last fully validated S3 recording values; retained after Stop so P3 can
+    // Last fully validated S3 recording values; retained after Stop so the browser can
     // show the completed run. Retaining a copy is not evidence of a live connection.
     recordingStatus status;
     // True only when the accepted UART frame supports recording statistics.

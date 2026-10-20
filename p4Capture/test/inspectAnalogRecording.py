@@ -30,7 +30,12 @@ def signed24(data, offset):
 
 
 def inspectRecording(path):
-    """Validate the entire file and examine two seconds after a 1s settling skip."""
+    """Check file layout and the full payload checksum; examine seconds 1 through 3.
+
+    Raise ValueError for the checked header/length/checksum failures. The checksum
+    compares saved bytes with the P4's stored checksum; it cannot show whether the
+    analog measurement or the earlier ADC-to-P4 transfer was correct.
+    """
     with path.open('rb') as recording:
         header = recording.read(512)
         if len(header) != 512 or header[:8] != b'P4ADC03\0':

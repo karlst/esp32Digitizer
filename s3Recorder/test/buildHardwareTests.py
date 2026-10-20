@@ -40,9 +40,19 @@ if selectedSource:
                                'sdLedDiagnostic.cpp', 'sdWriteTiming.cpp',
                                'ads127InputDiagnostic.cpp', 'ads127CaptureDiagnostic.cpp']:
         raise ValueError('Unknown hardware test source: ' + selectedSource)
-    env.BuildSources('$BUILD_DIR/hardwareTests', str(testRoot),
-                     src_filter=['-<*>', '+<' + selectedSource + '>'])
+    sources = ['-<*>', '+<' + selectedSource + '>']
+    if selectedSource == 'ads127CaptureDiagnostic.cpp':
+        sources.append('+<ads127Dma.cpp>')
+    env.BuildSources('$BUILD_DIR/hardwareTests', str(testRoot), src_filter=sources)
 elif chokeEnabled:
     env.BuildSources('$BUILD_DIR/hardwareTests', str(testRoot),
                      src_filter=['-<*>', '+<chokeTest.cpp>', '+<chokeEvents.cpp>',
                                  '+<acquisitionChoke.cpp>'])
+
+# The optional startup storage test is implemented separately from the sink.
+storageCheckEnabled = any(item == 'S3_SD_VERIFY' or
+                          isinstance(item, (list, tuple)) and item[0] == 'S3_SD_VERIFY'
+                          for item in definitions)
+if storageCheckEnabled:
+    env.BuildSources('$BUILD_DIR/storageCheck', str(testRoot),
+                     src_filter=['-<*>', '+<storageCheck.cpp>'])

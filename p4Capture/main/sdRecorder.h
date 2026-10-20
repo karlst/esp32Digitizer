@@ -29,9 +29,10 @@
 #include "freertos/task.h"
 #endif
 
-/** @brief One prepared recording, with explicit asynchronous preparation and saving.
- * State publication transfers ownership: ready permits claim(), running permits
- * CPU1 submissions, finishing is published only after CPU1 has drained. Disk
+/** @brief One recording whose card operations run in a separate background task.
+ * Requests change a state variable shared with that task: ready permits claim(),
+ * running permits Core 1 submissions, and finishing means Core 1 has stopped
+ * submitting and finished its queued work. Disk
  * calls never occur in either submission method. Files are created exclusively,
  * never replaced.
  * bufferedWriter owns the ring and protects queued bytes until disk writing

@@ -36,7 +36,12 @@ public:
     bool failed() const;
     void report(unsigned long run, bool hardwareClean);
 private:
-    /** @brief Burst bounds relative to START echo; sum/count retain its mean. */
+    /**
+     * @brief Measurements taken together during one scheduled A2 read interval.
+     * timeUs is the midpoint, in microseconds since begin() after the START echo;
+     * durationUs is the time spent reading. sum/reads gives the average raw ADC
+     * count; minimum and maximum preserve variation that the average would hide.
+     */
     struct point
     {
         uint32_t timeUs;

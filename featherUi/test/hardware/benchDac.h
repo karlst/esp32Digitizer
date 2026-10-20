@@ -25,7 +25,7 @@
 #include <freertos/semphr.h>
 
 /**
- * @brief Serialize periodic A1 updates with start/stop in the Arduino loop.
+ * @brief Prevent timer writes to A1 from overlapping the loop's start/stop calls.
  * ESP_TIMER_TASK invokes tick() in a shared task, NOT an interrupt. A mutex
  * prevents stop() from disabling the DAC while a callback writes a new code.
  * No DAC output is enabled by construction or initialize(). Objects live for

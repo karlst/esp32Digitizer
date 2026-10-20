@@ -25,7 +25,7 @@
 #include "SPI.h"
 #include "ads127l18.h"
 #include "ads127LowRate.h"
-#include "benchLine.h"
+#include "test/support/benchLine.h"
 #include "ads127BenchRate.h"
 
 // Existing Arduino fakes use these globals to observe pin levels and elapsed time.

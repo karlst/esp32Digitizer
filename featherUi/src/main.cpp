@@ -14,7 +14,9 @@
 
 /**
  * @file main.cpp
- * @brief Starting point for the Feather firmware, separate from the S3 firmware.
+ * @brief Start the Feather web application for the legacy S3 recorder and local DAC.
+ * This entry point is not used by the P4 test-control builds: PlatformIO selects
+ * their separate setup()/loop() in test/hardware/ads127CaptureControl.cpp.
  * Arduino calls setup() once and then loop() repeatedly. webApp performs the
  * actual service startup/updates; dacGenerator creates its own background task.
  * Read webApp.cpp next for ownership and startup, webController.cpp for routes.

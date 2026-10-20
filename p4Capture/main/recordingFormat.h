@@ -13,8 +13,8 @@
  */
 
 /** @file recordingFormat.h
- * @brief Portable sample packing and versioned P4 commissioning file headers.
- * ADC v3 stores three-byte signed samples and 64-bit sizes; synthetic v1 is unchanged.
+ * @brief Define how ADC numbers and recording information are stored in P4 ADC files.
+ * ADC v3 stores three-byte signed samples and 64-bit sizes.
  * These helpers do not allocate memory, perform disk I/O, or change DMA capture.
  * This is the SECOND kind of packing in the data path. PARLIO hardware first
  * packs pairs of pin levels into raw bytes. frameDecoder reconstructs 32-bit
@@ -55,7 +55,10 @@ inline size_t packSamples(const uint32_t* words, size_t count, uint8_t* output, 
     return retVal;
 }
 
-/** @brief Store an unsigned header field explicitly in little-endian byte order. */
+/**
+ * @brief Store value in four bytes at output, least-significant byte first.
+ * The caller must provide four writable bytes; no capacity check occurs here.
+ */
 inline void store32(uint8_t* output, uint32_t value)
 {
     for (unsigned index = 0; index < 4; ++index)
@@ -64,7 +67,10 @@ inline void store32(uint8_t* output, uint32_t value)
     }
 }
 
-/** @brief Store a 64-bit field without truncating files above 4 GiB. */
+/**
+ * @brief Store value in eight writable bytes supplied by the caller.
+ * Low four bytes come first. This retains file sizes larger than 4 GiB.
+ */
 inline void store64(uint8_t* output, uint64_t value)
 {
     store32(output, static_cast<uint32_t>(value));
@@ -74,32 +80,26 @@ inline void store64(uint8_t* output, uint64_t value)
 /** @brief Fill caller-owned 512-byte header; version identifies the payload layout.
  * ADC v3: magic P4ADC03, 64-bit byte count at 28, CRC32 at 36, width=3 at 40,
  * and 64-bit sample count at 44. Readers must select layout by version/magic.
- * Synthetic v1 remains byte-for-byte compatible with the existing SD-only test.
- * valid is set only after capture and file verification succeed. Payload bytes
+ * run identifies the capture; stage selects the rate; rate is samples per second.
+ * bytes excludes this header. Output must have
+ * 512 writable bytes. The helper simply encodes the caller's valid flag; it
+ * performs no verification itself. The recorder supplies true after capture
+ * and readback checks, but final sync/close occur afterward. Payload bytes
  * and CRC describe the stored representation, not the larger DMA input stream.
  */
-inline void makeHeader(uint8_t* output, bool synthetic, bool valid, uint32_t run,
+inline void makeHeader(uint8_t* output, bool valid, uint32_t run,
                        uint32_t stage, uint32_t rate, uint64_t bytes, uint32_t crc)
 {
     std::memset(output, 0, headerBytes);
-    std::memcpy(output, synthetic ? "P4SYN01" : "P4ADC03", 7);
-    store32(output + 8, synthetic ? 1 : 3);
+    std::memcpy(output, "P4ADC03", 7);
+    store32(output + 8, 3);
     store32(output + 12, valid ? 1 : 0);
     store32(output + 16, run);
     store32(output + 20, stage);
     store32(output + 24, rate);
-    if (synthetic)
-    {
-        // Synthetic tests remain limited to 60 seconds, well below 4 GiB.
-        store32(output + 28, static_cast<uint32_t>(bytes));
-        store32(output + 32, crc);
-    }
-    else
-    {
-        store64(output + 28, bytes);
-        store32(output + 36, crc);
-        store32(output + 40, sampleBytes);
-        store64(output + 44, bytes / sampleBytes);
-    }
+    store64(output + 28, bytes);
+    store32(output + 36, crc);
+    store32(output + 40, sampleBytes);
+    store64(output + 44, bytes / sampleBytes);
 }
 }

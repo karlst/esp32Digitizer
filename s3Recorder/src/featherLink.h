@@ -20,7 +20,8 @@
 #include "acquisition.h"
 
 /**
- * @brief Exchange version-2 commands and version-3 status on the S3 side of the link.
+ * @brief Receive version-2/3 commands and send version-5 S3 status to Feather.
+ * S3_LEGACY_STATUS builds send version-2 status instead, without recording fields.
  * main.cpp owns this object and calls it from the Arduino loop task. It holds a
  * reference to acquisition, sends it queued commands, and reads copied status.
  * Reports include only the latest sample and counters, not the full sample stream.

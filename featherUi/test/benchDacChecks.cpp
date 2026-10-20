@@ -23,9 +23,13 @@
 /** @brief Check phase, nominal range, repeatability and delayed-update behavior. */
 int main()
 {
+    // Check the commanded codes at the sine's center, positive peak and negative
+    // peak. These values follow the nominal 3.3-V mapping, not measured volts.
     assert(benchDacWave::codeAt(0) == 97);
     assert(benchDacWave::codeAt(25000) == 135);
     assert(benchDacWave::codeAt(75000) == 58);
+    // Visit every scheduled update in one period, then repeat at later times.
+    // This exercises the pure formula; it does not run the board's timer callback.
     for (uint64_t time = 0; time < benchDacWave::periodUs; time += benchDacWave::updateUs)
     {
         const uint8_t code = benchDacWave::codeAt(time);

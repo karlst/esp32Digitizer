@@ -40,7 +40,9 @@ static int64_t startedAt = 0, nextReadAt = 0;
 static uint32_t missedReadSlots = 0;
 
 /** @brief Stop the timer/DAC before USB output; loop alone owns the sample array.
- * clean requires a full timed window and no known driver error. It does not
+ * The caller passes clean=true only after the timed window ends. The printed
+ * clean flag also requires at least 200 readings and no known DAC error. Missed
+ * read slots are reported separately; clean does not require zero misses or
  * mean a faithful sine or correct wiring. Independent ADC readings may include
  * noise/nonlinearity. Print actual timestamps, never pretend sampling was exact.
  */

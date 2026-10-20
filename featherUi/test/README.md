@@ -111,9 +111,9 @@ checks described above were added afterward; subsequent short runs through 256k
 passed the header checks. This paragraph records the earlier commissioning run.
 
 Reading path: `hardware/ads127CaptureControl.cpp` coordinates the test;
-`../src/adc/ads127LowRate.cpp` explains each ADC setting;
+`hardware/ads127LowRate.cpp` explains each ADC setting;
 `../../s3Recorder/test/hardware/ads127CaptureDiagnostic.cpp` handles S3 commands;
-`../../s3Recorder/src/frontend/ads127Dma.cpp` contains the actual `i2s_read()` call
+`../../s3Recorder/test/hardware/ads127Dma.cpp` contains the actual `i2s_read()` call
 that copies completed DMA data for inspection.
 
 ## First communication check

@@ -10,17 +10,17 @@
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General
 # Public License in the repository LICENSE file or <https://www.gnu.org/licenses/>.
 
-idf_component_register(SRCS "main.cpp" "frameDecoder.cpp" "sdRecorder.cpp" "sdWriteTest.cpp" "ramWaveform.cpp"
+# Compile P4 capture and storage plus the shared byte writer. The reusable writer
+# has no S3 dependency; these include paths expose its interface to sdRecorder.
+idf_component_register(SRCS "main.cpp" "frameDecoder.cpp" "sdRecorder.cpp"
     "../../shared/bufferedWriter/src/bufferedWriter.cpp"
     INCLUDE_DIRS "." "../../shared" "../../shared/bufferedWriter/src"
     REQUIRES esp_driver_parlio esp_driver_uart esp_driver_gpio esp_timer fatfs sdmmc esp_driver_sdmmc esp_psram esp_rom esp_hw_support)
+# Allocate the ring separately at runtime: 4 MiB total, writes of up to 128 KiB.
+# Apply identical definitions to all sources so class layouts agree.
 target_compile_definitions(${COMPONENT_LIB} PRIVATE
     BUFFERED_WRITER_EXTERNAL=1 BUFFERED_WRITER_CAPACITY=4194304 BUFFERED_WRITER_BLOCK_BYTES=131072)
 
-# Keep measurement code and its 60-second timing out of the normal firmware.
-if(CONFIG_P4_CAPTURE_PROFILE)
-    target_sources(${COMPONENT_LIB} PRIVATE "captureProfile.cpp")
-    target_compile_definitions(${COMPONENT_LIB} PRIVATE ADS127_P4_LONG_RUN=1)
-else()
-    target_compile_definitions(${COMPONENT_LIB} PRIVATE ADS127_P4_ENDURANCE=1)
-endif()
+# Bench commands remain available in the existing firmware. Their implementations
+# and optional profiling build rules live with the tests, not the recorder.
+include("${CMAKE_CURRENT_LIST_DIR}/../test/firmware.cmake")

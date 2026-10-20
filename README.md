@@ -27,6 +27,16 @@ PC tests. P4 uses this directly; its firmware and tests need no S3 source files.
 `s3Recorder/` retains the legacy S3 implementation and S3-specific tests. The
 S3 project also uses the shared writer, so there is only one implementation.
 
+Test implementations live under each project's `test/` directory. P4 hardware
+tests are in `p4Capture/test/hardware/`; CPU and decoder timing measurements are
+in `p4Capture/test/profile/`. Shared bench command/timing helpers are in
+`shared/test/support/`. Test build environments for Feather and S3 live in
+`test/platformio.ini`, imported by each project's main configuration.
+
+The existing bench firmware still connects these helpers to the real recorder:
+source separation does not remove commands or create a second recording path.
+See [the source layout](p4Capture/test/SOURCE-LAYOUT.md) for details.
+
 The S3 build and experiment notes below are historical. The current data path is:
 
 ```text

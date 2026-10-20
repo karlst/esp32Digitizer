@@ -12,7 +12,9 @@
  * Public License in the repository LICENSE file or <https://www.gnu.org/licenses/>.
  */
 
-// P3 renders validated S3 recording telemetry. It never controls the card itself.
+// The recording panel displays S3's reported counters and card status.
+// Feather checks serial messages before forwarding them; this panel does not
+// independently verify the card contents or control the card.
 // UART byte totals arrive as decimal strings; BigInt preserves their exact value.
 // History is a bounded browser-session display, not a substitute for recorded data.
 
@@ -44,14 +46,15 @@ function elapsed(value)
 }
 
 /**
- * Attach P3 once and return a renderer called after each successful status poll.
+ * Attach the recording panel and return a renderer for successful status polls.
  * The main S3 UI module calls this once, then calls the returned render function
  * with each HTTP status snapshot. The closure retains chart history between calls.
  * No sample payload arrives here: this page receives counters/positions/durations,
- * not the digitizer's 30000 samples per second. P3 is a monitor, not a recorder.
+ * not the digitizer's 30000 samples per second. This panel does not record samples.
  */
 export function createRecordingPanel()
 {
+    // Find a panel element by its HTML ID; callers expect these IDs in index.html.
     const get = (id) => document.getElementById(id);
     // Keep at most 240 observations and two minutes of time. This is a small
     // display history in this browser tab; reloading discards it.

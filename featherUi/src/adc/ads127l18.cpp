@@ -107,7 +107,7 @@ bool ads127l18::readRegister(uint8_t address, uint8_t& value)
  * @brief Write a writable register and check its echo in the following frame.
  * True means the ADC echoed this write; persistent settings still need readback.
  * CONTROL start/stop bits self-clear, so their echo confirms command acceptance,
- * not that sample clocks reached the S3. Reject invalid/read-only addresses and
+ * not that sample clocks reached the receiver. Reject invalid/read-only addresses and
  * changes that enable SPI CRC, which this two-byte transport does not implement.
  */
 bool ads127l18::writeRegister(uint8_t address, uint8_t value)

@@ -48,17 +48,18 @@ inline uint32_t testReadyRiseAt = UINT32_MAX;
 inline void (*testClockHook)() = nullptr;
 
 /**
- * @brief Return simulated elapsed time.
+ * @brief Return the test-controlled millisecond counter without advancing it.
  */
 inline uint32_t millis() { return testMs; }
 
 /**
- * @brief Return simulated SPI timing.
+ * @brief Run the optional hardware-simulation hook, then return test microseconds.
  */
 inline uint32_t micros() { if (testClockHook) { testClockHook(); } return testUs; }
 
 /**
- * @brief Return simulated DRDY.
+ * @brief Return testReady for every pin; GPIO9 may also trigger a scheduled rise.
+ * This is a DRDY-focused substitute, not an independent value for every GPIO.
  */
 inline int digitalRead(int pin)
 {
@@ -76,17 +77,17 @@ inline int digitalRead(int pin)
 inline void pinMode(int pin, int) { if (pin == 18) { testUartRxMapped = false; } }
 
 /**
- * @brief Observe the driver's chip-select level.
+ * @brief Save any digitalWrite value as testChipSelect; the pin argument is ignored.
  */
 inline void digitalWrite(int, int value) { testChipSelect = value; }
 
 /**
- * @brief Record SPI command delays.
+ * @brief Advance only testUs by duration microseconds; do not sleep the PC thread.
  */
 inline void delayMicroseconds(uint32_t duration) { testUs += duration; }
 
 /**
- * @brief Advance simulated time.
+ * @brief Advance only testMs by duration milliseconds; testUs is a separate clock.
  */
 inline void delay(uint32_t duration) { testMs += duration; }
 
@@ -112,12 +113,12 @@ struct fakeSerial
     bool flushed = false;
 
     /**
-     * @brief Simulate buffer sizing.
+     * @brief Ignore receive-buffer sizing; input is an unbounded test deque.
      */
     void setRxBufferSize(int) {}
 
     /**
-     * @brief Simulate buffer sizing.
+     * @brief Ignore transmit-buffer sizing; tests set capacity directly.
      */
     void setTxBufferSize(int) {}
 
@@ -132,7 +133,7 @@ struct fakeSerial
     int available() { return static_cast<int>(input.size()); }
 
     /**
-     * @brief Consume one received byte.
+     * @brief Consume one queued character; caller must first check available().
      */
     int read() { const int retVal = input.front(); input.pop_front(); return retVal; }
 
@@ -142,13 +143,13 @@ struct fakeSerial
     int availableForWrite() { return capacity; }
 
     /**
-     * @brief Capture an output frame.
+     * @brief Append all bytes to output; capacity is not enforced by this fake.
      */
     size_t write(const uint8_t* bytes, size_t count)
     { output.append(reinterpret_cast<const char*>(bytes), count); return count; }
 
     /**
-     * @brief Record acknowledgement completion before reboot.
+     * @brief Remember that flush was requested; no physical transmission occurs.
      */
     void flush() { flushed = true; }
 

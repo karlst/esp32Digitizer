@@ -13,7 +13,9 @@
  */
 
 /** @file ramWaveformChecks.cpp
- * @brief PC checks: settling skip, signed extrema, bin boundaries, reset and cap.
+ * @brief PC checks of grouping samples into minimum, maximum and average records.
+ * This calls the real RAM collector with invented words. No ADC, DMA receiver,
+ * timing or inter-core synchronization is exercised.
  */
 #include "ramWaveform.h"
 #include <cassert>
@@ -22,11 +24,15 @@
 /** @brief Exercise actual collector with the lowest supported 16k sample rate. */
 int main()
 {
+    // At 16,000 samples/second, the first 16,000 words are the one-second skip.
+    // Even full-scale startup values must not enter the retained groups.
     ramWaveform wave;
     wave.reset(16000);
     const uint32_t startup = 0x087fffff;
     for (unsigned index = 0; index < 16000; ++index) { wave.accept(&startup, 1); }
     assert(wave.completedBins == 0 && !wave.complete());
+    // Eight samples make one 0.5-ms group at this rate. Split each group across
+    // two accept() calls to check that a caller's batch boundary cannot reset it.
     const uint32_t batch[] = {0x08800000, 0x087fffff, 0x08ffffff, 0x08000001,
                              0x08000000, 0x08000000, 0x08000000, 0x08000000};
     for (unsigned bin = 0; bin < 600; ++bin)
@@ -38,6 +44,8 @@ int main()
     assert(wave.complete() && wave.completedBins == 600);
     assert(wave.bins[0].minimum == -8388608 && wave.bins[599].maximum == 8388607);
     assert(wave.bins[0].sum == -1);
+    // A completed 600-group capture ignores later words; reset must clear it
+    // and select 512 samples per group for the next, full-rate capture.
     wave.accept(&startup, 1);
     assert(wave.bins[599].sum == -1 && wave.completedBins == 600);
     wave.reset(1024000);

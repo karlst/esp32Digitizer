@@ -71,7 +71,8 @@ void featherLink::begin()
  * The first thirteen fields retain their previous meanings. Six added fields
  * carry detected misses, rejected reads, driver failures, overlapping reads,
  * ready timeouts, and the last read-fault flags. The appended recording fields come from the storage task snapshot.
- * If the UART has no room, skip this report; the next contains the same totals.
+ * If the UART has no room, skip this report; the next carries updated totals.
+ * True means the UART accepted the entire line, not that Feather received it.
  */
 bool featherLink::report(const acquisitionStatus& status)
 {

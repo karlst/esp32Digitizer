@@ -17,7 +17,7 @@
  * @brief Shared finite-run timing for the ADC controller and P4 receiver.
  * ADS127_P4_ENDURANCE selects 30 minutes; ADS127_P4_LONG_RUN retains 60 seconds.
  * The historical Feather/S3 build retains its five-second run/eight-second
- * receiver deadline. Both P4 test boards must be rebuilt for the long run.
+ * receiver deadline. Feather and P4 must use matching duration selections.
  */
 #pragma once
 #include <cstdint>

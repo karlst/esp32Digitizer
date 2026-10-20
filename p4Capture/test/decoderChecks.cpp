@@ -26,7 +26,7 @@
 #include "frameDecoder.h"
 #include "sdTestData.h"
 #include "recordingFormat.h"
-#include "ads127BenchTiming.h"
+#include "test/support/ads127BenchTiming.h"
 
 /** @brief Read a test header's little-endian 64-bit field for boundary checks. */
 static uint64_t header64(const uint8_t* input)
@@ -42,6 +42,8 @@ static uint64_t header64(const uint8_t* input)
 /** @brief Check signed 24-bit limits, status removal, bounds and both file formats. */
 static void checkRecordingFormat()
 {
+    // Known byte patterns check sign preservation and removal of the ADC status
+    // byte. Sentinel bytes on both sides catch writes beyond the supplied space.
     const uint32_t words[] = {0x08000000, 0x08ffffff, 0x087fffff, 0x08800000,
                               0x08123456, 0xff123456};
     const uint8_t expected[] = {0,0,0, 255,255,255, 255,255,127, 0,0,128,
@@ -56,8 +58,10 @@ static void checkRecordingFormat()
     assert(std::vector<uint8_t>(bytes, bytes + sizeof(bytes)) == before);
     assert(recordingFormat::packSamples(words, 0, bytes, sizeof(bytes)) == 0);
 
+    // Build headers in RAM, then inspect fixed offsets independently. This checks
+    // the format and large counts, not an actual card write or a 30-minute run.
     uint8_t header[512];
-    recordingFormat::makeHeader(header, false, true, 0x12345678, 6, 1024000, 18, 0xabcdef01);
+    recordingFormat::makeHeader(header, true, 0x12345678, 6, 1024000, 18, 0xabcdef01);
     assert(std::memcmp(header, "P4ADC03", 8) == 0);
     assert(header[8] == 3 && header[12] == 1);
     assert(header[16] == 0x78 && header[19] == 0x12);
@@ -66,14 +70,14 @@ static void checkRecordingFormat()
     for (size_t index = 52; index < sizeof(header); ++index) { assert(header[index] == 0); }
     for (uint64_t payloadBytes : {0xffffffffULL, 0x100000000ULL, 5529600000ULL, 10000000000ULL})
     {
-        recordingFormat::makeHeader(header, false, false, 1, 6, 1024000, payloadBytes, 0xabcdef01);
+        recordingFormat::makeHeader(header, false, 1, 6, 1024000, payloadBytes, 0xabcdef01);
         assert(header64(header + 28) == payloadBytes && header64(header + 44) == payloadBytes / 3);
         assert(header[36] == 1 && header[39] == 0xab && header[40] == 3 && header[12] == 0);
     }
-    recordingFormat::makeHeader(header, true, true, 1, 0xffffffff, 812500, 20, 0);
+    sdTestData::makeHeader(header, true, 1, 0xffffffff, 812500, 20, 0);
     assert(std::memcmp(header, "P4SYN01", 8) == 0 && header[8] == 1);
     for (size_t index = 36; index < sizeof(header); ++index) { assert(header[index] == 0); }
-    recordingFormat::makeHeader(header, false, false, 0, 0, 0, 0, 0);
+    recordingFormat::makeHeader(header, false, 0, 0, 0, 0, 0);
     assert(header[12] == 0 && header64(header + 28) == 0 && header64(header + 44) == 0);
     assert(ads127BenchTiming::runMs == 1800000 && ads127BenchTiming::receiverTimeoutMs == 1805000);
     assert(uint64_t{1024000} * ads127BenchTiming::runMs / 1000 == 1843200000ULL);
@@ -102,6 +106,15 @@ static void checkSdTestData()
     }
     assert(sdTestData::word(0) == 0x9912ca41U);
     assert(sdTestData::word(1) == 0x99f46072U);
+    // Check the extracted card-read verifier with independent known bytes.
+    // A nonzero index catches accidental restarting of the pattern per block.
+    uint8_t readback[] = {0x72, 0x60, 0xf4, 0x99};
+    assert(sdTestData::checkBlock(readback, sizeof(readback), 1) == 0);
+    assert(sdTestData::checkBlock(readback, sizeof(readback), 0) == 1);
+    readback[2] ^= 1;
+    assert(sdTestData::checkBlock(readback, sizeof(readback), 1) == 1);
+    assert(sdTestData::checkBlock(readback, 3, 1) == 1);
+    assert(sdTestData::checkBlock(readback, 0, 1) == 0);
     puts("PASS: SD-only rate arithmetic, 60-second cap and known file pattern.");
 }
 
@@ -118,7 +131,11 @@ static void appendFrame(std::vector<unsigned>& pairs, unsigned clocks, uint32_t 
     }
 }
 
-/** @brief Pack pairs in the documented PARLIO two-bit LSB layout; pad tail low. */
+/**
+ * @brief Pack four simulated clock observations per byte, earliest in bits 0..1.
+ * Each pair contains data in bit 0 and frame sync in bit 1. A final incomplete
+ * byte is padded with zeros; this models the receiver's memory layout only.
+ */
 static std::vector<uint8_t> pack(const std::vector<unsigned>& pairs)
 {
     std::vector<uint8_t> retVal((pairs.size() + 3) / 4, 0);

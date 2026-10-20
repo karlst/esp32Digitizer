@@ -14,20 +14,25 @@
 
 /**
  * @file benchLine.h
- * @brief Bounded line assembly for the temporary Feather/S3 bench protocol.
+ * @brief Assemble serial test commands for Feather, S3, and P4, one character at a time.
  */
 #pragma once
 #include <cstddef>
 
 /**
  * @brief Collect UART characters until newline; discard oversized lines entirely.
- * Each board's Arduino loop owns its instance, so no lock is required. A true
+ * One control task/loop on each board owns its instance, so no lock is required. A true
  * feed() return exposes one complete null-terminated line until the next feed().
  */
 class benchLine
 {
 public:
-    /** @brief Add one received character; return true only for a complete valid line. */
+    /**
+     * @brief Add a character; true means a nonempty line ended at newline.
+     * Ignore carriage return. Keep at most 383 characters; a longer line is
+     * discarded through its newline, then collection starts fresh. "Valid"
+     * here means it fits, not that its command syntax or contents are correct.
+     */
     bool feed(char value)
     {
         bool retVal = false;

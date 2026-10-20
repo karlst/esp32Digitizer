@@ -13,10 +13,11 @@
  */
 
 /** @file ramWaveform.h
- * @brief Bounded waveform summaries, independent of SD and hardware drivers.
+ * @brief Keep a short summary of measured voltage samples in RAM, without an SD file.
  * Core 1 skips one second, then summarizes 300 ms into 600 half-millisecond
- * bins. Every sample contributes to its bin's mean and extrema; this is not
- * an anti-aliased spectrum. Core 0 reads bins only after the decoder drains.
+ * groups (called bins). Every sample contributes to its group's average and
+ * minimum/maximum. Individual samples are not retained, and averaging can
+ * hide rapid changes. Core 0 reads groups only after queued decoding finishes.
  */
 #pragma once
 #include <atomic>
@@ -31,7 +32,11 @@ struct waveformBin
     int64_t sum = 0;
 };
 
-/** @brief Fixed RAM capture with an atomic completion flag shared across cores. */
+/**
+ * @brief Core 1 accumulates the summary; Core 0 watches a completion flag.
+ * The atomic flag can be read safely across cores. Other fields are ordinary
+ * memory: Core 0 resets them before capture and reads them after decoding stops.
+ */
 class ramWaveform
 {
 public:
@@ -42,6 +47,7 @@ public:
     void reset(uint32_t rate);
     void accept(const uint32_t* words, size_t count);
     bool complete() const;
+    void report(unsigned long run, uint32_t rate, bool clean) const;
 private:
     uint32_t skip = 0;
     uint32_t inBin = 0;

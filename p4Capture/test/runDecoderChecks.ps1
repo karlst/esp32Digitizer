@@ -10,7 +10,8 @@
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General
 # Public License in the repository LICENSE file or <https://www.gnu.org/licenses/>.
 
-# Compile/run the real decoder on this PC. No board connection or upload.
+# Compile/run the real decoder, shared writer tests and >4-GiB counter-wrap test
+# on this PC. All data stays in RAM; this does not run a board or write an SD card.
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path $PSScriptRoot -Parent
 $writerRoot = Join-Path (Split-Path $projectRoot -Parent) 'shared/bufferedWriter'
@@ -25,7 +26,7 @@ $batch = @"
 @echo off
 call "$environmentScript" >nul
 if %errorlevel% neq 0 exit /b 1
-cl /nologo /std:c++17 /O2 /EHsc /W4 /DADS127_P4_ENDURANCE=1 /I"$projectRoot/main" /I"$projectRoot/../shared" "$projectRoot/test/decoderChecks.cpp" "$projectRoot/main/frameDecoder.cpp" /Fe:decoderChecks.exe
+cl /nologo /std:c++17 /O2 /EHsc /W4 /DADS127_P4_ENDURANCE=1 /I"$projectRoot/main" /I"$projectRoot/test/hardware" /I"$projectRoot/test/profile" /I"$projectRoot/../shared" "$projectRoot/test/decoderChecks.cpp" "$projectRoot/main/frameDecoder.cpp" /Fe:decoderChecks.exe
 if %errorlevel% neq 0 exit /b 1
 decoderChecks.exe
 if %errorlevel% neq 0 exit /b 1

@@ -21,8 +21,9 @@
 
 /**
  * @brief Implement the small Serial API used by the shared diagnostic source.
- * Only the main task calls these methods. UART0 reaches COM4 through the board's
- * USB bridge; UART1 and the Feather are never started. This is not an SD adapter.
+ * Only the main task calls these methods. UART0 reaches the PC through the board's
+ * USB bridge; Windows assigns its COM port. UART1 and the Feather are never
+ * started. This is not an SD adapter.
  */
 class diagnosticSerial
 {

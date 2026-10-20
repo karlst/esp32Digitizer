@@ -81,7 +81,7 @@ cl /nologo /std:c++17 /EHsc /W4 /DS3_CHOKE_TEST=1 /I"$projectRoot/test/fakes" /I
 if %errorlevel% neq 0 exit /b 1
 chokeCommandChecks.exe
 if %errorlevel% neq 0 exit /b 1
-cl /nologo /std:c++17 /EHsc /W4 /I"$projectRoot/test/fakes" /I"$projectRoot/../shared" /I"$projectRoot/../featherUi/src/adc" "$projectRoot/test/ads127DriverChecks.cpp" "$projectRoot/../featherUi/src/adc/ads127l18.cpp" "$projectRoot/../featherUi/src/adc/ads127LowRate.cpp" /Fe:ads127DriverChecks.exe
+cl /nologo /std:c++17 /EHsc /W4 /I"$projectRoot/test/fakes" /I"$projectRoot/../shared" /I"$projectRoot/../featherUi/src/adc" /I"$projectRoot/../featherUi/test/hardware" "$projectRoot/test/ads127DriverChecks.cpp" "$projectRoot/../featherUi/src/adc/ads127l18.cpp" "$projectRoot/../featherUi/test/hardware/ads127LowRate.cpp" /Fe:ads127DriverChecks.exe
 if %errorlevel% neq 0 exit /b 1
 ads127DriverChecks.exe
 "@

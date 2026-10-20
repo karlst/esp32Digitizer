@@ -19,7 +19,7 @@
  * Build with ADS127_P4_LONG_RUN=1, as in the profiling firmware.
  */
 #include "profileMath.h"
-#include "ads127BenchTiming.h"
+#include "test/support/ads127BenchTiming.h"
 #include <cassert>
 #include <cstdio>
 

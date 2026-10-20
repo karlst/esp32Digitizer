@@ -82,7 +82,7 @@ In ordinary PowerShell, build the explicitly named Feather environment:
 
 The original `ads127-capture-control` environment retains five seconds for S3.
 Only the new environment selects `ADS127_P4_ENDURANCE=1`. The P4 CMake component
-selects the same option; `shared/ads127BenchTiming.h` supplies both durations.
+selects the same option; `shared/test/support/ads127BenchTiming.h` supplies both durations.
 The SD change adds output batching to the decoder, so rerun its PC tests first.
 
 In **ESP-IDF PowerShell**, using the installed IDF 5.5.6:

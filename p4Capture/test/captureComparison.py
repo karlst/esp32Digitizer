@@ -49,13 +49,15 @@ def readPort(port, name, events, stop):
 
 
 def capture(inputPort, outputPort, folder, constant=False):
-    """Capture one paired RAM report and return the saved HTML path.
+    """Capture paired RAM reports and save their analysis in a new session folder.
 
     inputPort names Feather, outputPort names P4, and folder holds timestamped
     sessions. constant selects fixed-code firmware and a no-fit voltage report.
     Reader threads only collect bytes; this calling thread owns log files, mode
     checks and start/stop commands. Timeout/validation failures raise ValueError
     with logs retained; finally closes ports and requests stop if still unfinished.
+    Return the analysis dictionary for waveform mode, or the HTML path for constant
+    mode, matching the selected report function. Opening ports does not upload code.
     """
     import serial
     if inputPort.upper() == outputPort.upper():

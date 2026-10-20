@@ -14,7 +14,7 @@
 
 /**
  * @file frameDecoder.h
- * @brief Decode ADC data and its frame marker from paired PARLIO input bits.
+ * @brief Reconstruct ADC samples from saved data-pin and sample-start-pin values.
  * Read feed() first, then beginFrame(), appendBits() and finishWord(). No hardware or RTOS
  * dependency: the same decoder is exercised by the desktop test program.
  */
@@ -22,7 +22,14 @@
 #include <cstddef>
 #include <cstdint>
 
-/** @brief Observations of received data, not a claim that every ADC bit arrived. */
+/**
+ * @brief Counts of what arrived, not proof that every ADC bit arrived.
+ * clocks counts captured clock positions; frames counts FSYNC rising edges;
+ * words counts complete 32-bit status+sample values. badPeriods counts wrong
+ * distances between frame starts; shortWords counts a new start interrupting
+ * an unfinished word. headers counts each possible status byte; badExamples
+ * keeps the first eight words whose status failed the mask in finishWord().
+ */
 struct captureStats
 {
     uint64_t clocks = 0;
@@ -38,7 +45,7 @@ struct captureStats
 };
 
 /**
- * @brief Worker-owned state spanning DMA blocks, including split ADC words.
+ * @brief Core 1's decoder keeps unfinished samples between raw input blocks.
  * A sample is one ADC conversion result. In our selected channel arrangement,
  * FSYNC (frame synchronization) rises once per sample; DCLK provides one clock
  * per serial bit. A rising edge means low-to-high, not every captured high level.
@@ -47,7 +54,7 @@ struct captureStats
  * Only the first 32 DCLKs of a frame form our 8-bit header + 24-bit sample.
  * Idle clocks in the rest of a frame are deliberately ignored.
  * An optional output callback receives copies of complete raw words in batches
- * of at most 512. A rejected batch latches failure but does not hide diagnostic
+ * of at most 512. A rejected batch sets a persistent failure flag but does not hide diagnostic
  * counts. reset clears that latch while preserving the selected callback.
  * The output is 32-bit status+sample words, not the final three-byte SD format.
  * This class owns no DMA buffer or ready/free queue. main.cpp supplies each raw

@@ -21,7 +21,9 @@
  * is the text object returned to JavaScript. HTTP 200 means a successful reply,
  * 202 means accepted/pending, and 4xx/5xx report rejected/unavailable requests.
  *
- * A local DAC Start returns its actual state after the operation. An S3 command
+ * A local DAC Start returns the software's enabled/settings state. The next
+ * worker update writes the voltage; there is no electrical confirmation here.
+ * An S3 command
  * returns pending and is confirmed later by an S3 serial acknowledgement. The
  * browser must not interpret acceptance for delivery as hardware confirmation.
  */
@@ -59,8 +61,11 @@ void webController::begin()
     // upload so an old cached stylesheet cannot make enabled buttons look grey.
     server.serveStatic("/static/", LittleFS, "/static/", "no-cache");
 
-    // Telemetry reports link freshness separately from ADC sample progress. Both
-    // this callback and monitor.update() run in loop(), so no extra mutex is needed.
+    /**
+     * Reply to a browser status request with the latest S3 report. A recent
+     * message does not establish that ADC samples are arriving. This callback
+     * and monitor.update() run in loop(), so they cannot run simultaneously.
+     */
     server.on("/api/s3", HTTP_GET, [this]()
     {
         server.sendHeader("Cache-Control", "no-store");
@@ -70,29 +75,36 @@ void webController::begin()
     // State reads synchronize reloads and multiple browser clients.
     server.on("/api/blink", HTTP_GET, [this]() { sendBlinkState(); });
 
-    // Explicit commands make retries safe without accidentally toggling state.
+    /** Enable blinking and reply with its settings; repeated Start keeps it enabled. */
     server.on("/api/blink/start", HTTP_POST, [this]()
     {
         blinker.setEnabled(true);
         sendBlinkState();
     });
+
+    /** Disable blinking and reply with its settings; repeated Stop keeps it disabled. */
     server.on("/api/blink/stop", HTTP_POST, [this]()
     {
         blinker.setEnabled(false);
         sendBlinkState();
     });
 
-    // DAC state is authoritative; POST routes change settings or explicit output state.
+    // Read the DAC service's software state; this does not measure the output voltage.
     server.on("/api/dac", HTTP_GET, [this]() { sendDacState(); });
     server.on("/api/dac/start", HTTP_POST, [this]() { startDac(); });
-    // A 202 response means sent, not applied. Status polls report the matched S3 acknowledgement.
+
+    // A 202 response means accepted for delivery. Later status polls report
+    // the S3 acknowledgment matched to this command.
     server.on("/api/s3/start", HTTP_POST, [this]() { commandS3("start"); });
     server.on("/api/s3/stop", HTTP_POST, [this]() { commandS3("stop"); });
     server.on("/api/s3/reboot", HTTP_POST, [this]() { commandS3("reboot"); });
     server.on("/api/s3/delete", HTTP_POST, [this]() { commandS3("delete"); });
+
+    /** Request DAC Stop and report acceptance, or HTTP 503 if unavailable. */
     server.on("/api/dac/stop", HTTP_POST, [this]()
     {
-        // A successful response confirms that code zero has been written to the DAC.
+        // A successful response means the initialized service accepted Stop.
+        // setEnabled() requests code zero but does not check that driver's result.
         if (generator.setEnabled(false))
         {
             sendDacState();
@@ -102,7 +114,8 @@ void webController::begin()
             server.send(503, "application/json", "{\"error\":\"DAC unavailable. Try rebooting the Feather.\"}");
         }
     });
-    // Acknowledge before scheduling a restart; the browser handles reconnecting.
+
+    /** Reply to the browser, then mark a delayed Feather restart for update(). */
     server.on("/api/reboot", HTTP_POST, [this]()
     {
         server.sendHeader("Cache-Control", "no-store");
@@ -117,7 +130,8 @@ void webController::begin()
  *
  * The request handler already replied to the browser. Waiting outside that handler
  * lets the reply leave before restarting, although delivery is not guaranteed.
- * Stop the DAC before restart; startup will restore defaults with output disabled.
+ * Request DAC stop before restart; its result is not checked here. Startup
+ * restores defaults with output disabled if initialization succeeds.
  */
 void webController::update()
 {
@@ -205,8 +219,8 @@ void webController::startDac()
 void webController::commandS3(const char* action)
 {
     float rate = 0;
-    // A recording request must be explicit 0/1, never a loosely parsed truthy
-    // string. Deletion requires a separate confirmation field from the browser.
+    // When present, record must be exactly "0" or "1". Omitting it means no
+    // recording. Deletion requires a separate confirmation field from the browser.
     const bool isStart = strcmp(action, "start") == 0;
     const bool record = isStart && server.hasArg("record") && server.arg("record") == "1";
     const bool validRecord = !isStart || !server.hasArg("record") ||

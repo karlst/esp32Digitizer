@@ -140,8 +140,9 @@ bool ads127LowRate::configure(unsigned stage, bool externalInput)
     // OSR means the number of modulator readings combined into one output sample.
     // GEN_CFG3 bit 7 selects output drive: zero gives full strength, matching
     // TI's specified output timing. This speeds signal transitions without
-    // changing their 1.8-V logic level. The full-drive high-clock tests still failed;
-    // register readback alone cannot establish that received bits are correct.
+    // changing their 1.8-V logic level. Historical S3 high-clock capture still
+    // failed with this setting; that is not a statement about later P4 results.
+    // Register readback alone cannot establish that received bits are correct.
     if (retVal)
     {
         retVal = setAndCheck(0x09, 0x06) &&  // Max speed; software start/stop; no averaging.
@@ -188,7 +189,9 @@ bool ads127LowRate::configure(unsigned stage, bool externalInput)
 }
 
 /**
- * @brief Request conversions only after successful configure() and receiver readiness.
+ * @brief Request conversions after successful configure(); return whether the echo matches.
+ * The caller must establish receiver readiness first. This function checks
+ * configured but has no access to the receiver's READY message.
  * CONTROL bit 1 self-clears. Its write echo is not proof of clock/sample delivery.
  */
 bool ads127LowRate::start()

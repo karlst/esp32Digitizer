@@ -14,7 +14,7 @@
 
 /**
  * @file ads127InputDiagnostic.cpp
- * @brief Park S3 sample pins as inputs during ADS127L18 power/SPI commissioning.
+ * @brief Park S3 sample pins as inputs during ADS127L18 power and SPI register checks.
  * This standalone build excludes the old ADS1256 driver, recording service and
  * command handlers. Therefore a web Start command cannot start old hardware.
  * There is no DMA, interrupt handler, SD access or waveform measurement here.

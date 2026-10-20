@@ -242,8 +242,10 @@ bool ads1256::start(uint32_t rate)
 
 /**
  * @brief Stop reading samples and ask the digitizer to enter standby.
- * @return True if already stopped or the chip becomes ready for the stop
- * commands. False if DRDY does not go low within 100 milliseconds.
+ * @return True if already software-stopped, or the ready checks allowed the stop
+ * commands to be sent. False if the initial 100 ms ready wait or, in continuous
+ * read mode, the additional 1 ms high-to-low edge wait fails. The STANDBY command
+ * itself has no reply here, so true does not independently verify standby.
  *
  * On failure we still stop software reads and deselect the chip, but cannot
  * confirm that the chip itself stopped converting the analog input.

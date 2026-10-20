@@ -16,6 +16,7 @@
  * @brief Retain waveform shape without disk I/O or printing during capture.
  */
 #include "ramWaveform.h"
+#include <cstdio>
 
 /** @brief Core 0 resets while decoder is idle; supported rates divide by 2000.
  * One second of decoded samples is skipped for analog startup settling.
@@ -63,4 +64,26 @@ void ramWaveform::accept(const uint32_t* words, size_t count)
 bool ramWaveform::complete() const
 {
     return ready.load();
+}
+
+/**
+ * @brief Print the captured groups to USB after the caller has drained decoding.
+ * run identifies this capture, rate is samples/second, and clean describes the
+ * receiver's error checks. It does not establish analog accuracy. Core 0 calls
+ * this only after Core 1 stops changing the bins; no lock is taken here.
+ */
+void ramWaveform::report(unsigned long run, uint32_t rate, bool clean) const
+{
+    printf("WAVE_BEGIN run=%lu rate=%lu bins=%lu samplesPerBin=%lu clean=%u\n",
+           run, static_cast<unsigned long>(rate),
+           static_cast<unsigned long>(completedBins),
+           static_cast<unsigned long>(samplesPerBin), unsigned(clean && complete()));
+    for (unsigned index = 0; index < completedBins; ++index)
+    {
+        const auto& bin = bins[index];
+        printf("WAVE,%u,%ld,%ld,%.3f\n", index, static_cast<long>(bin.minimum),
+               static_cast<long>(bin.maximum), double(bin.sum) / samplesPerBin);
+    }
+    printf("WAVE_END run=%lu\n", run);
+    fflush(stdout);
 }

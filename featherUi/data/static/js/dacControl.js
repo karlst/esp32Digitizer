@@ -172,10 +172,11 @@ export function initializeDacControl()
     }
 
     /**
-     * Render a validated device reply as the confirmed state and measured graph.
+     * Display firmware-reported settings and Feather's A2 measurements after the
+     * basic reply checks in synchronize(). This is not verification of DAC voltage.
      * Running summaries always use device settings, never the user's unsent fields.
      * Stopped drafts are preserved while preserveDraft is set; running fields reflect
-     * what the device actually applied. Firmware-supplied limits override page defaults.
+     * the settings reported by firmware. Firmware-supplied limits override page defaults.
      * Graph data is the Feather's local ADC loopback, not the S3 digitizer stream.
      */
     function renderState()

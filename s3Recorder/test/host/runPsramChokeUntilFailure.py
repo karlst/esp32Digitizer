@@ -13,9 +13,13 @@
 """Start the installed Choke firmware on COM4 and log until it stops.
 
 Run manually with an output-log path. Start records synthetic data to a new file;
-this script does not select a firmware or a rate. The installed build does that.
+the installed Choke build selects the generation rate. The script assumes that
+firmware is installed and does not check. With normal firmware, the same Start
+command instead requests ADC recording at 30000 samples/second.
 Keep the fixed-duration runner for reliability tests; this ramp has no deadline.
-A finally block sends Stop and releases the serial port on normal interruption.
+After a non-idle, non-running test report it collects eight more seconds of logs.
+The finally block attempts Stop, then closes the port; a failed Stop write can
+prevent that close. No acknowledgment of Stop is required by this script.
 """
 import serial,time,pathlib,sys
 sys.stdout.reconfigure(encoding='utf-8',errors='replace')

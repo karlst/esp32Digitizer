@@ -23,7 +23,13 @@ import serial
 
 
 def savePlot(rows, clean, target):
-    """Create a standalone HTML plot with actual time and raw-count axes."""
+    """Write rows of (microseconds, raw A2 count) to an HTML plot at target.
+
+    main calls this after matching the board's declared row count. The vertical
+    scale follows observed minimum/maximum, not the DAC's commanded range. clean
+    is the board's collection flag; no sine fit or waveform acceptance test runs.
+    """
+    # Leave space above and below the measured range, including a constant input.
     low, high = min(value for _, value in rows), max(value for _, value in rows)
     margin = max(5, (high-low)*0.1)
     floor, ceiling = low-margin, high+margin
@@ -35,6 +41,8 @@ def savePlot(rows, clean, target):
         y = 440 - tick*360/5
         value = floor + tick*(ceiling-floor)/5
         lines.append(f'<path d="M100 {y}H1100" stroke="#ddd"/><text x="5" y="{y}">{value:.0f}</text>')
+    # Map 300,000 microseconds to the full plot width. Joining readings draws a
+    # display line; it does not create measurements between the recorded times.
     points = ' '.join(f'{100+t/300000*1000},{440-(v-floor)/(ceiling-floor)*360}' for t,v in rows)
     lines.append(f'<polyline points="{points}" fill="none" stroke="#006b91" stroke-width="2"/>')
     target.write_text('<!doctype html><meta charset="utf-8"><title>Feather DAC measurement</title>'
@@ -53,9 +61,15 @@ def main():
     parser.add_argument('--port', default='COM4')
     parser.add_argument('--output', type=Path, default=Path('work/dac-loopback'))
     args = parser.parse_args()
+
+    # Save each run beside its complete serial log. These files are on the PC;
+    # this diagnostic does not write the P4's SD card.
     args.output.mkdir(parents=True, exist_ok=True)
     prefix = args.output / time.strftime('%Y%m%d-%H%M%S')
     port = serial.Serial(port=None, baudrate=115200, timeout=1)
+
+    # Set reset-control signals before opening; some USB drivers may still pulse
+    # them during connection. The two-second pause allows startup text to finish.
     port.dtr = port.rts = False
     port.port = args.port
     rows, expected, clean = [], None, 0
@@ -65,6 +79,9 @@ def main():
         port.write(b'g')
         deadline = time.monotonic() + 20
         with prefix.with_suffix('.txt').open('w', encoding='utf-8') as log:
+
+            # Preserve all text, but collect readings only after LOOP_BEGIN.
+            # A complete report can still say clean=0 and is plotted with a warning.
             while time.monotonic() < deadline:
                 line = port.readline().decode('utf-8', errors='replace').strip()
                 if line:

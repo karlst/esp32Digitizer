@@ -21,10 +21,12 @@ from pathlib import Path
 projectRoot = Path(env.subst('$PROJECT_DIR'))
 frameworkRoot = Path(env.PioPlatform().get_package_dir('framework-arduinoespressif32'))
 env.Append(CPPPATH=[str(projectRoot / 'src' / 'adc'),
+                   str(projectRoot / 'test' / 'hardware'),
                    str(projectRoot.parent / 'shared'),
                    str(frameworkRoot / 'libraries' / 'SPI' / 'src')])
 selectedSource = env.GetProjectOption('custom_test_source', 'ads127SpiDiagnostic.cpp')
 if selectedSource not in ['ads127SpiDiagnostic.cpp', 'ads127CaptureControl.cpp', 'benchDacLoopback.cpp']:
     raise ValueError('Unknown Feather hardware test: ' + selectedSource)
 env.BuildSources('$BUILD_DIR/hardwareTests', str(projectRoot / 'test' / 'hardware'),
-                 src_filter=['-<*>', '+<' + selectedSource + '>', '+<benchDac.cpp>', '+<inputSnapshot.cpp>'])
+                 src_filter=['-<*>', '+<' + selectedSource + '>', '+<benchDac.cpp>',
+                             '+<inputSnapshot.cpp>', '+<ads127LowRate.cpp>'])

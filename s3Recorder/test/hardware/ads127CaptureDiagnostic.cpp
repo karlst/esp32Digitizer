@@ -23,9 +23,9 @@
 #include <Arduino.h>
 #include <cstring>
 #include "ads127Pins.h"
-#include "benchLine.h"
+#include "test/support/benchLine.h"
 #include "ads127BenchRate.h"
-#include "frontend/ads127Dma.h"
+#include "ads127Dma.h"
 
 static ads127Dma capture;
 static benchLine commands;
@@ -60,7 +60,8 @@ static void report(const char* label)
 
 /**
  * @brief Accept only complete run-numbered commands from the dedicated bench UART.
- * An old READY or STOP cannot affect a new run because Feather chooses a fresh ID.
+ * STOP must match this run's ID. Feather chooses random IDs to reduce accidental
+ * matches with old messages; this is not a guarantee against repeated IDs.
  * ARM while already active is rejected, except a duplicate for the same run.
  */
 static void accept(const char* line)
@@ -95,8 +96,9 @@ static void accept(const char* line)
         report("DONE");
 
         // Send DONE first so Feather completes its stop handshake immediately.
-        // Only then print diagnostics: both ADC and receiver have stopped, so
-        // serial delays cannot spoil the capture being measured. Duplicate STOP
+        // Only then print diagnostics: this receiver has stopped, so serial waits
+        // cannot spoil its capture. Feather is responsible for stopping the ADC;
+        // this code does not independently confirm that. Duplicate STOP
         // commands still receive DONE but do not repeat this longer report.
         if (diagnosticsPending)
         {

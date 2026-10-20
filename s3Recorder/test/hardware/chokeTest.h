@@ -66,7 +66,9 @@ public:
     bool feed(uint64_t nowUs, bufferedWriter& writer);
     void stop(resultCode reason);
     uint32_t targetBps = initialBps;
-    uint32_t completedBps = 0; // Last whole ten-second stage completed without a detected failure.
+    // Last ramp stage whose due data entered RAM, or the final rate after a timed
+    // run. This alone does not confirm that storage saved the queued bytes.
+    uint32_t completedBps = 0;
     uint32_t elapsedMs = 0;
     uint64_t samples = 0; // Successfully copied into the ring, not necessarily written yet.
     int32_t latestSample = 0;

@@ -13,7 +13,11 @@
  */
 
 /** @file inputSnapshot.cpp
- * @brief Sample A2 concurrently with ADS127 capture; no USB output while active.
+ * @brief Measure the test voltage through Feather A2 while the external ADC captures it.
+ * This is a second ADC observing the same wire, not a copy of the values sent
+ * to the DAC. It can have its own noise and calibration error. poll() runs in
+ * the Feather control loop; report() prints stored results after local sampling
+ * stops. No USB output occurs in poll().
  * Read begin(), poll(), report(). One second of settling and a 300 ms observation
  * window match the P4 RAM collector. Their clocks are independent: PC analysis
  * may fit a small relative time shift for sine comparison. Constant-voltage
@@ -115,7 +119,8 @@ void inputSnapshot::poll()
 }
 
 /** @brief Tell loop to poll frequently only during the 300 ms diagnostic window.
- * A full RTOS tick sleep after every 500 us burst would miss 1 ms slots. Outside
+ * A full operating-system scheduling tick after every 500 us burst can miss
+ * 1 ms slots. Outside
  * this short interval loop retains its ordinary sleep. Never used in other builds.
  */
 bool inputSnapshot::sampling() const

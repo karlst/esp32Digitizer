@@ -19,7 +19,8 @@
 
 /**
  * Draw commanded and measured voltage against time within the latest two cycles.
- * canvas is the HTML drawing area; state is a validated DAC reply or null to show
+ * canvas is the HTML drawing area; state is a DAC reply checked by dacControl.js,
+ * or null to show
  * empty axes. Records are [milliseconds, commanded volts, measured volts].
  *
  * Use a fixed 0-3.3 V vertical scale so amplitude changes remain visually comparable.

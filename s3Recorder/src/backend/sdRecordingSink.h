@@ -34,7 +34,10 @@ class sdRecordingSink : public byteSink
 {
 public:
     bool mount();
+    // Optional test implementation lives in test/hardware/storageCheck.cpp.
+#if S3_SD_VERIFY
     bool verifyStorage();
+#endif
     bool open(uint32_t sampleRate);
     size_t write(const uint8_t* data, size_t length) override;
     bool flush() override;

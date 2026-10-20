@@ -20,7 +20,7 @@
 #include <cstdio>
 
 /**
- * @brief Supply P3 with a recording object, or null if unsupported/disconnected.
+ * @brief Supply the browser's recording panel with status, or null if unavailable.
  * All values are strings, including byte totals larger than JavaScript's exact
  * integer range. The browser can use BigInt for totals and bounded Number values
  * for percentages. File paths are generated from numeric IDs, not UART text.

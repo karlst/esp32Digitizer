@@ -14,7 +14,13 @@
 
 /**
  * @file captureProfile.cpp
- * @brief Quiet one-second runtime sampling, followed by a post-capture report.
+ * @brief Estimate how busy each P4 core is during capture; print results after stopping.
+ * The operating system counts time spent running each task (software thread).
+ * Each core has an idle task that runs when no other task needs it. Busy time
+ * is elapsed time minus that idle time, not a sum of selected application tasks.
+ * begin() takes starting counts, poll() takes roughly one-second readings,
+ * finish() freezes them, and report() prints percentages. Core 0 calls all four.
+ * Measuring costs CPU time too, and interrupt time is not reported separately.
  * vTaskGetInfo(..., pdFALSE, eInvalid) reads task information without scanning
  * the stack. Unlike uxTaskGetSystemState(), this avoids scanning every stack
  * during acquisition. Task handles remain valid for the lifetime of this app.
@@ -72,7 +78,10 @@ void captureProfile::finish()
 }
 
 /**
- * @brief Read task counters and available memory without allocating or printing.
+ * @brief Read cumulative task timers and available RAM without printing.
+ * baseline=true saves starting readings without adding an interval. Otherwise
+ * subtract the previous readings to find time used during this interval.
+ * A handle identifies a task; it must remain valid while profiling is active.
  * Counter differences use actual microsecond duration. Invalid snapshots are
  * excluded and reported; a missing handle must never look like 100% spare CPU.
  * Small per-task overruns of elapsed time are counted separately: scheduled
@@ -119,7 +128,8 @@ void captureProfile::sample(bool baseline)
     }
     else if (!valid || (!baseline && duration == 0)) { ++invalidIntervals; }
 
-    // Rebaseline even after an invalid interval; all diagnostics stay explicit.
+    // Use these readings as the next starting point even after an invalid
+    // interval, so a bad reading does not contaminate every later interval.
     for (unsigned index = 0; index < taskCount; ++index)
     {
         previousRuntime[index] = current[index];

@@ -13,7 +13,10 @@
  */
 
 /** @file frameDecoder.cpp
- * @brief Fixed framing; never search for a convenient header or shift bad data.
+ * @brief Turn captured data bits into ADC numbers using the separate sample-start signal.
+ * A frame is one sample's clock interval. Its start comes from FSYNC, not from
+ * searching the data for a plausible value. Status errors are counted without
+ * shifting the data until it looks right. This keeps errors visible to the caller.
  *
  * Reading path: feed() -> beginFrame()/appendBits() -> finishWord() ->
  * flushOutput(). Core 1's decodeTask calls feed() with a private raw block;
@@ -38,7 +41,9 @@
 #include <array>
 
 /**
- * @brief Build the byte-to-data-nibble lookup at compile time, not during capture.
+ * @brief Build a table that extracts four ADC data bits from each captured byte.
+ * A nibble is four bits. The compiler calculates this table once; receiving
+ * code indexes it instead of repeating the four bit-extraction operations.
  * Packed pairs have DOUT in bits 0,2,4,6. The earliest becomes nibble bit 3.
  * FSYNC bits are excluded here but still checked by the grouped marker mask.
  */
@@ -106,7 +111,8 @@ static inline uint32_t unpackData(const uint8_t* data)
 }
 
 /**
- * @brief Control task resets only while the worker is drained and DMA stopped.
+ * @brief Core 0 clears statistics and partial samples before a new capture.
+ * Receiving must be stopped and Core 1 must have finished all queued blocks.
  * clocksPerFrame comes from the shared rate table (32 times the slot count).
  * Ignore an initial high FSYNC until a low-to-high transition is actually seen;
  * starting in the middle of a frame must not manufacture a complete sample.
@@ -243,7 +249,8 @@ void frameDecoder::appendBits(uint32_t value, unsigned count)
 }
 
 /**
- * @brief Consume one rising DCLK edge (a low-to-high clock transition).
+ * @brief Process the two pin values already captured on one rising DCLK edge.
+ * pair bit 0 is ADC data and bit 1 is FSYNC. This reads RAM, not the pins.
  * ADC data change on falling DCLK; the rising edge reads the settled value.
  * FSYNC's rising transition includes the first data bit in the current ADC
  * configuration. A period different from the configured frame length is an
@@ -321,7 +328,9 @@ void frameDecoder::finishWord()
     }
 }
 
-/** @brief Configure an optional nonblocking batch receiver while decoding is stopped.
+/** @brief Choose the function that receives completed sample batches, while stopped.
+ * callback is that function; context is the caller's optional pointer, passed
+ * back unchanged. A null callback disables delivery while retaining counting.
  * The callback must copy the words before returning; this array is reused.
  * A false return latches failure until reset; subsequent words remain counted.
  */
@@ -333,8 +342,8 @@ void frameDecoder::setOutput(outputCallback callback, void* context)
 
 /**
  * @brief Synchronously offer the completed words to the configured receiver.
- * In the P4 program output is recordWords(), which calls submitSamples() and
- * copies the three-byte representation into the ring before returning. Therefore
+ * In the P4 program output is recordWords(), which either copies packed sample
+ * bytes into the SD ring or updates the RAM waveform summary before returning. Therefore
  * this outputWords array can be reused immediately; it is not a queued pointer
  * to the raw input block. A false result latches outputBroken until reset().
  */
@@ -347,13 +356,19 @@ void frameDecoder::flushOutput()
     }
 }
 
-/** @brief Read the output failure latch only on the decoder task or after draining. */
+/**
+ * @brief True if a batch was refused since reset(); later batches are then withheld.
+ * Call on the decoder task or after it has finished all queued blocks.
+ */
 bool frameDecoder::outputFailed() const
 {
     return outputBroken;
 }
 
-/** @brief Return worker-owned counters; the caller may read only after draining. */
+/**
+ * @brief Borrow the counters without copying them; decoding can change them.
+ * Core 0 must wait for all queued decoding to finish before reading this reference.
+ */
 const captureStats& frameDecoder::stats() const
 {
     return counts;

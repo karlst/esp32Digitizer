@@ -38,8 +38,10 @@
  *
  * current is the acquisition task's working status. publish() copies it into
  * published, and snapshot() gives communications a protected copy of published.
- * Monitoring keeps the latest value/count. Optional recording sends EVERY accepted
- * sample through sampleFormatter to the RAM buffer, then the storage task writes it.
+ * Monitoring keeps the latest value/count. Optional recording tries to place each
+ * accepted sample in the RAM buffer through sampleFormatter. A full buffer fails
+ * that submission; the next run() check stops acquisition. Accepted-read counts
+ * therefore do not by themselves establish that every value reached the card.
  * The temporary S3_CHOKE_TEST build substitutes acquisitionChoke.cpp for run()
  * and execute(): synthetic samples enter the same ring, with no digitizer calls.
  */
@@ -266,7 +268,7 @@ void acquisition::execute(const acquisitionCommand& command)
         publish();
         if (command.action == acquisitionCommand::Action::start)
         {
-            // While running, accept Start only if it asks for the same rate.
+            // While running, accept Start only for the same rate and recording choice.
             // Changing rate requires Stop then Start; do not reconfigure mid-read.
             if (current.running)
             {

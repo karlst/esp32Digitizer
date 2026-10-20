@@ -102,12 +102,12 @@ uint32_t ads1256::readDiagnostic() const { return readOk ? 0 : 3; }
 uint32_t ads1256::transferMicros() const { return 0; }
 
 /**
- * @brief Allocate a single simulated queue.
+ * @brief Reset the single global queue slot and return its address; no allocation.
  */
 QueueHandle_t xQueueCreate(int, size_t) { queueFull = false; return &queued; }
 
 /**
- * @brief Release the simulated queue.
+ * @brief Mark the global queue empty; no memory is freed.
  */
 void vQueueDelete(QueueHandle_t) { queueFull = false; }
 
@@ -320,7 +320,7 @@ void nativeChecks::checkAcquisition()
 /**
  * @brief Verify the actual status formatter and command-to-reboot ordering.
  *
- * Capture serial output in memory to check the version-3 frame and full-width
+ * Capture serial output in memory to check version-5 (or legacy version-2) frames and full-width
  * 64-bit counters. Simulate a full transmit buffer, one-slot command queue, and
  * reboot request. Require the acknowledgement to be flushed before restart.
  * The UART receive-mapping check guards against reintroducing the pinMode ordering bug.
@@ -358,7 +358,7 @@ void nativeChecks::checkLink()
     status.readyTimeouts = UINT64_MAX;
     status.readFault = 3;
     for (auto& value : status.recording.values) { value = UINT64_MAX; }
-    Serial1.capacity = 2048; // Firmware allocates this much space for complete v4 frames.
+    Serial1.capacity = 2048; // Firmware allocates this much space for complete v5 frames.
     status.latestRaw = -8388608;
     status.ackId = UINT32_MAX;
     status.hasSample = true;
@@ -570,7 +570,7 @@ void nativeChecks::checkChoke()
     recorder.execute({307, acquisitionCommand::Action::reboot, 0, false});
     assert(recorder.current.reboot && startCalls == 0 && stopCalls == 0);
 
-    // The ordinary v4 status contract still accepts the command's dropdown rate.
+    // The ordinary v5 status report still carries the command's dropdown rate.
     featherLink link(recorder);
     link.report(recorder.snapshot());
     assert(Serial1.output.find("S3,5,") != std::string::npos);

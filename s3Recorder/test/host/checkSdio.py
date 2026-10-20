@@ -14,7 +14,9 @@
 
 Run manually with one output-log path. Opening the port keeps DTR/RTS low; the
 explicit reboot command restarts firmware. This is a hardware operation, not a
-desktop unit test. Existing card contents are not altered by this script itself.
+desktop unit test. Startup firmware may write a card verification file.
+COM4 must be the S3: this script does not identify the connected board.
+The log records observations; it makes no pass/fail checks or reboot confirmation.
 """
 import serial,time,pathlib,sys
 sys.stdout.reconfigure(encoding="utf-8",errors="replace")

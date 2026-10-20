@@ -96,7 +96,8 @@ bool acquisition::stopChoke(chokeTest::resultCode reason)
  * @brief Handle existing Feather/USB commands without inventing a second protocol.
  * Start always records and resets the selected ramp or fixed-rate diagnostic. The dropdown rate is
  * echoed ONLY to satisfy the existing command-confirmation contract; it does not
- * control generation, and the test file's rate is zero (variable). Original
+ * control generation. The test file's ordinary ADC-rate field is zero; separate
+ * test fields describe its fixed rate or ramp. Original
  * commands remain unchanged in history, so retries cannot restart a stopped test.
  */
 void acquisition::executeChoke(const acquisitionCommand& command)
@@ -125,7 +126,8 @@ void acquisition::executeChoke(const acquisitionCommand& command)
                 publish();
 
                 // Open first; failed preparation must never generate unrecorded data.
-                // Zero rate plus the CHOKE header identifies a variable-rate test file.
+                // Zero ADC rate plus the CHOKE header identifies generated test data;
+                // the additional header fields describe the fixed rate or ramp.
                 chokeEvents::beginRun();
                 accepted = storage.prepare(0);
                 if (accepted)

@@ -27,7 +27,9 @@ from compareWaveforms import parseInput, parseOutput, svgPanel
 def calibrationMapping(text, run):
     """Validate a matching SDK table; return an approximate count-to-mV converter.
 
-    Integer-mV knots are interpolated every 32 counts. Conversion of an averaged
+    The firmware supplies count/voltage pairs spaced 32 counts apart (the last
+    interval is 31). Between pairs, use a straight-line estimate in millivolts.
+    Conversion of an averaged
     count is approximate if the mapping is nonlinear within that averaging group.
     Old captures remain valid raw reports but cannot acquire invented calibration.
     """
@@ -46,7 +48,7 @@ def calibrationMapping(text, run):
         raise ValueError('Calibration table is not increasing')
 
     def toMillivolts(raw):
-        """Interpolate neighboring SDK knots without extrapolating beyond ADC range."""
+        """Estimate millivolts between neighboring table entries; reject counts outside 0..4095."""
         if not 0 <= raw <= 4095:
             raise ValueError('ADC count outside calibration range')
         index = min(len(rows) - 2, max(0, bisect_right(expected, raw) - 1))
@@ -68,6 +70,9 @@ def voltagePanels(panels, converter, label):
     """
     centered = []
     for index, (name, units, means, lows, highs) in enumerate(panels):
+        # Feather uses the recorded calibration table. ADS127 uses the assumed
+        # 2500-mV reference: 2^23 signed counts correspond to positive full scale.
+        # Removing each trace's average compares fluctuations, not absolute voltage.
         convert = converter if index == 0 else lambda raw: raw * 2500.0 / 8388608
         voltages = [(t,convert(v)) for t, v in means]
         center = statistics.mean(v for _,v in voltages)

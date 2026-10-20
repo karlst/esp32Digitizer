@@ -21,7 +21,9 @@
  * HTTP latency therefore does not directly determine the waveform sample rate.
  * DAC means digital-to-analog converter: an 8-bit number sets the A1 output.
  * ADC means analog-to-digital converter: Feather's own A2 input measures that
- * voltage through the loopback wire. This is separate from the ADS1256 on S3.
+ * voltage through the loopback wire. This is separate from the external ADC.
+ * This generator belongs to the web application, not the P4 bench firmware's
+ * benchDac implementation. Do not apply its calibration or settings to that test.
  * Read begin() for task/timer setup, start() for settings, sample() for analog
  * work, and stateJson() for the browser snapshot. A task is a scheduled thread;
  * a notification wakes it without carrying a sample value.
@@ -172,8 +174,9 @@ bool dacGenerator::start(float frequency, float amplitude, float offset)
  * @return Whether the analog service was initialized and can accept the command.
  *
  * Repeated Start or Stop requests do not reset an already matching state. Stop
- * writes zero before returning; Start allows the next worker tick to write a sine
- * sample. The DAC remains enabled electrically while output is stopped (code zero).
+ * requests code zero before returning; Start allows the next worker tick to write a sine
+ * sample. Driver write errors are not checked here, so true confirms software
+ * acceptance, not measured voltage. The DAC remains electrically enabled.
  */
 bool dacGenerator::setEnabled(bool requested)
 {
@@ -190,7 +193,8 @@ bool dacGenerator::setEnabled(bool requested)
             sampleCount = 0;
             writeIndex = 0;
             lastCaptureUs = phaseStartUs;
-            // Disable synchronously so a completed Stop command leaves code zero.
+            // Request zero while holding the lock, so the worker cannot write
+            // a stale nonzero command afterward. This driver result is unchecked.
             if (!enabled)
             {
                 dac_output_voltage(DAC_CHANNEL_1, 0);
@@ -291,6 +295,8 @@ void dacGenerator::sample()
         const float volts = offsetVolts + amplitudeVolts * sin(2.0 * PI * fmod(cycles, 1.0));
         nextCode = static_cast<uint8_t>(lroundf(volts * 255.0f / nominalSupplyVolts));
     }
+    // This is the actual DAC command. Its return status is not checked;
+    // lastCode records the request, not a verified physical output voltage.
     dac_output_voltage(DAC_CHANNEL_1, nextCode);
     lastCode = nextCode;
     xSemaphoreGive(mutex);

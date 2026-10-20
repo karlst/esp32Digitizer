@@ -34,10 +34,10 @@
 #include <esp_timer.h>
 #endif
 #if S3_CHOKE_TEST
-#include "chokeTest.h"
+#include "chokeRecording.h"
 
 // Different magic prevents synthetic samples being mistaken for measured data.
-static constexpr const char* recordingMagic = "S3CHK001";
+static constexpr const char* recordingMagic = chokeRecording::magic;
 #else
 static constexpr const char* recordingMagic = "S3REC001";
 #endif
@@ -104,7 +104,7 @@ bool sdRecordingSink::mount()
 }
 
 /**
- * @brief Recognize only files created by this recorder, including large IDs.
+ * @brief Recognize the recorder's filename spelling, including large IDs.
  * Full consumption plus the canonical spelling prevents deleting similarly
  * named unrelated files. No directory traversal or arbitrary path is accepted.
  *
@@ -235,11 +235,7 @@ bool sdRecordingSink::header(uint32_t disposition)
     putLittle(bytes + 48, session, 4); putLittle(bytes + 52, part, 4);
 #if S3_CHOKE_TEST
 
-    // These are requested stored-bit rates, not an assertion of achieved timing.
-    // The synthetic counter payload remains the ordinary four-byte signed format.
-    putLittle(bytes + 56, chokeTest::initialBps, 4);
-    putLittle(bytes + 60, chokeTest::fixedRate ? 0 : chokeTest::incrementBps, 4);
-    putLittle(bytes + 64, chokeTest::stageUs / 1000, 4);
+    chokeRecording::appendHeader(bytes, putLittle);
 #endif
 
     // Move to the first byte so finalization updates the header instead of
@@ -514,8 +510,9 @@ bool sdRecordingSink::verifyPart(uint32_t disposition)
         static_cast<unsigned long>(session), static_cast<unsigned long>(part));
     FsFile check;
 
-    // Only the first 56 header bytes currently contain defined fields. Reserved
-    // bytes are not compared here, nor is the entire payload reread.
+    // Compare the first 56 bytes shared by normal and synthetic-test headers.
+    // The synthetic test's extra rate fields and reserved bytes are not checked
+    // here, nor is the entire payload reread.
     uint8_t actual[56] = {}, expected[56] = {};
     std::memcpy(expected, recordingMagic, 8);
     putLittle(expected + 8, 512, 4); putLittle(expected + 12, 1, 4);
@@ -604,59 +601,3 @@ void sdRecordingSink::accountGrowth()
     }
 }
 
-/**
- * @brief Write, close, reopen and check every byte of a separate 64-KiB test file.
- * Only the optional storage-check build calls this, on the disk task at startup.
- * A new filename is reserved exclusively; existing files are never overwritten.
- * The file remains on the card for inspection. Success verifies this one transfer,
- * not sustained speed or immunity to future power loss. No acquisition is running.
- */
-bool sdRecordingSink::verifyStorage()
-{
-    bool retVal = mount();
-    FsFile testFile;
-    char path[40] = {};
-    uint32_t id = 1;
-
-    // Choose an unused name without assuming an empty card or deleting old tests.
-    do
-    {
-        snprintf(path, sizeof(path), "/sdio_check_%06lu.bin", static_cast<unsigned long>(id++));
-    } while (retVal && filesystem.exists(path) && id < 1000000);
-    retVal = retVal && testFile.open(&filesystem, path, O_CREAT | O_EXCL | O_RDWR);
-    uint8_t block[512];
-
-    // Each byte depends on its absolute position, so misplaced sectors and bytes
-    // are detected. write() is the actual file transfer; sync() commits caches.
-    for (uint32_t offset = 0; retVal && offset < 65536; offset += sizeof(block))
-    {
-        for (size_t index = 0; index < sizeof(block); ++index)
-        {
-            const uint32_t position = offset + index;
-            block[index] = static_cast<uint8_t>(position * 37 + (position >> 8) * 11);
-        }
-        retVal = testFile.write(block, sizeof(block)) == sizeof(block);
-    }
-    if (retVal)
-    {
-        retVal = testFile.sync();
-    }
-    testFile.close();
-
-    // Reopen through the filesystem and check size and all payload bytes, rather
-    // than relying only on the recording header/tail check used for large files.
-    retVal = retVal && testFile.open(&filesystem, path, O_RDONLY);
-    retVal = retVal && testFile.fileSize() == 65536;
-    for (uint32_t offset = 0; retVal && offset < 65536; offset += sizeof(block))
-    {
-        retVal = testFile.read(block, sizeof(block)) == sizeof(block);
-        for (size_t index = 0; retVal && index < sizeof(block); ++index)
-        {
-            const uint32_t position = offset + index;
-            retVal = block[index] == static_cast<uint8_t>(position * 37 + (position >> 8) * 11);
-        }
-    }
-    testFile.close();
-    Serial.printf("SD full readback: %s bytes=65536 result=%s\n", path, retVal ? "PASS" : "FAIL");
-    return retVal;
-}

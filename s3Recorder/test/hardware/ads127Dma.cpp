@@ -27,7 +27,8 @@
  * Higher stages use four, two or one 32-bit time slots; only slot zero enters DMA.
  * Those slots describe TIME on DOUT0, not eight enabled ADC channels. Slot zero
  * contains ADC status (8 bits) then one signed sample (24 bits). Remaining clocks
- * are ignored. The status header is for commissioning and not a disk-file format.
+ * are ignored. The status byte helps check frame alignment during these tests;
+ * it is separate from a recording file's header.
  */
 #include "ads127Dma.h"
 #include "ads127Pins.h"
@@ -203,8 +204,9 @@ void ads127Dma::drainEvents()
  * @brief Copy a bounded batch (1024 or 4096 words) from DMA RAM and count it.
  * i2s_read() is the actual data-copy call. Its internal queue/mutex retains and
  * coordinates driver buffers; readBuffer belongs to this object and is reused
- * only after this function finishes processing it. A five-ms wait keeps UART
- * commands responsive when no ADC clock is present. No-data is not an error.
+ * only after this function finishes processing it. Pass a five-ms driver wait
+ * timeout so a silent ADC does not cause an indefinite wait for data. A successful
+ * read returning zero bytes is not counted as an error here.
  */
 void ads127Dma::poll()
 {

@@ -42,7 +42,8 @@ public:
     bool start(uint32_t rate);
 
     /**
-     * @brief Cease reads; false means hardware standby could not be confirmed.
+     * @brief Cease reads and request standby; false means a ready check failed.
+     * True means already software-stopped or commands sent, not standby readback.
      */
     bool stop();
 

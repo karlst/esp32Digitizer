@@ -14,7 +14,11 @@
 
 /**
  * @file ads127CaptureControl.cpp
- * @brief Manual finite ADC/DMA bench test, controlled through Feather USB.
+ * @brief Feather's test-control program: configure the ADC, coordinate capture, then stop.
+ * Arduino calls setup() once and loop() repeatedly. USB characters select a
+ * sampling rate; the separate UART serial link exchanges text with P4 (or S3
+ * in the legacy build). SPI is the clocked command connection to the ADC.
+ * Start reading requestRun(), acceptReply(), requestStop(), then loop().
  * setup() leaves DAC off and SPI inputs undriven. USB 'g' configures the ADC,
  * asks the receiver to arm, waits for matching READY, then starts conversions.
  * After the shared run duration (or on 's') it stops ADC then receiver. The named
@@ -34,9 +38,9 @@
 #include "ads127l18.h"
 #include "ads127LowRate.h"
 #include "ads127Pins.h"
-#include "benchLine.h"
+#include "test/support/benchLine.h"
 #include "ads127BenchRate.h"
-#include "ads127BenchTiming.h"
+#include "test/support/ads127BenchTiming.h"
 #if ADS127_COMPARE_INPUT
 #include "inputSnapshot.h"
 static inputSnapshot inputTrace;
@@ -89,7 +93,9 @@ static void printHelp()
 /**
  * @brief Request ADC stop, then receiver stop, retaining uncertainty if SPI echo fails.
  * A stop request is not proof of stopped hardware; the echo and subsequent
- * DONE are separate confirmations. Timer bounds waiting even if a wire fails.
+ * DONE are separate confirmations. After this function returns, loop() waits
+ * at most two seconds for receiver DONE; that limit does not bound the time
+ * spent making SPI calls or printing the optional input report here.
  */
 static void requestStop()
 {
@@ -104,7 +110,9 @@ static void requestStop()
 #endif
 #if ADS127_COMPARE_INPUT
     // UART STOP was sent first, allowing P4 to stop and export independently.
-    // This local USB report cannot delay active acquisition on either board.
+    // Reporting now avoids printing while this Feather collects its trace.
+    // It does not wait for P4's DONE; receiver stopping remains unconfirmed
+    // until its reply is processed after this function returns.
     inputTrace.report(runId, stopped && statusClean && !signalSource.failed());
 #else
     (void)statusClean;
@@ -115,7 +123,9 @@ static void requestStop()
 
 /**
  * @brief Configure while stopped and ask for DMA readiness using a fresh run ID.
- * Nothing starts if register readback fails or no matching READY arrives.
+ * requestedStage is an index in the shared sampling-rate table. Requests are
+ * refused unless idle, and no ADC START is issued if setup fails or no matching
+ * READY arrives. A random nonzero ID links later replies to this request.
  * ARM2 does not negotiate duration: verify both firmware banners before a run.
  */
 static void requestRun(unsigned requestedStage)
@@ -258,7 +268,8 @@ void setup()
 
 /**
  * @brief Process manual commands, UART replies and bounded run/handshake timers.
- * Short nonblocking steps keep Stop responsive. Unplugging the PC terminal does
+ * Serial polling is bounded, but command handlers can spend time configuring
+ * hardware or printing reports. Unplugging the PC terminal does
  * not disable the automatic stop while Feather remains powered. The run timer
  * starts after ADC START echo, whereas the receiver deadline starts at ARM.
  */

@@ -46,7 +46,7 @@ static void deliver(s3Monitor& monitor, HardwareSerial& port, const std::string&
 /**
  * @brief Check the actual Feather serial parser and browser JSON against known messages.
  *
- * Verify exact 64-bit counter text, both status versions, rejection of malformed
+ * Verify exact 64-bit counter text, supported status versions, rejection of malformed
  * new fields, and that bad messages do not refresh connection time. Simulate S3
  * reboot by sending reset counters and Feather disconnect by advancing its clock.
  * The test exercises code shared with firmware; it does not verify a physical UART.

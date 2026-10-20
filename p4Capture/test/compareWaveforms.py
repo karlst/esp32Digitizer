@@ -99,7 +99,12 @@ def interpolate(rows, times, at):
 
 
 def fitScale(pairs):
-    """Least-squares FeatherCount = gain * P4Count + offset, with centered sums."""
+    """Choose gain and offset that minimize squared differences for (P4, Feather) pairs.
+
+    Return gain, offset and mean squared difference in Feather-count units. Subtract
+    each column's average before multiplying to avoid large DC levels dominating
+    the arithmetic. This numerical fit can hide real fixed gain/offset errors.
+    """
     xMean = sum(x for x, _ in pairs)/len(pairs)
     yMean = sum(y for _, y in pairs)/len(pairs)
     variance = sum((x-xMean)**2 for x, _ in pairs)
@@ -128,6 +133,10 @@ def compare(inputRows, outputRows):
     if amplitude < 20:
         raise ValueError('Input too flat for useful waveform alignment')
     times = [row[0] for row in outputRows]
+
+    # Try each candidate time shift. For the first part of the capture, estimate
+    # P4 values at Feather timestamps and find the best straight-line count mapping.
+    # Keep the candidate with the smallest average squared difference.
     best = None
     for step in range(-800, 801):
         shift = step * 0.025
@@ -136,12 +145,18 @@ def compare(inputRows, outputRows):
         if best is None or error < best[0]:
             best = (error, shift, gain, offset)
     fitError, shift, gain, offset = best
+
+    # Use exactly those three fitted numbers for all comparisons. The later
+    # readings did not influence the fit; their differences test how well it holds.
     comparisons = []
     for at, measured in selected:
         raw = interpolate(outputRows,times,at+shift)
         mapped = gain*raw+offset
         comparisons.append((at,measured,raw,mapped,mapped-measured,'fit' if at < 100 else 'validation'))
     errors = [row[4] for row in comparisons if row[5] == 'validation']
+
+    # RMS is the square root of the average squared difference. The percentage
+    # uses the measured input's full high-to-low span, not the ADC's full range.
     rms = math.sqrt(sum(error*error for error in errors)/len(errors))
     maximum = max(abs(error) for error in errors)
     return dict(shift=shift,gain=gain,offset=offset,fitRms=math.sqrt(fitError),rms=rms,
@@ -175,7 +190,12 @@ def svgPanel(traces, title, yLabel, limits=None):
 
 
 def analyze(inputText, outputText, target):
-    """Write raw traces, adjusted overlay, residuals and every comparison to CSV."""
+    """Write an HTML report and CSV of compared points; return the fit/statistics dict.
+
+    residual means adjusted P4 value minus measured Feather value. Raw plots use
+    each converter's own counts and scale; only the fitted overlay uses a common
+    Feather-count scale. These plots contain group averages, not every ADC sample.
+    """
     inputMeta, inputRows=parseInput(inputText)
     outputMeta, outputRows=parseOutput(outputText)
     if inputMeta[0] != outputMeta[0]:

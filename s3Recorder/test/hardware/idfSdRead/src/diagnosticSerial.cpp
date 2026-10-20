@@ -27,7 +27,10 @@
 #include <cstdarg>
 diagnosticSerial Serial;
 
-/** @brief Install UART0 receive buffering; baud is bits per second, normally 115200. */
+/**
+ * @brief Install UART0 receive buffering; baud is bits per second, normally 115200.
+ * Called at startup. ESP_ERROR_CHECK aborts execution if either SDK call fails.
+ */
 void diagnosticSerial::begin(unsigned long baud)
 {
     ESP_ERROR_CHECK(uart_set_baudrate(UART_NUM_0, baud));
@@ -59,7 +62,10 @@ void diagnosticSerial::println(const char* message)
     std::fflush(stdout);
 }
 
-/** @brief Return the number of received UART bytes waiting for the main task. */
+/**
+ * @brief Return the number of received UART bytes waiting for the main task.
+ * The driver error result is ignored; zero can also mean the query failed.
+ */
 int diagnosticSerial::available()
 {
     size_t length = 0;
@@ -76,7 +82,10 @@ int diagnosticSerial::read()
     return retVal;
 }
 
-/** @brief Yield the main task for the requested milliseconds, preserving GPIO state. */
+/**
+ * @brief Let other tasks run for a delay expressed in milliseconds.
+ * pdMS_TO_TICKS rounds down to scheduler clock ticks; this is not a precise timer.
+ */
 void delay(unsigned long milliseconds)
 {
     vTaskDelay(pdMS_TO_TICKS(milliseconds));

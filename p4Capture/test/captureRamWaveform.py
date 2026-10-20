@@ -23,7 +23,12 @@ import serial
 
 
 def savePlot(rows, metadata, destination):
-    """Plot all bin extrema and means; no fitted sine or voltage calibration."""
+    """Draw each group's lowest, highest and average ADC count in destination HTML.
+
+    rows contains (index, minimum, maximum, mean) from the P4 report; this
+    function does no further averaging. The horizontal scale assumes 600
+    groups of 0.5 ms. Vertical limits follow the measured counts, not volts.
+    """
     low = min(row[1] for row in rows)
     high = max(row[2] for row in rows)
     margin = max(1, (high - low) * 0.1)

@@ -367,7 +367,7 @@ void recordingService::run()
     sink.mount();
 #if S3_SD_VERIFY
 
-    // One-time commissioning check; regular firmware does not create test files.
+    // Optional startup write/read check; regular firmware does not create test files.
     sink.verifyStorage();
 #endif
     refreshSpace();

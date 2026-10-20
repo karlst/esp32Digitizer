@@ -58,8 +58,9 @@ void s3Monitor::begin()
     // Set the idle pull-up before the UART owns the pin's peripheral function.
     pinMode(RX, INPUT_PULLUP);
     serialPort.begin(115200, SERIAL_8N1, RX, TX);
-    // Randomize the id sequence per Feather boot so old S3 replies cannot satisfy
-    // a new command after Feather restarts. Zero is reserved for 'no command'.
+    // Randomize the ID sequence per boot to reduce the chance that an old S3
+    // reply matches a new request after restart. This is not a uniqueness
+    // guarantee. Zero is reserved for 'no command'.
     commandId = esp_random();
     Serial.println("S3 monitor: 115200 baud, Feather RX=GPIO7, TX=GPIO8; waiting for S3.");
 }
@@ -257,7 +258,9 @@ bool s3Monitor::acceptLine(uint32_t nowMs)
  * A whole valid line refreshes the link; malformed text does not. Lines are capped
  * by lineCapacity and fragments expire after 500 ms. LF ends a line; CR is ignored.
  *
- * A command with no matching confirmation after five seconds becomes timeout.
+ * A command with no matching confirmation after five seconds becomes timeout,
+ * unless fresh matching reports say preparation/saving/deletion is still busy;
+ * those reports restart the five-second wait in acceptLine().
  * That means its outcome is unknown, not that S3 definitely did nothing. Do not
  * retry automatically: the next status can still show what S3 is actually doing.
  */
@@ -435,7 +438,7 @@ bool s3Monitor::sendCommand(const char* action, uint32_t rate, bool record)
             nextId = 1;
         }
         // Older S3s keep receiving their original command format. Version 3 adds
-        // the recording flag; only a version-4 status advertises support for it.
+        // the recording flag; version-4 or version-5 status advertises support.
         const String command = "CMD," + String(recording.available ? "3," : "2,") + String(nextId) + "," +
             action + "," + String(isStart ? rate : 0) +
             (recording.available ? String(record ? ",1" : ",0") : String("")) + "\n";

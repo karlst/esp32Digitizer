@@ -14,7 +14,9 @@
 
 /**
  * @file ads127l18.h
- * @brief ADS127L18 configuration-port access for initial commissioning.
+ * @brief Send settings to the ADS127L18 and read its register values back.
+ * SPI is the clocked serial link used for these commands. Registers are
+ * numbered bytes inside the ADC containing settings, identification, or status.
  * This is not the sample receiver. The separate receiver uses DCLK/FSYNC/DOUT0;
  * replacing that receiver does not change this configuration-port driver. The hardware diagnostic is the first caller of this class.
  */

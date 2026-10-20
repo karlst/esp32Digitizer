@@ -33,7 +33,8 @@
  * attaches its interrupt on core 0. While attached, only onReady() may touch SPI.
  * Detach the interrupt before a task sends any other SPI command. snapshot()
  * must run on the same core and briefly masks interrupts while copying results.
- * When a writer is attached, every accepted sample is encoded and queued in RAM.
+ * With a writer attached, each accepted sample is encoded and submitted to RAM;
+ * a full buffer rejects it and sets the writer's failure flag for the task to see.
  * snapshot() is only a monitor; it is never used to reconstruct recorded samples.
  */
 class fastCapture

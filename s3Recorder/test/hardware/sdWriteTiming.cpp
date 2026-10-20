@@ -135,6 +135,7 @@ static void runTest()
 
     // Sync commits filesystem caches separately; report failure even if every
     // earlier write succeeded. File size is bookkeeping, not payload validation.
+    // The close result is ignored, so RESULT ok does not certify a successful close.
     const int64_t syncStart = esp_timer_get_time();
     const bool synced = file.sync();
     const int64_t syncUs = esp_timer_get_time() - syncStart;
