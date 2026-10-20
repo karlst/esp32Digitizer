@@ -26,7 +26,7 @@
 #define TX 8
 
 /**
- * @brief Provide the small subset of Arduino String used by S3Monitor.cpp.
+ * @brief Provide the small subset of Arduino String used by ReceiverMonitor.cpp.
  */
 class String : public std::string
 {

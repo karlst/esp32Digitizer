@@ -31,8 +31,8 @@ Public License in the repository LICENSE file or <https://www.gnu.org/licenses/>
         <div class="top-status">Feather UI</div>
     </header>
 
-    <!-- Six panels: local Feather graph, S3 state, acquisition diagnostics, events,
-         Feather controls, and S3 controls. CSS stacks the same order on phones. -->
+    <!-- Six panels: local Feather graph, receiver state, acquisition diagnostics, events,
+         Feather controls, and receiver controls. CSS stacks the same order on phones. -->
     <main class="page-grid">
         <section class="panel" aria-labelledby="panel1-title">
             <div class="panel-header" id="panel1-title">P1: DAC Output and ADC Measurement</div>
@@ -46,51 +46,51 @@ Public License in the repository LICENSE file or <https://www.gnu.org/licenses/>
         <section class="panel" aria-labelledby="panel2-title">
             <div class="panel-header" id="panel2-title">P2: Digitizer Monitor</div>
             <div class="panel-body status-grid" aria-live="polite">
-                <div>S3 connected</div><div id="s3-connected">No</div>
-                <div>Digitizer ready</div><div id="s3-adc">Unknown</div>
-                <div>Receiving samples</div><div id="s3-receiving">Unknown</div>
-                <div>Samples accepted</div><div id="s3-count">&mdash;</div>
-                <div>Samples / second</div><div id="s3-rate">&mdash;</div>
-                <div>Latest raw reading</div><div id="s3-raw">&mdash;</div>
-                <div>Digitizer error</div><div id="s3-error">Unknown</div>
+                <div>receiver connected</div><div id="receiver-connected">No</div>
+                <div>Digitizer ready</div><div id="receiver-adc">Unknown</div>
+                <div>Receiving samples</div><div id="receiver-receiving">Unknown</div>
+                <div>Samples accepted</div><div id="receiver-count">&mdash;</div>
+                <div>Samples / second</div><div id="receiver-rate">&mdash;</div>
+                <div>Latest raw reading</div><div id="receiver-raw">&mdash;</div>
+                <div>Digitizer error</div><div id="receiver-error">Unknown</div>
             </div>
-            <div id="s3-message" class="monitor-message" role="status">Waiting for S3 messages.</div>
+            <div id="receiver-message" class="monitor-message" role="status">Waiting for receiver messages.</div>
         </section>
 
         <section class="panel" aria-labelledby="panel3-title">
             <div class="panel-header" id="panel3-title">P3: Recording Status</div>
             <div class="panel-body recording-panel">
-                <div id="recording-message" role="status">Waiting for S3 recording status.</div>
+                <div id="recording-message" role="status">Waiting for receiver recording status.</div>
                 <div class="status-grid recording-grid">
-                    <div>Recording / elapsed</div><div id="rec-state">—</div>
-                    <div>File</div><div id="rec-file">—</div>
-                    <div>Card / space</div><div id="rec-card">—</div>
-                    <div>Bytes written</div><div id="rec-bytes">—</div>
-                    <div>Samples written</div><div id="rec-samples">—</div>
-                    <div>Write rate</div><div id="rec-rate">—</div>
-                    <div>Initial file opening</div><div id="rec-open-time">�</div>
-                    <div>Latest recording delay</div><div id="rec-delay">—</div>
-                    <div>Maximum recording delay</div><div id="rec-max-delay">—</div>
+                    <div>Recording / elapsed</div><div id="rec-state">â€”</div>
+                    <div>File</div><div id="rec-file">â€”</div>
+                    <div>Card / space</div><div id="rec-card">â€”</div>
+                    <div>Bytes written</div><div id="rec-bytes">â€”</div>
+                    <div>Samples written</div><div id="rec-samples">â€”</div>
+                    <div>Write rate</div><div id="rec-rate">â€”</div>
+                    <div>Initial file opening</div><div id="rec-open-time">—</div>
+                    <div>Latest recording delay</div><div id="rec-delay">â€”</div>
+                    <div>Maximum recording delay</div><div id="rec-max-delay">â€”</div>
                 </div>
                 <div class="buffer-track" role="meter" aria-label="Ring buffer occupancy" aria-valuemin="0" aria-valuemax="100" id="rec-meter">
                     <div id="rec-fill"></div><div id="rec-wrap"></div><span id="rec-write-marker" title="Next write position">W</span><span id="rec-read-marker" title="Next read position">R</span>
                 </div>
                 <div id="rec-buffer" class="form-note">Ring buffer: unavailable</div>
-                <div id="rec-pointers" class="form-note">Write / read positions: —</div>
-                <div id="rec-errors" class="form-note">Recording errors: —</div>
+                <div id="rec-pointers" class="form-note">Write / read positions: â€”</div>
+                <div id="rec-errors" class="form-note">Recording errors: â€”</div>
                 <canvas id="recording-history" height="80" role="img" aria-label="Recent buffer occupancy and disk write delay">Recording history</canvas>
-                <div class="form-note">Last 2 minutes · <span class="buffer-legend">blue: buffer %</span> · <span class="delay-legend">orange: disk delay</span> <span id="rec-chart-scale"></span></div>
+                <div class="form-note">Last 2 minutes Â· <span class="buffer-legend">blue: buffer %</span> Â· <span class="delay-legend">orange: disk delay</span> <span id="rec-chart-scale"></span></div>
             </div>
             <details class="acquisition-details"><summary>Acquisition diagnostics</summary>
             <div class="panel-body status-grid diagnostic-grid" aria-live="polite">
-                <div>Detected missed samples</div><div id="s3-missed">&mdash;</div>
-                <div>Rejected reads</div><div id="s3-rejected">&mdash;</div>
-                <div>Reads failing driver checks</div><div id="s3-read-failures">&mdash;</div>
-                <div>Reads with a new sample arriving</div><div id="s3-overlaps">&mdash;</div>
-                <div>Data-ready timeouts</div><div id="s3-timeouts">&mdash;</div>
-                <div>Last read rejection</div><div id="s3-read-fault">Unknown</div>
+                <div>Detected missed samples</div><div id="receiver-missed">&mdash;</div>
+                <div>Rejected reads</div><div id="receiver-rejected">&mdash;</div>
+                <div>Reads failing driver checks</div><div id="receiver-read-failures">&mdash;</div>
+                <div>Reads with a new sample arriving</div><div id="receiver-overlaps">&mdash;</div>
+                <div>Data-ready timeouts</div><div id="receiver-timeouts">&mdash;</div>
+                <div>Last read rejection</div><div id="receiver-read-fault">Unknown</div>
             </div>
-            <div id="s3-counter-note" class="monitor-message">Counters are totals since S3 reboot; Stop/Start preserves them. Detected misses may undercount losses. A rejected read can fail both checks, so do not add its reason counts together.</div>
+            <div id="receiver-counter-note" class="monitor-message">Counters are totals since receiver reboot; Stop/Start preserves them. Detected misses may undercount losses. A rejected read can fail both checks, so do not add its reason counts together.</div>
             </details>
         </section>
 
@@ -146,14 +146,14 @@ Public License in the repository LICENSE file or <https://www.gnu.org/licenses/>
                 </div>
             </div>
         </section>
-        <section class="panel" aria-labelledby="s3-control-title">
-            <div class="panel-header" id="s3-control-title">S3 Controls</div>
+        <section class="panel" aria-labelledby="receiver-control-title">
+            <div class="panel-header" id="receiver-control-title">receiver Controls</div>
             <div class="panel-body control-stack">
                 <!-- This dropdown is a draft for the next Start. The running summary
-                     below it is populated only from S3-confirmed applied settings. -->
-                <form id="s3-form" class="dac-form" novalidate>
-                    <label for="s3-sample-rate">Sample rate (samples/s)</label>
-                    <select id="s3-sample-rate" name="sampleRate" disabled>
+                     below it is populated only from receiver-confirmed applied settings. -->
+                <form id="receiver-form" class="dac-form" novalidate>
+                    <label for="receiver-sample-rate">Sample rate (samples/s)</label>
+                    <select id="receiver-sample-rate" name="sampleRate" disabled>
                         <option value="100">100</option>
                         <option value="500">500</option>
                         <option value="1000" selected>1,000</option>
@@ -162,16 +162,16 @@ Public License in the repository LICENSE file or <https://www.gnu.org/licenses/>
                         <option value="15000">15,000</option>
                         <option value="30000">30,000</option>
                     </select>
-                    <label class="record-choice"><input id="s3-record" type="checkbox" disabled> Record to SD card</label>
-                    <div id="recording-unavailable" class="form-note">Waiting for S3 recording support.</div>
+                    <label class="record-choice"><input id="receiver-record" type="checkbox" disabled> Record to SD card</label>
+                    <div id="recording-unavailable" class="form-note">Waiting for receiver recording support.</div>
                     <div class="form-note">Settings take effect on Start. Stop before changing the rate.</div>
-                    <div class="control-actions"><button id="s3-acquisition-button" type="submit" disabled>Start Acquisition</button></div>
+                    <div class="control-actions"><button id="receiver-acquisition-button" type="submit" disabled>Start Acquisition</button></div>
                 </form>
-                <div id="s3-unavailable" class="form-note control-unavailable" role="status">Waiting for S3 status.</div>
-                <button id="s3-reboot-button" type="button" disabled>Reboot S3</button>
-                <button id="s3-delete-button" class="danger-button" type="button" disabled>Delete all recordings…</button>
-                <div id="s3-running" class="running-settings" role="status">Acquisition state unknown &mdash; S3 disconnected.</div>
-                <div id="s3-command-message" class="form-note" role="status">Waiting for S3 connection.</div>
+                <div id="receiver-unavailable" class="form-note control-unavailable" role="status">Waiting for receiver status.</div>
+                <button id="receiver-reboot-button" type="button" disabled>Reboot receiver</button>
+                <button id="receiver-delete-button" class="danger-button" type="button" disabled>Delete all recordingsâ€¦</button>
+                <div id="receiver-running" class="running-settings" role="status">Acquisition state unknown &mdash; receiver disconnected.</div>
+                <div id="receiver-command-message" class="form-note" role="status">Waiting for receiver connection.</div>
             </div>
         </section>
     </main>

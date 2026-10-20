@@ -18,7 +18,7 @@
  */
 #include <cassert>
 #include <iostream>
-#include "S3Monitor.h"
+#include "ReceiverMonitor.h"
 
 uint32_t testMs = 0;
 uint32_t testUs = 0;
@@ -34,12 +34,12 @@ FakeEsp ESP;
  * all bytes are consumed. This simulates successive Arduino loop passes without
  * opening a serial port or invoking a private parser directly.
  */
-static void deliver(S3Monitor& s3Monitor, HardwareSerial& hardwareSerial, const std::string& frame)
+static void deliver(ReceiverMonitor& receiverMonitor, HardwareSerial& hardwareSerial, const std::string& frame)
 {
     hardwareSerial._input.assign(frame.begin(), frame.end());
     while (hardwareSerial.available())
     {
-        s3Monitor.update();
+        receiverMonitor.update();
     }
 }
 
@@ -47,18 +47,18 @@ static void deliver(S3Monitor& s3Monitor, HardwareSerial& hardwareSerial, const 
  * @brief Check the actual Feather serial parser and browser JSON against known messages.
  *
  * Verify exact 64-bit counter text, supported status versions, rejection of malformed
- * new fields, and that bad messages do not refresh connection time. Simulate S3
+ * new fields, and that bad messages do not refresh connection time. Simulate receiver
  * reboot by sending reset counters and Feather disconnect by advancing its clock.
  * The test exercises code shared with firmware; it does not verify a physical UART.
  */
 int main()
 {
     HardwareSerial hardwareSerial;
-    S3Monitor s3Monitor(hardwareSerial);
-    const std::string prefix = "S3,3,1000,1,9007199254740993,1000,-1,1,0,1,1000,0,0,";
+    ReceiverMonitor receiverMonitor(hardwareSerial);
+    const std::string prefix = "RECEIVER,3,1000,1,9007199254740993,1000,-1,1,0,1,1000,0,0,";
     const std::string totals = "18446744073709551615,12,8,7,4,3\n";
-    deliver(s3Monitor, hardwareSerial, prefix + totals);
-    std::string json = s3Monitor.stateJson();
+    deliver(receiverMonitor, hardwareSerial, prefix + totals);
+    std::string json = receiverMonitor.stateJson();
     assert(json.find("\"connected\":true") != std::string::npos);
     assert(json.find("\"sampleCount\":\"9007199254740993\"") != std::string::npos);
     assert(json.find("\"missedEdges\":\"18446744073709551615\"") != std::string::npos);
@@ -76,28 +76,28 @@ int main()
     };
     for (const auto& suffix : invalid)
     {
-        deliver(s3Monitor, hardwareSerial, prefix + suffix);
+        deliver(receiverMonitor, hardwareSerial, prefix + suffix);
     }
-    json = s3Monitor.stateJson();
+    json = receiverMonitor.stateJson();
     assert(json.find("\"rejectedFrames\":6") != std::string::npos);
     assert(json.find("\"lastMessageAgeMs\":100") != std::string::npos);
     assert(json.find("\"rejectedReads\":\"12\"") != std::string::npos);
 
-    // Older S3 firmware remains controllable, with unavailable diagnostics.
-    deliver(s3Monitor, hardwareSerial, "S3,2,2000,1,10,1000,1,0,0,1,1000,0,0\n");
-    json = s3Monitor.stateJson();
+    // Older receiver firmware remains controllable, with unavailable diagnostics.
+    deliver(receiverMonitor, hardwareSerial, "RECEIVER,2,2000,1,10,1000,1,0,0,1,1000,0,0\n");
+    json = receiverMonitor.stateJson();
     assert(json.find("\"connected\":true") != std::string::npos);
     assert(json.find("\"diagnosticsAvailable\":false") != std::string::npos);
     assert(json.find("\"missedEdges\":null") != std::string::npos);
-    assert(s3Monitor.sendCommand("stop", 0));
+    assert(receiverMonitor.sendCommand("stop", 0));
     assert(hardwareSerial._output.find("CMD,2,") == 0);
 
     // A reboot legitimately resets every counter. Do not retain an old total.
-    deliver(s3Monitor, hardwareSerial, "S3,3,10,1,0,0,0,4294967295,0,0,1000,0,0,0,0,0,0,0,0\n");
-    json = s3Monitor.stateJson();
+    deliver(receiverMonitor, hardwareSerial, "RECEIVER,3,10,1,0,0,0,4294967295,0,0,1000,0,0,0,0,0,0,0,0\n");
+    json = receiverMonitor.stateJson();
     assert(json.find("\"missedEdges\":\"0\"") != std::string::npos);
     testMs += 3000;
-    json = s3Monitor.stateJson();
+    json = receiverMonitor.stateJson();
     assert(json.find("\"connected\":false") != std::string::npos);
     assert(json.find("\"rejectedReads\":null") != std::string::npos);
     assert(json.find("\"readFault\":null") != std::string::npos);
@@ -105,35 +105,35 @@ int main()
     // survive JSON; malformed positions reject the entire frame. Old versions
     // remain usable but cannot issue recording or deletion requests.
     HardwareSerial hardwareSerialRecording;
-    S3Monitor s3MonitorRecording(hardwareSerialRecording);
-    const std::string v4 = "S3,4,100,1,0,0,0,4294967295,0,0,1000,0,0,0,0,0,0,0,0,";
+    ReceiverMonitor receiverMonitorRecording(hardwareSerialRecording);
+    const std::string v4 = "RECEIVER,4,100,1,0,0,0,4294967295,0,0,1000,0,0,0,0,0,0,0,0,";
     const std::string recordingFields = "0,1,0,0,0,0,9007199254740993,0,1000000,800000,65536,0,0,0,0,0,0,0,0,0,0,0,0,0\n";
-    deliver(s3MonitorRecording, hardwareSerialRecording, v4 + recordingFields);
-    json = s3MonitorRecording.stateJson();
+    deliver(receiverMonitorRecording, hardwareSerialRecording, v4 + recordingFields);
+    json = receiverMonitorRecording.stateJson();
     assert(json.find("\"bytesWritten\":\"9007199254740993\"") != std::string::npos);
-    assert(s3MonitorRecording.sendCommand("start", 30000, true));
+    assert(receiverMonitorRecording.sendCommand("start", 30000, true));
     assert(hardwareSerialRecording._output == "CMD,3,1,start,30000,1\n");
     // Confirming only acquisition is insufficient for a recording Start.
-    deliver(s3MonitorRecording, hardwareSerialRecording,
-        "S3,4,200,1,1,30000,1,0,0,1,30000,1,1,0,0,0,0,0,0," + recordingFields);
-    assert(std::string(s3MonitorRecording.stateJson()).find("\"commandStatus\":\"rejected\"") != std::string::npos);
-    deliver(s3MonitorRecording, hardwareSerialRecording, v4 +
+    deliver(receiverMonitorRecording, hardwareSerialRecording,
+        "RECEIVER,4,200,1,1,30000,1,0,0,1,30000,1,1,0,0,0,0,0,0," + recordingFields);
+    assert(std::string(receiverMonitorRecording.stateJson()).find("\"commandStatus\":\"rejected\"") != std::string::npos);
+    deliver(receiverMonitorRecording, hardwareSerialRecording, v4 +
         "0,1,0,0,0,0,0,0,1000000,800000,65536,4,4,65536,0,0,0,0,0,0,0,0,0,0\n");
-    assert(std::string(s3MonitorRecording.stateJson()).find("\"rejectedFrames\":1") != std::string::npos);
-    deliver(s3MonitorRecording, hardwareSerialRecording, "S3,2,300,1,0,0,0,4294967295,0,0,1000,0,0\n");
-    assert(!s3MonitorRecording.sendCommand("start", 1000, true));
-    assert(!s3MonitorRecording.sendCommand("delete", 0));
+    assert(std::string(receiverMonitorRecording.stateJson()).find("\"rejectedFrames\":1") != std::string::npos);
+    deliver(receiverMonitorRecording, hardwareSerialRecording, "RECEIVER,2,300,1,0,0,0,4294967295,0,0,1000,0,0\n");
+    assert(!receiverMonitorRecording.sendCommand("start", 1000, true));
+    assert(!receiverMonitorRecording.sendCommand("delete", 0));
     // V5 adds opening time and estimated/measured/stale quality atomically.
-    const std::string v5 = "S3,5,400,1,0,0,0,4294967295,0,0,1000,0,0,0,0,0,0,0,0,";
+    const std::string v5 = "RECEIVER,5,400,1,0,0,0,4294967295,0,0,1000,0,0,0,0,0,0,0,0,";
     const std::string baseFields = recordingFields.substr(0, recordingFields.size() - 1);
-    deliver(s3MonitorRecording, hardwareSerialRecording, v5 + baseFields + ",567364,2\n");
-    json = s3MonitorRecording.stateJson();
+    deliver(receiverMonitorRecording, hardwareSerialRecording, v5 + baseFields + ",567364,2\n");
+    json = receiverMonitorRecording.stateJson();
     assert(json.find("\"fileOpenUs\":\"567364\"") != std::string::npos);
     assert(json.find("\"freeSpaceMode\":\"2\"") != std::string::npos);
-    deliver(s3MonitorRecording, hardwareSerialRecording, v5 + baseFields + ",10,4\n");
-    assert(std::string(s3MonitorRecording.stateJson()).find("\"fileOpenUs\":\"567364\"") != std::string::npos);
-    deliver(s3MonitorRecording, hardwareSerialRecording, v4 + recordingFields);
-    assert(std::string(s3MonitorRecording.stateJson()).find("\"freeSpaceMode\":\"0\"") != std::string::npos);
+    deliver(receiverMonitorRecording, hardwareSerialRecording, v5 + baseFields + ",10,4\n");
+    assert(std::string(receiverMonitorRecording.stateJson()).find("\"fileOpenUs\":\"567364\"") != std::string::npos);
+    deliver(receiverMonitorRecording, hardwareSerialRecording, v4 + recordingFields);
+    assert(std::string(receiverMonitorRecording.stateJson()).find("\"freeSpaceMode\":\"0\"") != std::string::npos);
     std::cout << "PASS: Feather v2/v3/v4/v5 parser, recording commands, exact totals, invalid frames, reset and disconnect.\n";
     return 0;
 }

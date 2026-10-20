@@ -32,7 +32,7 @@ These conventions apply throughout this project and may be updated as developmen
 ## Required explanation level (confirmed by Karl, 2026-09-30)
 
 - Apply the explanatory requirements below to ALL code, including tests and
-  future changes. The original S3 examples were removed with that project;
+  future changes. For a current example,
   `espP4/main/src/RecordingApplication.cpp` documents the current transfer path.
   Do this during implementation; do not wait to be asked again.
 - Write for a capable reader who does not already know embedded systems or the

@@ -19,7 +19,7 @@
 #include "bufferedWriterChecks.h"
 
 /**
- * @brief Run only generic writer checks; no board or S3 source is needed.
+ * @brief Run only generic writer checks; no board or receiver source is needed.
  */
 int main()
 {

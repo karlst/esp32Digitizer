@@ -80,8 +80,6 @@ excluded from the current terminal build.
   with readback, not exact generated-sample accounting or power-cycle persistence.
 - Intermittent post-upload READY/DONE handshake trouble has been cleared by
   resetting P4, but its cause has not been diagnosed.
-- The S3 high-rate receiver failed at 512k and 1.024M samples/s because of its
-  I2S clock constraint. Its firmware was removed; earlier versions remain in Git history. P4 is the active receiver.
 - Production error policy, card qualification, and migration of Feather duties
   remain open. ADC data CRC and a physical known-digital-sequence test are proposals.
 
@@ -97,15 +95,16 @@ and intends to commit/push. Git operations remain his responsibility. Continue
 source review and discuss further changes before implementing them; no additional
 hardware experiment is scheduled by this document.
 
-## Source refactor awaiting verification
+## Source refactor verification
 
 October 20 source changes introduce `RecordingApplication` on P4 and
 `AcquisitionApplication` on Feather, with separate ordinary/test startup files.
 Classes and their filenames use PascalCase; members use leading underscores;
-instances use the class name in camelCase. The S3 project was removed after
-moving its retained Feather ADC checks and fake hardware into Feather tests.
+instances use the class name in camelCase. Feather ADC checks and fake hardware
+live in Feather tests.
 [Data flow](DATA-FLOW.md) documents the actual transfer and verification calls.
 
-The successful hardware results above predate these edits. PC checks, both
-firmware builds and a fresh hardware smoke run must verify the changed source.
-No new build, upload or hardware result is claimed here.
+Karl subsequently reported all twelve PC checks passed, P4 and both Feather
+builds succeeded, and a fresh 30-second hardware smoke test passed after uploads.
+These verify the refactor at smoke-test level. The later receiver-interface
+naming cleanup still needs its PC checks; it does not change the P4 capture path.

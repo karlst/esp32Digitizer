@@ -29,9 +29,9 @@ Numbers are GPIO labels, not positions on the header.
 
 | Signal | P4 | Other end |
 |---|---|---|
-| DCLK, incoming bit clock | GPIO0 input | Translator A5, formerly S3 GPIO9 |
-| FSYNC, incoming sample frame marker | GPIO1 input | Translator A6, formerly S3 GPIO10 |
-| DOUT0, incoming serial sample data | GPIO2 input | Translator A7, formerly S3 GPIO11 |
+| DCLK, incoming bit clock | GPIO0 input | Translator A5 |
+| FSYNC, incoming sample frame marker | GPIO1 input | Translator A6 |
+| DOUT0, incoming serial sample data | GPIO2 input | Translator A7 |
 | Command UART receive | GPIO4 input | Feather TX / GPIO8 |
 | Command UART transmit | GPIO5 output | Feather RX / GPIO7 |
 | Ground | GND | Common Feather/translator/ADC ground |
@@ -48,7 +48,7 @@ SD breakout wiring is needed. These are the Waveshare board's fixed SD pins.
 P4 and Feather use separate USB power/data cables (previously COM3 and COM4).
 The old shared 5 V jumper is removed. Translator VDDA is supplied by Feather
 3.3 V; VDDB comes from the ADC assembly. The ADC has its separate 6 V input
-supply. Common ground continuity was verified. S3 is removed from these links.
+supply. Common ground continuity was verified.
 Keep DAC coax disconnected. Do not join the boards' 5 V or 3.3 V rails.
 
 ## First: test the decoder on the PC
@@ -81,7 +81,7 @@ In ordinary PowerShell, build the explicitly named Feather environment:
 & "$env:USERPROFILE\.platformio\penv\Scripts\platformio.exe" run --project-dir C:\Users\karls\source\esp32Digitizer\espFeather -e ads127-p4-capture-30min
 ```
 
-The original `ads127-capture-control` environment retains five seconds for S3.
+The original `ads127-capture-control` environment retains a five-second diagnostic duration.
 Only the new environment selects `ADS127_P4_ENDURANCE=1`. The P4 CMake component
 selects the same option; `shared/test/support/ads127BenchTiming.h` supplies both durations.
 The SD change adds output batching to the decoder, so rerun its PC tests first.
@@ -152,8 +152,7 @@ the wrong settings, use `idf.py -B build/recording -D SDKCONFIG=sdkconfig.sd men
 
 Feather controls ADC configuration and start/stop over its existing SPI link.
 The P4 receives samples directly from the ADC translator, not from Feather UART.
-The updated Feather diagnostics use the name receiver instead of S3;
-ARM2/READY2/STOP/DONE is the same protocol used here with P4.
+Feather and P4 coordinate capture using ARM2/READY2/STOP/DONE messages.
 After each run, wait for **SD SAVED** or **SD FAILED** before another preparation.
 Each new run requires **p**, then **SD READY**, then a Feather rate key. A Feather
 ARM without a prepared file is refused before ADC start. Do not remove the card
@@ -164,9 +163,7 @@ while preparing, recording or verifying. Preparation does not start conversions.
 ### First isolate SD writing (SD-v3)
 
 Use the same card throughout a comparison and identify which card was used.
-The documented S3 reference was a SanDisk Extreme 64 GB V30 A2: preallocated
-26 Mbps for 30 minutes, 5.85 GB, no reported losses or write errors. This does
-not establish the replacement card's performance or the P4 implementation's.
+A result from one card does not establish another card's performance.
 
 After the PC checks, build and upload the P4 as above. Leave Feather/ADC stopped;
 no Feather commands are needed. In **P4 COM3**, use these steps separately:
@@ -209,7 +206,7 @@ samples/s. The SD-only t/u tests still use their original four-byte format and r
 
 ### Project-local exFAT support
 
-The older S3 recorder used SdFat. This standalone P4 uses ESP-IDF's bundled
+This standalone P4 uses ESP-IDF's bundled
 FatFs, whose source contains exFAT but whose default configuration disables it.
 `cmake/exfat.cmake` creates an overridden `fatfs` component inside the selected
 build directory before component discovery. It copies the installed SDK source
@@ -228,7 +225,7 @@ the same copied headers because exFAT changes file-object layouts and file sizes
 CMake checks component selection; the adapter checks configuration and 64-bit
 FSIZE_t at compile time. The override is pinned to ESP-IDF 5.5.6 and FatFs
 configuration revision 80286, so an SDK upgrade requires review. The SDK
-installation and S3 implementation are not edited. SD-v5 separately extends
+installation is not edited. SD-v5 separately extends
 ADC duration and the file header; the 10 GB reservation now requires exFAT.
 
 After updating an existing build, in ESP-IDF PowerShell from espP4:
@@ -359,7 +356,7 @@ The source now includes a tutorial reading path: start with the overview in
 `frameDecoder::feed()/finishWord()`, and
 `sdRecorder::submitSamples()/write()/finishFile()`. The shared ring implementation
 is `../shared/bufferedWriter/src/BufferedWriter.cpp`; its comments cover
-both the S3 and P4 callers.
+the P4 caller and reusable writer contract.
 
 ### Hardware capture versus software work
 

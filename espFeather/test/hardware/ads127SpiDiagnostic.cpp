@@ -16,7 +16,7 @@
  * @file ads127SpiDiagnostic.cpp
  * @brief Manual, read-only Feather communication test for the new ADC.
  * Arduino calls setup once and loop repeatedly in its main task. No web server,
- * DAC task, Feather-S3 commands or acquisition code is present in this build.
+ * DAC task, Feather-receiver commands or acquisition code is present in this build.
  * Read setup() for the idle pin states, then runCheck() for the manual test.
  * USB 'r' is the operator's statement that power/level-shifter checks passed;
  * this firmware cannot measure ADC IOVDD or verify those checks automatically.
@@ -35,7 +35,7 @@ static Ads127L18 ads127L18(SPI, ads127Pins::featherClock, ads127Pins::featherMis
  */
 static void printHelp()
 {
-    Serial.println("ADS127L18 READ-ONLY CHECK: DAC off; no sampling, web UI or S3 commands.");
+    Serial.println("ADS127L18 READ-ONLY CHECK: DAC off; no sampling, web UI or receiver commands.");
     Serial.println("First verify ADC power, 1.8-V IOVDD, translator supplies and MODE/RESET/START wiring.");
     Serial.println("Then send r to read ID/revision/status three times at 100 kHz SPI mode 1; h repeats help.");
     Serial.println("No SPI traffic until r. Power-on default SPI CRC must be disabled. No registers are written.");

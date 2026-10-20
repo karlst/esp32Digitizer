@@ -40,7 +40,7 @@ extern uint32_t testUs;
 extern int testReady;
 extern int testChipSelect;
 
-// Model the S3 native UART RX mux: ordinary GPIO configuration removes it.
+// Model the receiver native UART RX mux: ordinary GPIO configuration removes it.
 // Shared inline variables let test and production translation units observe the
 // same simulated state. UINT32_MAX here means no scheduled DRDY rise.
 inline bool testUartRxMapped = false;

@@ -23,7 +23,7 @@
 #pragma once
 #include <cstdint>
 
-/** @brief ADC clock/OSR choices; S3 reception passed through 256k and failed above it. */
+/** @brief ADC clock/OSR choices for the available sampling rates. */
 struct Ads127BenchRate
 {
     uint32_t _samplesPerSecond;

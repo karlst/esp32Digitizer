@@ -13,29 +13,29 @@
  */
 
 /**
- * @file S3Monitor.h
- * @brief Receive bounded S3 status messages without disturbing DAC sampling.
+ * @file ReceiverMonitor.h
+ * @brief Receive bounded receiver status messages without disturbing DAC sampling.
  */
 #pragma once
 #include <Arduino.h>
 #include "RecordingMonitor.h"
 
 /**
- * @brief Own the UART receive buffer and last validated S3 acquisition status.
+ * @brief Own the UART receive buffer and last validated receiver acquisition status.
  *
  * begin(), update(), and stateJson() run only in Arduino's loop task. Unlike the
  * DAC generator, this class has no worker accessing its state and needs no mutex.
  * The UART driver buffers incoming bytes; update() drains only a bounded amount
  * per loop pass so a noisy/disconnected link cannot monopolize web servicing.
- * Wire format and pin assignments are documented in shared/s3StatusProtocol.md.
+ * Wire format and pin assignments are documented in shared/receiverStatusProtocol.md.
  */
-class S3Monitor
+class ReceiverMonitor
 {
 public:
     /**
      * @brief Retain the dedicated serial port; USB debugging uses a different UART.
      */
-    explicit S3Monitor(HardwareSerial& hardwareSerial);
+    explicit ReceiverMonitor(HardwareSerial& hardwareSerial);
     /**
      * @brief Configure Feather RX/TX header pins for 115200-baud 3.3 V UART.
      */
@@ -50,7 +50,7 @@ public:
     String stateJson() const;
     /**
      * @brief Send one command; its eventual result is reported by stateJson().
-     * record applies only to Start and requires recording-capable S3 firmware.
+     * record applies only to Start and requires recording-capable receiver firmware.
      */
     bool sendCommand(const char* action, uint32_t rate, bool record = false);
     /**
@@ -85,11 +85,11 @@ private:
     uint32_t _lastFrameMs = 0;
     uint32_t _lastProgressMs = 0;
     // Bad serial reports, not rejected ADC reads. This belongs to the Feather
-    // link receiver and resets when Feather reboots, not when S3 reboots.
+    // link receiver and resets when Feather reboots, not when receiver reboots.
     uint32_t _rejectedFrames = 0;
 
     // These values all belong to the same validated frame. Counters describe ADC
-    // conversions read by S3, not UART bytes, DRDY edges, or generated mock readings.
+    // conversions read by RECEIVER, not UART bytes, DRDY edges, or generated mock readings.
     uint32_t _uptimeMs = 0;
     bool _adcReady = false;
     uint64_t _sampleCount = 0;

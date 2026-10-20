@@ -23,7 +23,7 @@
  * @brief Store the legacy LED test's requested state and current output level.
  * No task or timer is created here. webApp calls update() from Arduino loop(),
  * and HTTP callbacks in that same task call setEnabled(). GPIO13 is a Feather
- * pin; it is unrelated to S3 GPIO13 used for digitizer data.
+ * pin; it is unrelated to receiver GPIO13 used for digitizer data.
  */
 class LedBlinker
 {

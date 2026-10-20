@@ -140,8 +140,7 @@ bool Ads127LowRate::configure(unsigned stage, bool externalInput)
     // OSR means the number of modulator readings combined into one output sample.
     // GEN_CFG3 bit 7 selects output drive: zero gives full strength, matching
     // TI's specified output timing. This speeds signal transitions without
-    // changing their 1.8-V logic level. Historical S3 high-clock capture still
-    // failed with this setting; that is not a statement about later P4 results.
+    // changing their 1.8-V logic level.
     // Register readback alone cannot establish that received bits are correct.
     if (retVal)
     {

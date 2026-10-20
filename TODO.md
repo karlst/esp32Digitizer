@@ -83,5 +83,5 @@ These concerns were recorded during comment review; no fixes are implied.
 - [ ] Normal Feather web DAC ignores dac_output_voltage return values in stop/sample paths. Software-reported state is not driver confirmation.
 - [ ] Feather HTML initial rec-open-time placeholder appears to contain an encoding replacement character; not changed in comment-only pass.
 
-S3-only review findings were retired with removal of that project, not fixed.
+Review findings specific to the removed firmware were retired, not fixed.
 Its previous code and review notes remain in Git history.

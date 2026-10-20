@@ -14,7 +14,7 @@
 
 /**
  * @file WebController.cpp
- * @brief Translate browser HTTP requests into Feather actions or queued S3 commands.
+ * @brief Translate browser HTTP requests into Feather actions or queued receiver commands.
  *
  * webApp registers these routes once, then server.handleClient() calls their
  * handlers from Arduino loop(). GET reads status; POST requests a change. JSON
@@ -23,8 +23,8 @@
  *
  * A local DAC Start returns the software's enabled/settings state. The next
  * worker update writes the voltage; there is no electrical confirmation here.
- * An S3 command
- * returns pending and is confirmed later by an S3 serial acknowledgement. The
+ * A receiver command
+ * returns pending and is confirmed later by a receiver serial acknowledgement. The
  * browser must not interpret acceptance for delivery as hardware confirmation.
  */
 #include <LittleFS.h>
@@ -38,8 +38,8 @@
  * All referenced objects live as long as this controller. Route callbacks capture
  * this pointer to reach them later; no hardware is configured in this constructor.
  */
-WebController::WebController(WebServer& webServer, LedBlinker& ledBlinker, DacGenerator& dacGenerator, S3Monitor& s3Monitor)
-    : _webServer(webServer), _ledBlinker(ledBlinker), _dacGenerator(dacGenerator), _s3Monitor(s3Monitor)
+WebController::WebController(WebServer& webServer, LedBlinker& ledBlinker, DacGenerator& dacGenerator, ReceiverMonitor& receiverMonitor)
+    : _webServer(webServer), _ledBlinker(ledBlinker), _dacGenerator(dacGenerator), _receiverMonitor(receiverMonitor)
 {
     // Share services without copying their state.
 }
@@ -62,14 +62,14 @@ void WebController::begin()
     _webServer.serveStatic("/static/", LittleFS, "/static/", "no-cache");
 
     /**
-     * Reply to a browser status request with the latest S3 report. A recent
+     * Reply to a browser status request with the latest receiver report. A recent
      * message does not establish that ADC samples are arriving. This callback
      * and monitor.update() run in loop(), so they cannot run simultaneously.
      */
-    _webServer.on("/api/s3", HTTP_GET, [this]()
+    _webServer.on("/api/receiver", HTTP_GET, [this]()
     {
         _webServer.sendHeader("Cache-Control", "no-store");
-        _webServer.send(200, "application/json", _s3Monitor.stateJson());
+        _webServer.send(200, "application/json", _receiverMonitor.stateJson());
     });
 
     // State reads synchronize reloads and multiple browser clients.
@@ -94,11 +94,11 @@ void WebController::begin()
     _webServer.on("/api/dac/start", HTTP_POST, [this]() { startDac(); });
 
     // A 202 response means accepted for delivery. Later status polls report
-    // the S3 acknowledgment matched to this command.
-    _webServer.on("/api/s3/start", HTTP_POST, [this]() { commandS3("start"); });
-    _webServer.on("/api/s3/stop", HTTP_POST, [this]() { commandS3("stop"); });
-    _webServer.on("/api/s3/reboot", HTTP_POST, [this]() { commandS3("reboot"); });
-    _webServer.on("/api/s3/delete", HTTP_POST, [this]() { commandS3("delete"); });
+    // the receiver acknowledgment matched to this command.
+    _webServer.on("/api/receiver/start", HTTP_POST, [this]() { commandReceiver("start"); });
+    _webServer.on("/api/receiver/stop", HTTP_POST, [this]() { commandReceiver("stop"); });
+    _webServer.on("/api/receiver/reboot", HTTP_POST, [this]() { commandReceiver("reboot"); });
+    _webServer.on("/api/receiver/delete", HTTP_POST, [this]() { commandReceiver("delete"); });
 
     /** Request DAC Stop and report acceptance, or HTTP 503 if unavailable. */
     _webServer.on("/api/dac/stop", HTTP_POST, [this]()
@@ -207,16 +207,16 @@ void WebController::startDac()
 }
 
 /**
- * @brief Validate a browser request and ask the serial monitor to send it to S3.
+ * @brief Validate a browser request and ask the serial monitor to send it to receiver.
  * @param action One of the registered actions: start, stop, reboot, or delete.
  *
  * Only Start reads sampleRate and record; Stop/Reboot ignore invalid drafts.
- * Delete requires the browser's explicit confirmation field and stopped S3 state.
+ * Delete requires the browser's explicit confirmation field and stopped receiver state.
  * The monitor checks supported rates, connection freshness, and pending commands.
- * HTTP 202 means the command was sent and is awaiting S3 confirmation. HTTP 409
- * means it was not accepted for sending. This handler never waits for the S3 reply.
+ * HTTP 202 means the command was sent and is awaiting receiver confirmation. HTTP 409
+ * means it was not accepted for sending. This handler never waits for the receiver reply.
  */
-void WebController::commandS3(const char* action)
+void WebController::commandReceiver(const char* action)
 {
     float rate = 0;
     // When present, record must be exactly "0" or "1". Omitting it means no
@@ -229,13 +229,13 @@ void WebController::commandS3(const char* action)
     const bool valid = strcmp(action, "start") != 0 ||
         (readNumber("sampleRate", rate) && rate >= 0 && rate <= 30000 && floorf(rate) == rate);
     _webServer.sendHeader("Cache-Control", "no-store");
-    if (valid && validRecord && confirmed && _s3Monitor.sendCommand(action, static_cast<uint32_t>(rate), record))
+    if (valid && validRecord && confirmed && _receiverMonitor.sendCommand(action, static_cast<uint32_t>(rate), record))
     {
-        _webServer.send(202, "application/json", _s3Monitor.stateJson());
+        _webServer.send(202, "application/json", _receiverMonitor.stateJson());
     }
     else
     {
-        _webServer.send(409, "application/json", "{\"error\":\"S3 unavailable, busy, or command/settings invalid.\"}");
+        _webServer.send(409, "application/json", "{\"error\":\"receiver unavailable, busy, or command/settings invalid.\"}");
     }
 }
 

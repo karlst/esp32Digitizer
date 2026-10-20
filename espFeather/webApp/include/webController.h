@@ -20,13 +20,13 @@
 #include <WebServer.h>
 #include "LedBlinker.h"
 #include "DacGenerator.h"
-#include "S3Monitor.h"
+#include "ReceiverMonitor.h"
 
 /**
  * @brief Connect URL routes to the application services, without owning their hardware.
  * All handlers execute in Arduino's loop task when WebServer services a request.
  * The generator supplies its own synchronization for its separate worker. The
- * S3 monitor uses this same loop task, so handlers need no extra monitor lock.
+ * receiver monitor uses this same loop task, so handlers need no extra monitor lock.
  * See WebController.cpp for endpoint setup and accepted-versus-confirmed replies.
  */
 class WebController
@@ -35,7 +35,7 @@ public:
     /**
      * @brief Bind to services owned by the application.
      */
-    WebController(WebServer& webServer, LedBlinker& ledBlinker, DacGenerator& dacGenerator, S3Monitor& s3Monitor);
+    WebController(WebServer& webServer, LedBlinker& ledBlinker, DacGenerator& dacGenerator, ReceiverMonitor& receiverMonitor);
     /**
      * @brief Register page, asset, and API routes before server startup.
      */
@@ -63,9 +63,9 @@ private:
      */
     void startDac();
     /**
-     * @brief Validate an S3 command and queue it for UART acknowledgement.
+     * @brief Validate a receiver command and queue it for UART acknowledgement.
      */
-    void commandS3(const char* action);
+    void commandReceiver(const char* action);
     /**
      * @brief Parse a required finite decimal form parameter without accepting trailing junk.
      */
@@ -75,7 +75,7 @@ private:
     WebServer& _webServer;
     LedBlinker& _ledBlinker;
     DacGenerator& _dacGenerator;
-    S3Monitor& _s3Monitor;
+    ReceiverMonitor& _receiverMonitor;
     // The HTTP reply is sent first; update() checks this flag/time to restart later.
     bool _rebootPending = false;
     unsigned long _rebootRequestedMs = 0;

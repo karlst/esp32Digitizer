@@ -17,7 +17,7 @@
  * @brief Bring up the Feather services and keep them running from Arduino loop().
  *
  * main.cpp owns one webApp. It owns the HTTP server, local DAC generator, legacy
- * LED service, S3 serial monitor, and the controller that connects browser routes
+ * LED service, receiver serial monitor, and the controller that connects browser routes
  * to those services. Browser files live in LittleFS, a separate flash filesystem.
  * Uploading firmware alone does not update those HTML/JavaScript/CSS files.
  */
@@ -29,10 +29,10 @@
  * @brief Connect the application objects without starting hardware during construction.
  *
  * server(80) listens on the standard HTTP port. monitor(Serial1) uses the physical
- * serial connection to S3. controller receives references to these existing objects;
+ * serial connection to receiver. controller receives references to these existing objects;
  * it does not make copies. Declaration order in WebApp.h creates dependencies first.
  */
-WebApp::WebApp() : _webServer(80), _s3Monitor(Serial1), _webController(_webServer, _ledBlinker, _dacGenerator, _s3Monitor)
+WebApp::WebApp() : _webServer(80), _receiverMonitor(Serial1), _webController(_webServer, _ledBlinker, _dacGenerator, _receiverMonitor)
 {
     // Defer hardware initialization until Arduino calls setup.
 }
@@ -40,7 +40,7 @@ WebApp::WebApp() : _webServer(80), _s3Monitor(Serial1), _webController(_webServe
 /**
  * @brief Start hardware services, mount browser files, create Wi-Fi, and open HTTP.
  * @return True if the filesystem mounted and the access point/web server started.
- * This does not prove DAC initialization succeeded or an S3 is connected.
+ * This does not prove DAC initialization succeeded or a receiver is connected.
  *
  * Called once from Arduino setup(). The Feather creates its own Wi-Fi access point
  * named ESP32-Digitizer; it does not join a home router. The UI remains available
@@ -52,7 +52,7 @@ bool WebApp::begin()
     bool retVal = false;
     _ledBlinker.begin();
     _dacGenerator.begin();
-    _s3Monitor.begin();
+    _receiverMonitor.begin();
 
     // LittleFS is the web-file storage in flash. true allows formatting if mounting
     // fails; that can leave an empty filesystem that needs the web files uploaded.
@@ -94,12 +94,12 @@ bool WebApp::begin()
  * main.cpp calls this on every Arduino loop pass. These services share that task,
  * so the monitor and web controller cannot change monitor state simultaneously.
  * The DAC has its own worker and mutex; it does not depend on this loop for ticks.
- * S3 input is drained even if web startup failed. HTTP is served only after success.
+ * receiver input is drained even if web startup failed. HTTP is served only after success.
  */
 void WebApp::update()
 {
-    // Drain S3 telemetry in this task; the independent DAC worker never accesses it.
-    _s3Monitor.update();
+    // Drain receiver telemetry in this task; the independent DAC worker never accesses it.
+    _receiverMonitor.update();
     // Service HTTP only after startup, while always advancing hardware activity.
     if (_serverStarted)
     {

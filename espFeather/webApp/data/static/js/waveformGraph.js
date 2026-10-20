@@ -15,7 +15,7 @@
 // Draw Feather's local output/loopback graph using the browser's canvas API.
 // No synthetic sine is generated here. Each firmware record contains elapsed ms,
 // estimated commanded DAC volts, and measured ADC volts. These are Feather A1/A2
-// measurements, independent of the S3 digitizer acquisition and its sample rate.
+// measurements, independent of the receiver digitizer acquisition and its sample rate.
 
 /**
  * Draw commanded and measured voltage against time within the latest two cycles.

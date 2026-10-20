@@ -132,7 +132,7 @@ It is excluded from the parent terminal build. Build it explicitly with:
 
 Its sources, headers, and browser assets are under `webApp/src`, `webApp/include`,
 and `webApp/data`. Assets require a separate filesystem upload when changed.
-This interface controls the older S3 application; it does not control the P4.
+This interface retains a separate receiver-status contract; it does not control the P4.
 
 ## PC checks after source moves
 

@@ -36,7 +36,7 @@ Node executable. The runner installs nothing and does not silently skip a
 requested browser check if a dependency is missing. Screenshots go under
 `espFeather/.pio/`.
 
-The retired S3 project is no longer required. Firmware builds are separate; see [Building the firmware](../docs/BUILDING.md).
+Firmware builds are separate; see [Building the firmware](../docs/BUILDING.md).
 
 ## Real hardware smoke test
 

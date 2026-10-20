@@ -13,7 +13,7 @@ at boot, and ports can change after USB reconnection.
 |---|---|---|---|
 | `ads127-hardware-smoke` | 30-second two-level DAC signal plus A2 measurements | P4 smoke build; SD recording/readback, 128 MiB reserve | [Hardware smoke instructions](../docs/HARDWARE-SMOKE.md) |
 | `ads127-spi-check` | ADC register communication check; no DAC | No P4 capture | [Feather test guide](../espFeather/test/README.md) |
-| `ads127-capture-control` | Legacy S3, five seconds; DAC off | Legacy S3 receiver | Feather USB commands; not the current P4 pairing |
+| `ads127-capture-control` | Five-second diagnostic; DAC off | No current P4 pairing | Feather USB commands |
 | `ads127-p4-capture-60s` | Internal-short ADC baseline; DAC off | P4 profile build, 60/65 seconds | [PROFILE.md](PROFILE.md); prepare SD, then Feather `6` |
 | `ads127-p4-capture-30min` | Endurance baseline; DAC off | P4 normal SD build, 1800/1805 seconds | [README.md](README.md); prepare SD, then Feather `6` |
 | `ads127-p4-dac-60s` | External CH0, nominal 10 Hz sine | P4 profile build; SD or RAM selected before run | [ANALOG-TEST.md](ANALOG-TEST.md) or [RAM-WAVEFORM.md](RAM-WAVEFORM.md) |

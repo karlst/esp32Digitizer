@@ -85,7 +85,7 @@ BufferedWriter::~BufferedWriter()
  * microseconds. The adapter may open after this call to measure opening time,
  * but must not enable the producer until the file is ready.
  *
- * Called by recordingService (S3) or sdRecorder (P4) when preparing a NEW recording.
+ * Called by SdRecorder when preparing a NEW recording.
  * This only prepares RAM; it does not open a file, start the ADC, or erase a card.
  * Resetting positions makes old bytes irrelevant without clearing the whole array.
  * @param destination Object that implements the actual write/flush operations.
@@ -233,8 +233,7 @@ void BufferedWriter::measure(uint64_t beganUs, uint32_t kind, bool success)
  * An overflow still allows earlier queued good bytes to be drained.
  *
  * THIS IS WHERE WE READ DATA OUT OF THE RING BUFFER.
- * S3 recordingService::run() calls this from its Core 1 disk task; P4
- * sdRecorder::work() calls it from its Core 0 disk task. The adapter determines
+ * SdRecorder::work() calls it from its Core 0 disk task. The adapter determines
  * scheduling; this reusable library does not create tasks or choose a CPU core.
  * Reading here does not mean reading the ADC or loading a file from the SD card.
  * It means giving the oldest queued RAM bytes to the object that writes the file.
@@ -277,8 +276,8 @@ bool BufferedWriter::pump(bool drain)
         const uint64_t began = _clockUs();
 
         // This call reads the ring memory and writes the file. sink is a byteSink
-        // interface; the implementation is sdRecordingSink::write() on S3 or
-        // sdRecorder::write() on P4. Both must finish reading before returning.
+        // interface; the P4 implementation is SdRecorder::write(). It must
+        // finish reading before returning.
         // It can block on storage. Crucially, tail has NOT moved yet.
         const size_t written = _byteSink->write(_buffer + offset, length);
 

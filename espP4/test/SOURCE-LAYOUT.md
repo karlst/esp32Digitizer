@@ -27,9 +27,8 @@ shared test-duration choices remain in `shared/test/support`.
 
 The preserved `espFeather/webApp` is a separate PlatformIO project. Its LED
 service lives with its own source and headers; terminal firmware does not link
-web code. Its old S3 status interface has not been converted into P4 control.
-The S3 firmware project was removed; the Feather driver checks and Arduino/SPI
-substitutes it formerly hosted now live in `espFeather/test`.
+web code. Its receiver-status interface has not been converted into P4 control.
+Feather driver checks and Arduino/SPI substitutes live in `espFeather/test`.
 
 [Data flow](../../docs/DATA-FLOW.md) describes ownership and actual transfer calls.
 [Build instructions](../../docs/BUILDING.md) list ordinary and test builds.

@@ -177,7 +177,7 @@ export function initializeDacControl()
      * Running summaries always use device settings, never the user's unsent fields.
      * Stopped drafts are preserved while preserveDraft is set; running fields reflect
      * the settings reported by firmware. Firmware-supplied limits override page defaults.
-     * Graph data is the Feather's local ADC loopback, not the S3 digitizer stream.
+     * Graph data is the Feather's local ADC loopback, not the receiver digitizer stream.
      */
     function renderState()
     {

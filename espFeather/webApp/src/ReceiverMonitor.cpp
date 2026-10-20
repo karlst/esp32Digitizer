@@ -13,20 +13,20 @@
  */
 
 /**
- * @file S3Monitor.cpp
- * @brief Feather-side serial receiver and command tracker for the S3 board.
+ * @file ReceiverMonitor.cpp
+ * @brief Feather-side serial receiver and command tracker for the receiver board.
  *
  * webApp calls begin() once and update() on each Arduino loop pass. update()
  * assembles serial lines; acceptLine() validates every field before storing it.
  * stateJson() supplies the browser snapshot. sendCommand() sends a request once
- * and leaves it pending until a matching S3 report confirms or rejects it.
+ * and leaves it pending until a matching receiver report confirms or rejects it.
  *
- * A fresh serial message proves only that S3 is communicating. To say samples
+ * A fresh serial message proves only that receiver is communicating. To say samples
  * are arriving we also require its accepted-sample counter to advance recently.
  * A constant input voltage can produce identical values but advancing counts.
  * No full sample recording passes through this monitor.
  */
-#include "S3Monitor.h"
+#include "ReceiverMonitor.h"
 #include <cstring>
 #include <cstdio>
 #include <esp_system.h>
@@ -38,7 +38,7 @@
  * The constructor can run before Arduino startup, so hardware work waits for begin().
  * This object is used only by the loop task, not the DAC worker or an interrupt.
  */
-S3Monitor::S3Monitor(HardwareSerial& hardwareSerial) : _hardwareSerial(hardwareSerial)
+ReceiverMonitor::ReceiverMonitor(HardwareSerial& hardwareSerial) : _hardwareSerial(hardwareSerial)
 {
     // Configuration waits until Arduino setup so its runtime is initialized.
 }
@@ -50,19 +50,20 @@ S3Monitor::S3Monitor(HardwareSerial& hardwareSerial) : _hardwareSerial(hardwareS
  * deliberately avoid the original Feather's incompatible GPIO16/17 assignments.
  * RX is pulled up so a missing cable rests at the UART's idle-high level.
  */
-void S3Monitor::begin()
+void ReceiverMonitor::begin()
 {
     // Buffer bursts while the same loop task is occupied serving an HTTP request.
-    // RX receives S3 pin 17; TX sends commands to S3 pin 18, with common ground.
+    // RX receives status; TX sends commands. The peer must use the documented
+    // receiver web-interface protocol and share ground with Feather.
     _hardwareSerial.setRxBufferSize(4096);
     // Set the idle pull-up before the UART owns the pin's peripheral function.
     pinMode(RX, INPUT_PULLUP);
     _hardwareSerial.begin(115200, SERIAL_8N1, RX, TX);
-    // Randomize the ID sequence per boot to reduce the chance that an old S3
+    // Randomize the ID sequence per boot to reduce the chance that an old receiver
     // reply matches a new request after restart. This is not a uniqueness
     // guarantee. Zero is reserved for 'no command'.
     _commandId = esp_random();
-    Serial.println("S3 monitor: 115200 baud, Feather RX=GPIO7, TX=GPIO8; waiting for S3.");
+    Serial.println("receiver monitor: 115200 baud, Feather RX=GPIO7, TX=GPIO8; waiting for receiver.");
 }
 
 /**
@@ -71,7 +72,7 @@ void S3Monitor::begin()
  * @param value Written only when the entire field is valid.
  * @return True for a nonempty sequence of digits within range.
  */
-bool S3Monitor::readUnsigned(const char* text, uint64_t maximum, uint64_t& value)
+bool ReceiverMonitor::readUnsigned(const char* text, uint64_t maximum, uint64_t& value)
 {
     bool retVal = *text != '\0';
     uint64_t parsed = 0;
@@ -101,7 +102,7 @@ bool S3Monitor::readUnsigned(const char* text, uint64_t maximum, uint64_t& value
 }
 
 /**
- * @brief Validate a complete S3 status report before replacing the displayed state.
+ * @brief Validate a complete receiver status report before replacing the displayed state.
  *
  * Version 5 adds initial file-opening time and free-space measurement quality.
  * Version 4 has the original 24 recording fields; missing additions stay unknown.
@@ -109,13 +110,13 @@ bool S3Monitor::readUnsigned(const char* text, uint64_t maximum, uint64_t& value
  * The whole report must validate before any part becomes visible. Older version-2
  * reports have thirteen fields and remain usable while boards are updated;
  * their missing diagnostics are reported as unknown, not as zero.
- * @param nowMs Feather receipt time; S3 uptime is never compared to the Feather clock.
+ * @param nowMs Feather receipt time; receiver uptime is never compared to the Feather clock.
  * @return True only after a whole frame has passed validation and been committed.
  *
  * Malformed/unsupported traffic cannot refresh 'connected'. Keeping temporary values
  * until all checks pass prevents a partial line from corrupting the displayed state.
  */
-bool S3Monitor::acceptLine(uint32_t nowMs)
+bool ReceiverMonitor::acceptLine(uint32_t nowMs)
 {
     char* fields[45] = {_line};
     size_t fieldCount = 1;
@@ -139,7 +140,7 @@ bool S3Monitor::acceptLine(uint32_t nowMs)
     const bool hasSpaceDetails = fieldCount == 45 && strcmp(fields[1], "5") == 0;
     const bool hasRecording = hasSpaceDetails || (fieldCount == 43 && strcmp(fields[1], "4") == 0);
     const bool hasDiagnostics = hasRecording || (fieldCount == 19 && strcmp(fields[1], "3") == 0);
-    retVal = retVal && strcmp(fields[0], "S3") == 0 &&
+    retVal = retVal && strcmp(fields[0], "RECEIVER") == 0 &&
         (hasDiagnostics || (fieldCount == 13 && strcmp(fields[1], "2") == 0));
     uint64_t parsed[17] = {};
     RecordingStatus recordingStatusNext;
@@ -201,8 +202,8 @@ bool S3Monitor::acceptLine(uint32_t nowMs)
             _observedProgress = true;
         }
         // Commit the complete validated snapshot at once. parsed indexes follow
-        // wire-field order after the S3 tag and version; keep them aligned with
-        // shared/s3StatusProtocol.md when extending the message.
+        // wire-field order after the receiver tag and version; keep them aligned with
+        // shared/receiverStatusProtocol.md when extending the message.
         _uptimeMs = static_cast<uint32_t>(parsed[0]);
         _adcReady = parsed[1] != 0;
         _sampleCount = parsed[2];
@@ -261,10 +262,10 @@ bool S3Monitor::acceptLine(uint32_t nowMs)
  * A command with no matching confirmation after five seconds becomes timeout,
  * unless fresh matching reports say preparation/saving/deletion is still busy;
  * those reports restart the five-second wait in acceptLine().
- * That means its outcome is unknown, not that S3 definitely did nothing. Do not
- * retry automatically: the next status can still show what S3 is actually doing.
+ * That means its outcome is unknown, not that receiver definitely did nothing. Do not
+ * retry automatically: the next status can still show what receiver is actually doing.
  */
-void S3Monitor::update()
+void ReceiverMonitor::update()
 {
     const uint32_t nowMs = millis();
     // Missing acknowledgements become an explicit outcome; never automatically
@@ -310,19 +311,19 @@ void S3Monitor::update()
 }
 
 /**
- * @brief Build a browser reply from the most recent validated S3 report.
+ * @brief Build a browser reply from the most recent validated receiver report.
  * @return JSON text with live measurements, or null measurements after disconnection.
  *
  * A report older than three seconds is disconnected. "receiving" additionally
  * requires running/ready flags, recent count progress, and a recently read sample.
- * S3 sample age is extended by time since Feather received the report; the boards'
+ * receiver sample age is extended by time since Feather received the report; the boards'
  * absolute clocks are never compared. Stale values must not masquerade as live data.
  *
  * All 64-bit totals are decimal strings so JavaScript cannot round away digits.
  * Version-2 reports lack diagnostics and show them as null. Command outcome fields
  * remain available even when live measurements become unknown.
  */
-String S3Monitor::stateJson() const
+String ReceiverMonitor::stateJson() const
 {
     const uint32_t nowMs = millis();
     const uint32_t ageMs = nowMs - _lastFrameMs;
@@ -385,10 +386,10 @@ String S3Monitor::stateJson() const
  * @brief Check that samples-per-second is one of the seven rates offered by this UI.
  * @return True for an exact supported rate, not for every integer below 30000.
  *
- * This matches S3's commandProtocol::rateRegister choices. Neither this test nor
+ * This matches receiver's commandProtocol::rateRegister choices. Neither this test nor
  * the dropdown establishes that acquisition can sustain every offered rate.
  */
-bool S3Monitor::validRate(uint32_t rate)
+bool ReceiverMonitor::validRate(uint32_t rate)
 {
     const uint32_t supported[] = {100, 500, 1000, 2000, 7500, 15000, 30000};
     bool retVal = false;
@@ -400,7 +401,7 @@ bool S3Monitor::validRate(uint32_t rate)
 }
 
 /**
- * @brief Send one validated command to S3 and mark it pending without waiting.
+ * @brief Send one validated command to receiver and mark it pending without waiting.
  * @param action start, stop, reboot, or delete; all other text is rejected.
  * @param rate Samples/second for Start; Stop/Reboot always transmit zero instead.
  * @param record Whether Start must also create a recording; false for other actions.
@@ -409,11 +410,11 @@ bool S3Monitor::validRate(uint32_t rate)
  * False means disconnected, busy, invalid settings/state, or insufficient buffer room.
  *
  * Only the loop task calls this. A successful return is NOT hardware confirmation:
- * acceptLine() later checks the matching request ID, S3 result, and applied state.
+ * acceptLine() later checks the matching request ID, receiver result, and applied state.
  * The five-second timeout is handled in update(); there is no automatic retransmit.
  * An already running acquisition cannot be retuned to a different rate with Start.
  */
-bool S3Monitor::sendCommand(const char* action, uint32_t rate, bool record)
+bool ReceiverMonitor::sendCommand(const char* action, uint32_t rate, bool record)
 {
     const uint32_t nowMs = millis();
     const bool isStart = strcmp(action, "start") == 0;
@@ -437,7 +438,7 @@ bool S3Monitor::sendCommand(const char* action, uint32_t rate, bool record)
         {
             nextId = 1;
         }
-        // Older S3s keep receiving their original command format. Version 3 adds
+        // Older receivers keep receiving their original command format. Version 3 adds
         // the recording flag; version-4 or version-5 status advertises support.
         const String command = "CMD," + String(_recordingMonitor._available ? "3," : "2,") + String(nextId) + "," +
             action + "," + String(isStart ? rate : 0) +

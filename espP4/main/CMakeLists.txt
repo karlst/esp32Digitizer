@@ -11,7 +11,7 @@
 # Public License in the repository LICENSE file or <https://www.gnu.org/licenses/>.
 
 # Compile P4 capture and storage plus the shared byte writer. The reusable writer
-# has no S3 dependency; these include paths expose its interface to sdRecorder.
+# has no receiver dependency; these include paths expose its interface to sdRecorder.
 # Select one small startup file. Application and storage implementations are shared.
 set(startup "src/main.cpp")
 if(CONFIG_P4_HARDWARE_SMOKE OR CONFIG_P4_CAPTURE_PROFILE OR CONFIG_P4_DIAGNOSTICS)

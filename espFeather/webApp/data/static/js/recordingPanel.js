@@ -12,7 +12,7 @@
  * Public License in the repository LICENSE file or <https://www.gnu.org/licenses/>.
  */
 
-// The recording panel displays S3's reported counters and card status.
+// The recording panel displays receiver's reported counters and card status.
 // Feather checks serial messages before forwarding them; this panel does not
 // independently verify the card contents or control the card.
 // UART byte totals arrive as decimal strings; BigInt preserves their exact value.
@@ -20,7 +20,7 @@
 
 /**
  * Format bytes with a readable unit while retaining exact bytes in the main total.
- * value is a decimal-string byte count supplied by S3. BigInt keeps every
+ * value is a decimal-string byte count supplied by receiver. BigInt keeps every
  * integer bit; converting the original total to Number could round large counts.
  * Division here truncates to one decimal place. KiB/MiB/GiB mean powers of 1024,
  * not disk manufacturers' decimal KB/MB/GB. This is display formatting only.
@@ -35,7 +35,7 @@ function byteSize(value)
 
 /**
  * Format a recording-relative duration; no synchronization of board clocks is needed.
- * value is elapsed milliseconds measured on S3, passed as a decimal string.
+ * value is elapsed milliseconds measured on RECEIVER, passed as a decimal string.
  * Drop fractional seconds, split into hours/minutes/seconds, and zero-pad the last
  * two components. Hours can exceed 24; this is a duration, not a time of day.
  */
@@ -47,7 +47,7 @@ function elapsed(value)
 
 /**
  * Attach the recording panel and return a renderer for successful status polls.
- * The main S3 UI module calls this once, then calls the returned render function
+ * The main receiver UI module calls this once, then calls the returned render function
  * with each HTTP status snapshot. The closure retains chart history between calls.
  * No sample payload arrives here: this page receives counters/positions/durations,
  * not the digitizer's 30000 samples per second. This panel does not record samples.
@@ -101,7 +101,7 @@ export function createRecordingPanel()
             });
             ctx.stroke();
         }
-        // S3 timestamps maximum delays when they happen, not when the browser
+        // receiver timestamps maximum delays when they happen, not when the browser
         // receives them. Mark those times explicitly, without inventing a buffer
         // occupancy measurement at the earlier instant.
         if (history.length)
@@ -120,11 +120,11 @@ export function createRecordingPanel()
 
     /**
      * Render one coherent snapshot; clear live claims when either connection fails.
-     * state is the browser's parsed S3 status object. It may be missing or stale if
+     * state is the browser's parsed receiver status object. It may be missing or stale if
      * a link is lost. Hide live values in that case rather than showing zero losses or
      * an empty buffer as if they were measured. The history arrays remain in memory.
      * On valid status, replace labels and geometry, add a changed observation to the
-     * chart, then redraw. A displayed Saved state is S3's report, not a browser guess.
+     * chart, then redraw. A displayed Saved state is receiver's report, not a browser guess.
      */
     return function render(state)
     {
@@ -133,7 +133,7 @@ export function createRecordingPanel()
         const ids = ["state", "file", "card", "bytes", "samples", "rate", "delay", "max-delay", "open-time", "buffer", "pointers", "errors"];
         if (!rec)
         {
-            message.textContent = state?.connected ? "Recording unavailable — S3 update required." : "Recording state unknown — disconnected.";
+            message.textContent = state?.connected ? "Recording unavailable — receiver update required." : "Recording state unknown — disconnected.";
             for (const id of ids) { get(`rec-${id}`).textContent = "—"; }
             get("rec-fill").style.width = "0%";
             get("rec-wrap").style.width = "0%";
@@ -219,7 +219,7 @@ export function createRecordingPanel()
                 history.push({ time, fill, delay: Number(rec.latestDelayUs) / 1000, cardPercent });
                 previousMaxDelay = maximum;
                 // Discard old observations to bound browser memory. The chart cannot recover
-                // all short stalls between reports; S3 separately preserves peak/max values.
+                // all short stalls between reports; receiver separately preserves peak/max values.
                 while (history.length > 240 || (history.length && time - history[0].time > 120000)) { history.shift(); }
                 while (maxima.length > 240 || (maxima.length && time - maxima[0].time > 120000)) { maxima.shift(); }
                 lastKey = key;

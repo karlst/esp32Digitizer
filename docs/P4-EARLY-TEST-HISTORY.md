@@ -36,8 +36,7 @@ SD-only **26 Mbps passed for 60 seconds**: 195,000,000 bytes, ring peak 368,700,
 zero overflow/errors/unsaved bytes, and every generated word verified.
 Write-call throughput was 29.190 Mbps. **32.768 Mbps failed after 7.616 seconds**:
 ring overflow, 31,194,468 accepted bytes saved, zero pattern errors, write-call
-throughput 29.123 Mbps. These results concern the card currently installed;
-do not assume it is the original S3 reference card.
+throughput 29.123 Mbps. These results concern only the card installed for that run.
 
 **SD-v4 passed the combined 60-second ADC-to-SD test:** 61,439,431 samples,
 184,318,293 bytes (exactly three/sample), matching readback CRC f75cf499,
@@ -55,67 +54,8 @@ Earlier power-interrupted attempts failed and do not count toward this result.
 DMA, packing, status checks, SD clock, ring and transfer sizes are unchanged.
 Expected payload is 5,529,600,000 bytes (1,843,200,000 samples), approximately;
 normal capture start/stop limitations still apply. No existing files are deleted.
-The original Feather/S3 environment retains its five-second run duration.
 
 
-
-## October 12: why capture moved from S3 to P4
-
-- The reusable SD backend passed the 26-Mbps, 30-minute synthetic test with space
-  reserved before recording. Reference commit: `f3e098a`; build environment:
-  `sd-reliability-preallocated`. It uses 4 MiB PSRAM buffering, 128 KiB writes,
-  and 10-MHz four-bit SDMMC. This is not an ADC-to-disk integration test.
-- ADS127L18 configuration over Feather SPI works. Short S3 DMA capture tests
-  passed through 256,000 samples/s. Matching status headers do not validate
-  every payload bit, analog accuracy, or exact generated-sample accounting.
-- S3 I2S capture failed at 512,000 and 1,024,000 samples/s (32.768-MHz DCLK).
-  Its required internal clock is at least eight times DCLK: 262.144 MHz here,
-  exceeding the selected 160-MHz clock. Preserve the diagnostic, stop tweaking
-  delays, and replace the capture path. Full ADC output drive did not fix it.
-- Ordinary default firmware still targets the legacy ADS1256/web application.
-  Building it is fine; uploading it to the current ADS127 wiring is not an
-  automatic restoration procedure because pin roles differ.
-
-At that checkpoint S3 source had restored input timing bypass, but its last
-reported upload still contained the failed RX_BCK_IN_DM=1 experiment. The
-rollback had been built, not uploaded. Feather used ads127-capture-control.
-These historical firmware states must not be treated as current installations.
-
-PARLIO supports external-clock reception up to 40 MHz, bit packing, and continuous
-circular DMA. It avoids the S3 I2S clock-ratio limit. We have NOT established
-reliable ADS127L18/translator/P4 operation from specifications alone.
-
-At 32.768 MHz, each half clock period is 15.259 ns. ADC output-valid delay is
-up to 7 ns. Conservatively allowing 4.5 ns difference between translator data
-and clock delays leaves about 3.759 ns setup and 8.759 ns hold, before extra
-wiring/loading effects. No guaranteed P4 PARLIO pin setup/hold specification was
-found. A focused hardware experiment is accepted; a guarantee is not justified.
-An Espressif hardware inquiry was drafted but NOT submitted.
-
-Use a newer ESP-IDF than the current 4.4.7 project. Older PARLIO receive drivers
-had a buffer-tail corruption issue; the revised mounting code is present in
-v5.5.4. Select the final version for the actual P4 chip revision. Porting the
-backend adapter is separate work; retain the reusable buffered writer.
-
-### References retained from the investigation
-
-- [P4 PARLIO driver](https://docs.espressif.com/projects/esp-idf/en/stable/esp32p4/api-reference/peripherals/parlio/parlio_rx.html)
-- [P4 datasheet](https://documentation.espressif.com/esp32-p4_datasheet_en.html)
-- [PARLIO buffer defect](https://github.com/espressif/esp-idf/issues/17581)
-- [S3 I2S limitations](https://docs.espressif.com/projects/esp-idf/en/stable/esp32s3/api-reference/peripherals/i2s.html)
-- [ADS127L18 datasheet](https://www.ti.com/lit/ds/symlink/ads127L18.pdf)
-- [Translator datasheet](https://www.ti.com/lit/ds/symlink/sn74axc8t245.pdf)
-- [TI FPGA reference](https://github.com/TexasInstruments/precision-adc-examples/tree/main/devices/ads127L18/verilog)
-
-### PC and build verification at that checkpoint
-
-All twelve desktop suites passed (`espS3/test/runNativeChecks.ps1`).
-Seven PlatformIO builds passed: Feather `featheresp32`, `ads127-spi-check`,
-`ads127-capture-control`; S3 `esp32-s3-devkitc-1`, `ads127-input-check`,
-`ads127-dma-check`, `sd-reliability-preallocated`.
-No compiler warning/error matches appeared in the captured build logs.
-Git whitespace checks passed. No firmware upload or hardware test was performed.
-Builds and desktop tests do not establish physical capture timing.
 
 ## October 17: endurance evidence and implementation details
 
@@ -164,9 +104,9 @@ retained in this repository. The values above come from his console records.
 
 | Signal | P4 connection | Other end |
 |---|---|---|
-| DCLK | GPIO0 input | Translator A5; formerly S3 GPIO9 |
-| FSYNC | GPIO1 input | Translator A6; formerly S3 GPIO10 |
-| DOUT0 | GPIO2 input | Translator A7; formerly S3 GPIO11 |
+| DCLK | GPIO0 input | Translator A5 |
+| FSYNC | GPIO1 input | Translator A6 |
+| DOUT0 | GPIO2 input | Translator A7 |
 | Command RX | GPIO4 | Feather TX / GPIO8 |
 | Command TX | GPIO5 | Feather RX / GPIO7 |
 | Console UART | GPIO37/38 | Reserved for P4 USB UART |
@@ -179,8 +119,7 @@ driver with an unset initial voltage, before setting operating voltage. It is
 not a voltmeter reading and did not prevent mounting or the successful recording.
 
 Two cards were tried and both were confirmed exFAT. Exact identity of the card
-installed then was not established; do not call it the original S3 card.
-The documented S3 reference card was SanDisk Extreme 64 GB V30 A2.
+installed then was not established.
 
 ### Capture and recording architecture established then
 
@@ -244,7 +183,7 @@ ADC v3 header is 512 bytes, magic `P4ADC03` plus zero at offset 0:
 | 36 | uint32 LE | Payload CRC32 |
 | 40 | uint32 LE | Bytes/sample = 3 |
 | 44 | uint64 LE | Stored sample count |
-| 52–511 | zero | Reserved |
+| 52â€“511 | zero | Reserved |
 
 Payload starts at 512: signed 24-bit little-endian samples. FF FF FF = -1;
 00 00 80 = -8388608. Sign-extend bit 23 when reading. Old P4ADC01 has four-byte
@@ -273,16 +212,11 @@ captures that finalized normally were trimmed and preserved with invalid headers
   4.07 GB; a stop command was unconfirmed. Reinitialization preceded the final run.
 - Final successful run 1844422070 is separate from failed IDs 2253990025 and
   4142401717. The new successful result supersedes pending-validation notes.
-- The original S3 I2S capture path hit a peripheral-clock limitation at high rates;
-  CPU speed alone would not fix that path. P4 PARLIO plus optimized decoding
-  solved reception. Both chips already had DMA and four-bit SD capabilities.
 - SD-only 26 Mbps passed for 60 s (195 MB, every word checked), but 32.768 Mbps
   overflowed at ~7.6 s. Packing three sample bytes solved the combined-run
   storage demand. Do not return to four-byte ADC records without a new reason.
-- Original S3 synthetic preallocated 26 Mbps/30-minute result remains useful
-  history, but it was not ADC-to-SD and may have used a different physical card.
 
-## October 18–19: analog signal and measurement investigation
+## October 18â€“19: analog signal and measurement investigation
 
 | Experiment | Evidence / result | What it establishes |
 |---|---|---|
@@ -345,7 +279,7 @@ matched. The DAC alternates two levels once per second.
 
 - `20261020-093826`: maximum individual-bin disagreement was 44.0 mV (17.8% of
   input swing), failing the original 5% limit. Average low/high values agreed
-  within about 2–5 mV. Short A2 bursts fluctuated much more than disk averages.
+  within about 2â€“5 mV. Short A2 bursts fluctuated much more than disk averages.
 - `20261020-095403`: after switching to separate settled averages for each
   plateau, the worst difference was 20.8 mV (8.2%). This failed 5%, then passed
   when reanalyzed under Karl's approved 10% functional-smoke criterion. That

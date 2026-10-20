@@ -49,7 +49,7 @@ private:
     WebServer _webServer;
     LedBlinker _ledBlinker;
     DacGenerator _dacGenerator;
-    S3Monitor _s3Monitor;
+    ReceiverMonitor _receiverMonitor;
     WebController _webController;
     // Gate HTTP servicing after startup failure; serial monitoring still runs.
     bool _serverStarted = false;

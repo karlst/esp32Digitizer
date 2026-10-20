@@ -16,4 +16,4 @@ See [build instructions](../../docs/BUILDING.md),
 [hardware smoke steps](../../docs/HARDWARE-SMOKE.md),
 [experiment selection](../../espP4/CURRENT-SETUP.md), and
 [retained test history](../../docs/P4-EARLY-TEST-HISTORY.md).
-The S3 firmware was removed; these tests need no S3 directory.
+The receiver firmware was removed; these tests need no receiver directory.

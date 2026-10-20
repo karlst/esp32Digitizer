@@ -14,7 +14,7 @@
 
 /**
  * @file RecordingStatus.h
- * @brief Recording values shared by S3 storage and Feather's status receiver.
+ * @brief Recording values shared by receiver storage and Feather's status receiver.
  * UART version 5 adds opening time and space quality to version 4 recording fields.
  * Positions are byte offsets; totals and times belong to the current/last recording.
  */
@@ -24,7 +24,7 @@
 
 /**
  * @brief One consistent snapshot of the card, file writer and sample ring buffer.
- * Only S3 measures these values. Feather must never invent zero for unavailable
+ * Only receiver measures these values. Feather must never invent zero for unavailable
  * firmware or a disconnected board. bytesWritten counts successful file writes,
  * including headers; samplesWritten counts only complete sample payloads.
  */
@@ -90,7 +90,7 @@ struct RecordingStatus
      *
      * Feather calls this on a temporary parsed frame BEFORE accepting its values.
      * It rejects impossible states and buffer geometry; it does not confirm that the
-     * card is physically present or that S3's counters are truthful measurements.
+     * card is physically present or that receiver's counters are truthful measurements.
      * The % 4 rules belong to today's four-byte sample format. A future packed format
      * must deliberately update both boards' validation rather than silently fail.
      * Full and empty rings may both have equal read/write offsets; usedBytes tells

@@ -26,10 +26,10 @@
  * for percentages. File paths are generated from numeric IDs, not UART text.
  *
  * Called when Feather builds the HTTP status response for the browser.
- * connected says whether recent valid S3 reports are arriving; available says
+ * connected says whether recent valid receiver reports are arriving; available says
  * whether those reports use a protocol version that includes recording fields.
  * Both must be true. Returning JSON null otherwise prevents old stored numbers
- * from being displayed as live recording state. This function never asks S3 to
+ * from being displayed as live recording state. This function never asks receiver to
  * start/stop recording and never reads the card.
  * JSON is the named-field text format sent to JavaScript. Even small fields are
  * quoted strings for a consistent schema. JavaScript Number cannot represent all

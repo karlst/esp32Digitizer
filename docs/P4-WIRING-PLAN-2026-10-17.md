@@ -9,7 +9,7 @@ compiled or uploaded. P4 currently runs Hello World. See
 
 Waveshare ESP32-P4-Module-DEV-KIT, chip revision 1.3. ESP-IDF 5.5.6.
 Feather ESP32 V2 continues configuring the ADS127L18 through the existing
-voltage translators. P4 replaces the S3 as the sample receiver. The first test
+voltage translators. P4 receives the samples. The first test
 captures into memory only; it does not write to SD. C6 wireless is not needed.
 
 ## Confirmed signal assignments
@@ -18,36 +18,33 @@ Numbers below are GPIO labels, NOT physical header positions. Identify the
 printed board labels before connecting. The existing ADC wiring comes from
 shared/ads127Pins.h; the Feather link comes from the two capture test sources.
 
-| Signal | Former S3 endpoint | Current P4 endpoint |
-|---|---|---|
-| ADC DCLK through translator A5: incoming data clock | GPIO9 | GPIO0, input |
-| ADC FSYNC through translator A6: sample frame marker | GPIO10 | GPIO1, input |
-| ADC DOUT0 through translator A7: sample data | GPIO11 | GPIO2, input |
-| Feather TX / GPIO8: commands to receiver | GPIO18 | GPIO4, UART receive |
-| Feather RX / GPIO7: replies from receiver | GPIO17 | GPIO5, UART transmit |
-| Shared signal ground | Existing common GND | P4 header GND |
+| Signal | P4 endpoint |
+|---|---|
+| ADC DCLK through translator A5: incoming data clock | GPIO0, input |
+| ADC FSYNC through translator A6: sample frame marker | GPIO1, input |
+| ADC DOUT0 through translator A7: sample data | GPIO2, input |
+| Feather TX / GPIO8: commands to receiver | GPIO4, UART receive |
+| Feather RX / GPIO7: replies from receiver | GPIO5, UART transmit |
+| Shared signal ground | P4 header GND |
 
 Keep GPIO37/38 reserved for the P4 USB-to-UART console. GPIO0/1/2/4/5 are
 exposed on the carrier header; the reviewed carrier schematic does not attach
 these five nets to its Ethernet, audio or SD devices. The installed PARLIO driver
-routes external clock and data inputs through the GPIO matrix, so we need not
-reuse the S3 pin numbers. Check actual board markings against the manufacturer
+routes external clock and data inputs through the GPIO matrix. Check actual board markings against the manufacturer
 pinout; do not use Raspberry Pi header assumptions.
 
 The translator A side is the existing 3.3 V side. Keep the ADC's 1.8 V side and
 Feather-to-ADC configuration wiring intact. P4 capture GPIOs must remain inputs;
-they must not drive the ADC signals. The S3 ends have been moved;
-do not leave extra branches to the old receiver. Keep sample-clock/data
+they must not drive the ADC signals. Do not leave unused signal branches. Keep sample-clock/data
 wires short with a nearby ground return.
 
 ## Confirmed power arrangement
 
-The old Feather USB-pin-to-S3 5 V jumper has been removed. Feather and P4 use
+Feather and P4 use
 separate USB power/data cables; their 5 V and 3.3 V rails are not joined.
 Translator VDDA now comes from Feather 3.3 V; VDDB comes from the ADC assembly.
 A separate 6 V supply powers the ADC assembly. Common signal ground remains
-connected and has been checked for continuity. Feather alone was verified to
-have 5 V while the disconnected S3 remained unpowered. P4 was identified on
+connected and has been checked for continuity. P4 was identified on
 COM3 and Feather on COM4; recheck after changing USB ports.
 
 Avoid driving signals into an unpowered board. Perform rewiring with all USB
@@ -80,5 +77,5 @@ configuration. Header matches alone do not prove every payload bit is correct.
 - [Waveshare board and header pinout](https://docs.waveshare.com/ESP32-P4-Module-DEV-KIT)
 - [Waveshare schematic](https://files.waveshare.com/wiki/ESP32-P4-Module-DEV-KIT/ESP32-P4-Module-DEV-KIT.pdf)
 - Existing project: shared/ads127Pins.h, espFeather/test/hardware/ads127CaptureControl.cpp,
-  espS3/test/hardware/ads127CaptureDiagnostic.cpp, docs/P4-EARLY-TEST-HISTORY.md.
+  espP4/main/src/RecordingApplication.cpp, docs/P4-EARLY-TEST-HISTORY.md.
 - Installed ESP-IDF: components/esp_driver_parlio/src/parlio_rx.c (GPIO routing).
