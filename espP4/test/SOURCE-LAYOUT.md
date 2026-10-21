@@ -8,6 +8,9 @@ or ADC configuration sequence.
 | --- | --- | --- |
 | Ordinary startup | `main/src/main.cpp` | `src/main.cpp` |
 | Real application | `main/src/RecordingApplication.cpp` | `src/AcquisitionApplication.cpp` |
+| Console/Feather controller | `main/src/RecordingController.cpp` | Part of `AcquisitionApplication` |
+| Receive and decoding tasks | `AdcReceiver`, `SampleDecoder` | ADC control remains on Feather |
+| Terminal reporting | `ConsoleRecordingReporter` through `RecordingReporter` | Part of `AcquisitionApplication` |
 | Application headers | `main/include` | `include` |
 | Test startup | `test/hardware/main.cpp` | `test/hardware/ads127CaptureControl.cpp` |
 | Test services | `RecordingHarness`, `RamCaptureDestination`, `SdWriteTest`, `SdSmokeSummary` | `BenchAcquisitionServices`, `BenchDac`, `InputSnapshot` |
@@ -19,11 +22,16 @@ layout and readback interfaces allow test-specific verification without includin
 test classes in the recorder. `CONFIG_P4_DIAGNOSTICS` enables manual RAM and SD
 speed tests in a separate configured build; smoke/profile already include them.
 
+`RecordingHarness` implements separate command and observation interfaces.
+`RecordingObserver` has no command methods. `espP4/lib/bufferedWriter` owns
+the ring implementation and independent writer tests. See
+[Recording classes](../../docs/RECORDING-CLASSES.md) for the control/data split.
+
 Feather environment `recording` selects ordinary startup and the external ADC
 input. The existing named test environments select their own startup and inject
 test services. The reusable ADC configuration and SPI driver live in `src/adc`
-and `include/adc`. `shared/BenchLine.h` assembles protocol lines for both boards;
-shared test-duration choices remain in `shared/test/support`.
+and `include/adc`. `common/BenchLine.h` assembles protocol lines for both boards;
+shared test-duration choices remain in `common/test/support`.
 
 The preserved `espFeather/webApp` is a separate PlatformIO project. Its LED
 service lives with its own source and headers; terminal firmware does not link

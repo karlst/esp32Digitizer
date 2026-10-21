@@ -81,7 +81,7 @@ void LedBlinker::setEnabled(bool enabled)
  * @brief Return whether blinking was requested, not the current light level.
  * @return True throughout a blinking run, including its half-second off periods.
  */
-bool LedBlinker::isEnabled() const
+bool LedBlinker::getEnabled() const
 {
     // Expose the commanded state to the controller.
     const bool retVal = _blinkEnabled;

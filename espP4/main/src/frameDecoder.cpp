@@ -26,7 +26,7 @@
  * separate frame-start wire) and DMA has moved them into RAM. Each byte holds
  * four clock instants, earliest in bits 1:0. We do not read GPIO pins here.
  * Only a captured FSYNC transition from 0 to 1 starts a frame. A continuing 1
- * does not start more frames. At stage 6 FSYNC is high for the first 16 clocks,
+ * does not start more frames. At 1,024,000 samples/s FSYNC is high for the first 16 clocks,
  * low for the next 16; falling halfway through does NOT end the sample.
  * DOUT0's first 8 bits are status, the next 24 the signed measurement value.
  * Thus 8 raw bytes reconstruct one 32-bit word; sdRecorder later retains only
@@ -213,7 +213,7 @@ void FrameDecoder::feed(const uint8_t* data, size_t length)
  * Used by both grouped and bitwise paths. An early next frame still records
  * both period and short-word errors before discarding that incomplete word.
  * position counts captured DCLK instants since reset, not CPU cycles or bytes.
- * frameClocks is 32 at stage 6, larger in slower configurations. Checking this
+ * frameClocks is 32 at 1,024,000 samples/s, larger in slower configurations. Checking this
  * spacing detects some missing/extra clocks but cannot prove none were lost.
  */
 void FrameDecoder::beginFrame(uint64_t position)
@@ -360,7 +360,7 @@ void FrameDecoder::flushOutput()
  * @brief True if a batch was refused since reset(); later batches are then withheld.
  * Call on the decoder task or after it has finished all queued blocks.
  */
-bool FrameDecoder::outputFailed() const
+bool FrameDecoder::getOutputFailed() const
 {
     return _outputBroken;
 }
@@ -369,13 +369,13 @@ bool FrameDecoder::outputFailed() const
  * @brief Borrow the counters without copying them; decoding can change them.
  * Core 0 must wait for all queued decoding to finish before reading this reference.
  */
-const CaptureStats& FrameDecoder::stats() const
+const CaptureStats& FrameDecoder::getCaptureStats() const
 {
     return _captureStats;
 }
 
 /** @brief Return unfinished word bits at the captured tail, or zero if complete. */
-uint32_t FrameDecoder::pendingBits() const
+uint32_t FrameDecoder::getPendingBits() const
 {
     return _synchronized && _bits < 32 ? _bits : 0;
 }

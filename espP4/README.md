@@ -83,7 +83,7 @@ In ordinary PowerShell, build the explicitly named Feather environment:
 
 The original `ads127-capture-control` environment retains a five-second diagnostic duration.
 Only the new environment selects `ADS127_P4_ENDURANCE=1`. The P4 CMake component
-selects the same option; `shared/test/support/ads127BenchTiming.h` supplies both durations.
+selects the same option; `common/test/support/ads127BenchTiming.h` supplies both durations.
 The SD change adds output batching to the decoder, so rerun its PC tests first.
 
 In **ESP-IDF PowerShell**, using the installed IDF 5.5.6:
@@ -128,35 +128,36 @@ the wrong settings, use `idf.py -B build/recording -D SDKCONFIG=sdkconfig.sd men
 
    Keep the P4 monitor open. Feather help (`h`) must say **1800 seconds each**
    and a matching receiver deadline of **1805 seconds**. Neither monitor starts
-   conversions. ARM2 does not negotiate duration, so verify both banners:
+   conversions. ARM3 does not negotiate duration, so verify both banners:
    an older build may stop at five or sixty seconds instead.
-5. With an exFAT card inserted and capture idle, type **p in the P4 monitor**.
-   Wait for **SD READY**. Preparation reserves exactly 10,000,000,000 bytes
-   in a new uniquely named file. No format or deletion is attempted on failure.
-   No card reformatting is required for exFAT. Then type **6 in the Feather
-   monitor** for the 30-minute SD run at 1,024,000 samples/s. After capture,
+5. With an exFAT card inserted and capture idle, type **g in the Feather monitor**
+   for the 30-minute SD run at 1,024,000 samples/s. P4 prepares storage automatically,
+   reserving exactly 10,000,000,000 bytes in a new uniquely named file. No format
+   or deletion is attempted on failure. `SD READY` confirms file preparation;
+   `READY3` permits Feather to start the ADC after receiver setup. After capture,
    wait for file verification and SD SAVED/FAILED; readback adds several minutes.
    Verification progress prints every 256 MiB. Closing releases unused reservation.
 6. Inspect both consoles before advancing. Feather `s` requests an early stop.
-   Each later stage is a separate manual request; there is no automatic sweep.
+   Each alternative rate is a separate manual request; there is no automatic sweep.
 
-| Feather key | Stage | Samples/second | DCLK | Clocks per sample |
-|---|---:|---:|---:|---:|
-| g | 0 | 16,000 | 4.096 MHz | 256 |
-| 1 | 1 | 32,000 | 4.096 MHz | 128 |
-| 2 | 2 | 64,000 | 4.096 MHz | 64 |
-| 3 | 3 | 128,000 | 8.192 MHz | 64 |
-| 4 | 4 | 256,000 | 16.384 MHz | 64 |
-| 5 | 5 | 512,000 | 32.768 MHz | 64 |
-| 6 | 6 | 1,024,000 | 32.768 MHz | 32 |
+| Feather key | Samples/second | DCLK | Clocks per sample |
+|---|---:|---:|---:|
+| 0 | 16,000 | 4.096 MHz | 256 |
+| 1 | 32,000 | 4.096 MHz | 128 |
+| 2 | 64,000 | 4.096 MHz | 64 |
+| 3 | 128,000 | 8.192 MHz | 64 |
+| 4 | 256,000 | 16.384 MHz | 64 |
+| 5 | 512,000 | 32.768 MHz | 64 |
+| g (or 6) | 1,024,000 | 32.768 MHz | 32 |
 
 Feather controls ADC configuration and start/stop over its existing SPI link.
 The P4 receives samples directly from the ADC translator, not from Feather UART.
-Feather and P4 coordinate capture using ARM2/READY2/STOP/DONE messages.
+Feather and P4 coordinate capture using ARM3/READY3/STOP/DONE messages.
 After each run, wait for **SD SAVED** or **SD FAILED** before another preparation.
-Each new run requires **p**, then **SD READY**, then a Feather rate key. A Feather
-ARM without a prepared file is refused before ADC start. Do not remove the card
-while preparing, recording or verifying. Preparation does not start conversions.
+Each new run needs only a Feather rate key. P4 allows 180 seconds for preparation;
+Feather waits 185 seconds for readiness. No ADC conversions begin during preparation,
+and that time does not count toward the run duration. There is no `p` command.
+Do not remove the card while preparing, recording or verifying.
 
 ## SD data and result meaning
 
@@ -168,15 +169,15 @@ A result from one card does not establish another card's performance.
 After the PC checks, build and upload the P4 as above. Leave Feather/ADC stopped;
 no Feather commands are needed. In **P4 COM3**, use these steps separately:
 
-1. Type `p`; wait for the exact `SD READY` message.
-2. Type `t` for 60 seconds at **26 Mbps** (3,250,000 bytes/s).
-3. Wait for source COMPLETE/FAILED, then SD SAVED/FAILED and patternErrors.
-4. Only after reviewing that result, `p` again, wait for SD READY, then `u`
-   tests **32.768 Mbps** (4,096,000 bytes/s) for 60 seconds.
+1. Type `t` to prepare storage and then generate 60 seconds at **26 Mbps**
+   (3,250,000 bytes/s). The timed source begins only after SD readiness.
+2. Wait for source COMPLETE/FAILED, then SD SAVED/FAILED and patternErrors.
+3. Only after reviewing that result, type `u` to prepare a new file and test
+   **32.768 Mbps** (4,096,000 bytes/s) for 60 seconds.
 
 The console key `s` requests an early synthetic-test stop, which is a failed
 full-duration test. Feather `s` is a separate ADC command. Starts are refused
-without a prepared file or while recording/finalizing. Tests do not run at boot.
+while preparing, recording or finalizing. Tests do not run at boot.
 
 CPU1 generates known words in batches of up to 512 and submits through the same
 ring/CRC path as capture. The CPU0 writer retains its 128 KiB blocks, 16 KiB
@@ -191,7 +192,7 @@ This tolerance is scheduling allowance, not a precise hardware clock measurement
 Require source COMPLETE, SD SAVED, zero overflow/storage errors, exact expected
 payload count and zero patternErrors. Readback checks every stored word against
 its expected index as well as the CRC. Synthetic files use final magic `P4SYN01`
-and stage 0xffffffff, with the same header layout; the rate field is generated
+and a zeroed reserved field at offset 20, with the same header layout; the rate field is generated
 words/s. They contain no ADC samples. A source COMPLETE alone does not prove saving.
 
 writeCallMbps measures bytes divided by time inside the write adapter, including
@@ -235,8 +236,8 @@ idf.py -B build/recording -D SDKCONFIG=sdkconfig.sd reconfigure build
 ```
 
 Look for `P4 FatFs: exFAT enabled` during configuration. Build success is not
-a card test: after upload, prepare the existing exFAT card with `p`, require
-`SD READY`, and only then perform the capture/readback check. No
+a card test: after upload, request a recording and check automatic preparation,
+capture and readback. No
 automatic format, deletion or replacement of an existing file is introduced.
 
 ### Recording pipeline
@@ -258,9 +259,9 @@ The same-mounted-card readback is not a power-cycle test.
 Files use unique `P4xxxxxx.BIN` names. The first 512 bytes contain an initial invalid
 header, updated after verification. New ADC files contain `P4ADC03` plus a zero
 byte at offset 0. Offsets 8, 12, 16, 20 and 24 are little-endian uint32 fields:
-version (3), valid (0/1), run ID, stage, requested samples/s. Offset 28 is a
+version (3), valid (0/1), run ID, reserved zero, requested samples/s. Offset 28 is a
 uint64 payload byte count; offset 36 is uint32 payload CRC32; offset 40 is
-uint32 record width (3); offset 44 is uint64 stored sample count. Bytes 52–511
+uint32 record width (3); offset 44 is uint64 stored sample count. Bytes 52â€“511
 are zero. Each payload sample is signed 24-bit
 little endian: decoded `0x08123456` becomes `56 34 12`, `0x08ffffff` becomes
 `FF FF FF` (-1), and `0x08800000` becomes `00 00 80` (-8388608). Readers must
@@ -352,10 +353,11 @@ They use a separate 60-second build and are disabled by default; the normal
 30-minute build does not compile the profiler.
 
 The source now includes a tutorial reading path: start with the overview in
-`main/src/main.cpp`, then `receiveBlock()`, `decodeTask()`,
-`frameDecoder::feed()/finishWord()`, and
-`sdRecorder::submitSamples()/write()/finishFile()`. The shared ring implementation
-is `../shared/bufferedWriter/src/BufferedWriter.cpp`; its comments cover
+`main/src/main.cpp`, then `RecordingController`, `RecordingApplication`,
+`AdcReceiver::receiveBlock()`, `SampleDecoder::decode()`,
+`FrameDecoder::feed()/finishWord()`, and
+`SdRecorder::submitSamples()/write()/finishFile()`. The ring implementation
+is `lib/bufferedWriter/src/BufferedWriter.cpp`; its comments cover
 the P4 caller and reusable writer contract.
 
 ### Hardware capture versus software work
@@ -479,12 +481,19 @@ and longer-duration testing are required before production claims.
 
 ## Reading path and references
 
-- `main/src/main.cpp`: UART handshake, memory ownership, timeout and reporting.
+- `main/src/main.cpp`: construct services and repeatedly service controller/application.
+- `main/src/RecordingController.cpp`: console commands and Feather handshake.
+- `main/src/RecordingApplication.cpp`: preparation, start/stop and timeout supervision.
+- `main/src/AdcReceiver.cpp`: hardware setup, interrupt copy and raw block ownership.
+- `main/src/SampleDecoder.cpp`: Core 1 decoding task and destination submission.
+- `main/include/RecordingReporter.h`: reporting interface.
+- `main/src/ConsoleRecordingReporter.cpp`: terminal output for capture and storage.
+- [Class design](../docs/RECORDING-CLASSES.md): responsibilities and replacement controller boundary.
 - `main/include/FrameDecoder.h` / `main/src/FrameDecoder.cpp`: unpacking, FSYNC alignment and header checks.
 - `test/decoderChecks.cpp`: desktop checks and explicit payload-check limitation.
-- `../shared/Ads127BenchRate.h`: rate table shared with unchanged Feather code.
+- `../common/Ads127Config.h`: complete ADC configurations and the named default, shared by both boards.
 - [TI ADS127L18 datasheet](https://www.ti.com/lit/ds/symlink/ads127L18.pdf),
-  sections 7.4.10.3–7.4.10.6: header bits, FSYNC, rising-edge data capture.
+  sections 7.4.10.3â€“7.4.10.6: header bits, FSYNC, rising-edge data capture.
 - Installed IDF 5.5.6 `components/esp_driver_parlio/src/parlio_rx.c` and
   `components/hal/include/hal/parlio_types.h`: DMA behavior and pair packing.
 
@@ -494,7 +503,7 @@ These are the original firmware results, before timing-v2. Every run used the
 ADC internal-short input. The clean runs reported ADC status 0x00 after stop.
 
 | Stage | Requested samples/s | Received words | Observed samples/s | Queue peak | Result |
-|---|---:|---:|---:|---:|---|
+|---|---:|---:|---:|---|
 | 0 | 16,000 | 79,934 | 16,000.3 | 1/16 | All reported errors zero |
 | 1 | 32,000 | 159,995 | 32,000.6 | 1/16 | All reported errors zero |
 | 2 | 64,000 | 319,991 | 64,001.2 | 1/16 | All reported errors zero |

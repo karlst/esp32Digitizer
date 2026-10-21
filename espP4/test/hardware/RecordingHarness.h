@@ -17,6 +17,7 @@
  */
 #pragma once
 #include "RecordingObserver.h"
+#include "RecordingConsoleCommands.h"
 #include "RamCaptureDestination.h"
 #include "SdWriteTest.h"
 #include "DecoderTiming.h"
@@ -24,13 +25,14 @@
 #if CONFIG_P4_CAPTURE_PROFILE
 #include "CaptureProfile.h"
 #endif
+
 /**
  * @brief Supply test commands, RAM summaries and optional runtime measurements.
  * Core 0 calls command/start/stop; Core 1 updates decoder timings during capture.
  * The application drains Core 1 before calling stopped, so reporting has no race.
  * Production startup never includes this class or allocates its test buffers/tasks.
  */
-class RecordingHarness : public RecordingObserver
+class RecordingHarness : public RecordingObserver, public RecordingConsoleCommands
 {
 public:
     explicit RecordingHarness(SdRecorder& sdRecorder);

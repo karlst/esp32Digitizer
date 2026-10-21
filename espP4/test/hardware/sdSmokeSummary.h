@@ -34,9 +34,9 @@ class SdSmokeSummary : public RecordingReadback
 public:
     void reset(uint32_t samplesPerSecond);
     void accept(const uint8_t* data, size_t bytes);
-    bool complete() const;
-    double mean(unsigned index) const;
-    uint64_t sampleCount() const;
+    bool getComplete() const;
+    double getMean(unsigned index) const;
+    uint64_t getSampleCount() const;
     void report(uint32_t run, bool storageClean) const;
 private:
     int64_t _sums[300] = {};

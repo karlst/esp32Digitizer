@@ -24,7 +24,6 @@
 namespace sdTestData
 {
 constexpr uint64_t durationUs = 60000000;
-constexpr uint32_t stage = 0xffffffffU;
 
 /** @brief Number of four-byte words due by elapsed microseconds, capped at 60 s.
  * Integer arithmetic avoids accumulated rounding from individual task sleeps.
@@ -41,6 +40,7 @@ inline uint32_t word(uint32_t index)
 {
     return (index * 1664525U + 1013904223U) ^ 0xa57c391eU;
 }
+
 /**
  * @brief Check card-read bytes against the generated test pattern; return mismatches.
  * firstWord is the absolute four-byte word index at the start of this block.
@@ -62,13 +62,14 @@ inline uint64_t checkBlock(const uint8_t* data, size_t bytes, uint64_t firstWord
     if (bytes % 4 != 0) { ++retVal; }
     return retVal;
 }
+
 /**
  * @brief Write the original 512-byte synthetic-test header into caller-owned RAM.
  * Byte count excludes the header; these 60-second tests fit in 32 bits. valid is
  * the caller's verdict, not a check performed here. Integer encoders are shared
  * with the real ADC file format; the payload layout and magic remain test-only.
  */
-inline void makeHeader(uint8_t* output, bool valid, uint32_t run, uint32_t stageId,
+inline void makeHeader(uint8_t* output, bool valid, uint32_t run,
                        uint32_t rate, uint64_t bytes, uint32_t crc)
 {
     std::memset(output, 0, recordingFormat::headerBytes);
@@ -76,7 +77,7 @@ inline void makeHeader(uint8_t* output, bool valid, uint32_t run, uint32_t stage
     recordingFormat::store32(output + 8, 1);
     recordingFormat::store32(output + 12, valid ? 1 : 0);
     recordingFormat::store32(output + 16, run);
-    recordingFormat::store32(output + 20, stageId);
+    recordingFormat::store32(output + 20, 0); // Reserved, matching the normal recording header.
     recordingFormat::store32(output + 24, rate);
     recordingFormat::store32(output + 28, static_cast<uint32_t>(bytes));
     recordingFormat::store32(output + 32, crc);

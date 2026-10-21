@@ -17,6 +17,7 @@
  */
 #pragma once
 #include <cstdint>
+
 /** @brief One physical A2 measurement; time is microseconds after sampling begins. */
 struct LoopbackPoint
 {

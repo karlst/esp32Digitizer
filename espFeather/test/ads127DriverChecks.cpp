@@ -26,7 +26,7 @@
 #include "Ads127L18.h"
 #include "Ads127LowRate.h"
 #include "BenchLine.h"
-#include "Ads127BenchRate.h"
+#include "Ads127Config.h"
 
 // Existing Arduino fakes use these globals to observe pin levels and elapsed time.
 uint32_t testMs = 0, testUs = 0;
@@ -179,15 +179,15 @@ int main()
     assert(ads127LowRate.configure());
     assert(startCommands == 0 && stopCommands == 2);
     assert(statusWrites == 1 && registers[2] == 0);
-    assert(registers[9] == 6 && registers[0x0c] == 0x60);
+    assert(registers[9] == 6 && registers[0x0c] == 0x00);
 
     // TI CLK_CFG bit 3 is the external-clock selector. Zero silently chooses
-    // the internal 25.6-MHz oscillator, invalidating the intended 16-kHz rate.
+    // the internal 25.6-MHz oscillator, invalidating the intended 1,024,000-sample/s rate.
     assert(registers[0x0d] == 0x08);
     assert(registers[0x0b] == 0x70 && registers[0x11] == 0x20);
     for (unsigned channel = 0; channel < 8; ++channel)
     {
-        assert(registers[0x12 + channel * 8] == (channel == 0 ? 0x10 : 0x30));
+        assert(registers[0x12 + channel * 8] == (channel == 0 ? 0x09 : 0x29));
     }
     assert(ads127LowRate.start() && startCommands == 1);
     assert(ads127LowRate.stop() && stopCommands == 3);
@@ -222,28 +222,36 @@ int main()
     assert(registers[2] == 0x04 && statusWrites == priorClears);
     assert(startCommands == priorStarts);
 
-    // Check every timing stage against clock arithmetic, not just matching bytes.
+    // Check every supported configuration against clock arithmetic, not just matching bytes.
     registers[2] = 0;
-    for (unsigned stage = 0; stage < ads127BenchRateCount; ++stage)
+    assert(adsConfig._samplesPerSecond == 1024000);
+    assert(getAds127Config(6) == nullptr && getAds127Config(12345) == nullptr);
+    for (const Ads127Config& ads127Config : ads127Configs)
     {
-        const Ads127BenchRate& ads127BenchRate = ads127BenchRates[stage];
-        assert(ads127BenchRate._samplesPerSecond == 16384000u / ads127BenchRate._osr);
-        const unsigned divider = 1u << (ads127BenchRate._clockDividerCode >> 5);
-        assert(32768000u / divider == ads127BenchRate._samplesPerSecond * ads127BenchRate._slots * 32);
-        assert(ads127LowRate.configure(stage));
+        assert(getAds127Config(ads127Config._samplesPerSecond)->matches(ads127Config));
+        assert(isSupportedAds127Config(ads127Config));
+        assert(ads127Config._samplesPerSecond == 16384000u / ads127Config._osr);
+        const unsigned divider = 1u << (ads127Config._clockDividerCode >> 5);
+        assert(32768000u / divider == ads127Config._samplesPerSecond * ads127Config._slots * 32);
+        assert(ads127LowRate.configure(ads127Config));
 
-        // Every stage keeps 24-bit output and full drive strength. This checks
+        // Every configuration keeps 24-bit output and full drive strength. This checks
         // the configuration command, not physical signal quality on the wires.
         assert(registers[0x0a] == 0x00);
-        assert(registers[0x0c] == ads127BenchRate._clockDividerCode);
+        assert(registers[0x0c] == ads127Config._clockDividerCode);
         for (unsigned channel = 0; channel < 8; ++channel)
         {
-            assert(registers[0x12 + 8 * channel] == (ads127BenchRate._filterCode | (channel ? 0x20 : 0)));
+            assert(registers[0x12 + 8 * channel] == (ads127Config._filterCode | (channel ? 0x20 : 0)));
         }
     }
-    const unsigned beforeInvalidStage = transferCount;
-    assert(!ads127LowRate.configure(ads127BenchRateCount) && !ads127LowRate.start());
-    assert(transferCount == beforeInvalidStage);
+    const unsigned beforeInvalidConfig = transferCount;
+    Ads127Config adsConfigInvalid = adsConfig;
+    adsConfigInvalid._slots = 2; // Known rate with inconsistent transfer timing.
+    assert(!ads127LowRate.configure(adsConfigInvalid) && !ads127LowRate.start());
+    adsConfigInvalid = adsConfig;
+    adsConfigInvalid._samplesPerSecond = 12345;
+    assert(!ads127LowRate.configure(adsConfigInvalid) && !ads127LowRate.start());
+    assert(transferCount == beforeInvalidConfig);
 
     // Oversized UART lines must be dropped, never interpreted as a valid suffix.
     BenchLine benchLine;
@@ -253,7 +261,7 @@ int main()
     }
     assert(!benchLine.feed('\n'));
     assert(!benchLine.feed('h') && benchLine.feed('\n'));
-    assert(benchLine.value()[0] == 'h' && benchLine.value()[1] == '\0');
+    assert(benchLine.getValue()[0] == 'h' && benchLine.getValue()[1] == '\0');
 
     // A disconnected bus can return either extreme; the driver must not invent ID.
     registers[0] = 0;

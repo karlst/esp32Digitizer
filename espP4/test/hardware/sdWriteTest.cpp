@@ -17,13 +17,14 @@
  * start() chooses a rate; work() computes how many words should exist by each
  * elapsed time. Falling too far behind fails the test instead of quietly
  * reducing the rate. A task notification is an OS signal that wakes the
- * otherwise sleeping generator. The prepared
- * recorder is exclusively claimed before that notification; ADC ARM then fails.
+ * otherwise sleeping generator. start() reserves use of the recorder and
+ * requests file preparation before waking the task; conflicting ADC starts fail.
  */
 #include "SdWriteTest.h"
 #include "sdTestData.h"
 #include "esp_timer.h"
 #include "esp_random.h"
+#include "RecordingTiming.h"
 #include <cstdio>
 
 /** @brief Install the CPU1 generator once; creation does not start a test.
@@ -39,7 +40,8 @@ bool SdWriteTest::initialize(SdRecorder& recorder)
 /**
  * @brief Core 0 starts a generated-data test at one of two supported word rates.
  * wordsPerSecond must be 812500 or 1024000; each word is four bytes. Return
- * true only when an unused prepared file was claimed and the task was signaled.
+ * true only when preparation was accepted and the task was signaled.
+ * The task waits for readiness before starting its 60-second source timer.
  * This does not mean the test or card writes have completed successfully.
  */
 bool SdWriteTest::start(uint32_t wordsPerSecond)
@@ -47,7 +49,7 @@ bool SdWriteTest::start(uint32_t wordsPerSecond)
     bool retVal = !_busy.load() && (wordsPerSecond == 812500 || wordsPerSecond == 1024000);
     if (retVal)
     {
-        retVal = _sdRecorder->claim(esp_random() | 1U, sdTestData::stage, wordsPerSecond, &_syntheticRecordingLayout);
+        retVal = _sdRecorder->prepare(esp_random() | 1U, wordsPerSecond, &_syntheticRecordingLayout);
     }
     if (retVal)
     {
@@ -88,53 +90,71 @@ void SdWriteTest::work()
         // Sleep until start() signals us. pdTRUE clears accumulated wakeups;
         // portMAX_DELAY waits indefinitely without consuming CPU in a poll loop.
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-        // Integer formatting avoids the floating-point formatter's startup
-        // allocation and deeper call stack. This is outside the timed interval.
-        const uint32_t bitsPerSecond = _rate * 32U;
-        printf("SD TEST START %lu.%03lu Mbps for 60 seconds; generated data, ADC not used\n",
-               static_cast<unsigned long>(bitsPerSecond / 1000000),
-               static_cast<unsigned long>((bitsPerSecond % 1000000) / 1000));
-        const int64_t began = esp_timer_get_time();
-        const uint64_t expected = sdTestData::dueWords(sdTestData::durationUs, _rate);
-        uint64_t sent = 0;
-        uint64_t maxLagUs = 0;
-        bool ok = true;
-        while (sent < expected && ok)
+        // Wait before starting the timed source. No data are generated until
+        // the SD task confirms the new file is ready. Cancellation is a flag;
+        // only the SD task may close a file or finish a slow filesystem call.
+        const int64_t prepareStartedAt = esp_timer_get_time();
+        while (!_sdRecorder->getReady() && !_sdRecorder->getFailed() && !_stopRequested.load() &&
+               esp_timer_get_time() - prepareStartedAt <
+                   static_cast<int64_t>(recordingTiming::preparationTimeoutMs) * 1000)
+        { vTaskDelay(1); }
+        if (!_sdRecorder->getReady() || _stopRequested.load() || _sdRecorder->getFailed() ||
+            esp_timer_get_time() - prepareStartedAt >=
+                static_cast<int64_t>(recordingTiming::preparationTimeoutMs) * 1000)
         {
-            // Compare submitted words with words due by wall-clock time. The
-            // difference converted to microseconds is how far the source lags.
-            const uint64_t elapsed = esp_timer_get_time() - began;
-            const uint64_t due = sdTestData::dueWords(elapsed, _rate);
-            const uint64_t lagUs = (due - sent) * 1000000 / _rate;
-            if (lagUs > maxLagUs) { maxLagUs = lagUs; }
-            ok = !_stopRequested.load() && !_sdRecorder->failed() && lagUs <= 100000 &&
-                 elapsed <= sdTestData::durationUs + 100000;
-            while (sent < due && ok)
-            {
-                // Fill at most 512 words, each determined by its position.
-                // submitBytes copies them, so this batch can be reused as soon
-                // as it returns. Refusal ends the test; do not retry lost data.
-                const size_t count = due - sent < 512 ? static_cast<size_t>(due - sent) : 512;
-                for (size_t index = 0; index < count; ++index)
-                {
-                    _batch[index] = sdTestData::word(static_cast<uint32_t>(sent + index));
-                }
-                ok = !_stopRequested.load() && _sdRecorder->submitBytes(reinterpret_cast<const uint8_t*>(_batch),
-                    static_cast<uint32_t>(count * sizeof(uint32_t)));
-                if (ok) { sent += count; }
-            }
-            if (sent < expected && ok) { vTaskDelay(1); }
+            _sdRecorder->cancelPreparation();
+            printf("SD TEST preparation failed, cancelled or timed out; source not started\n");
         }
-        const uint64_t elapsed = esp_timer_get_time() - began;
-        ok = ok && sent == expected && elapsed <= sdTestData::durationUs + 100000 &&
-             !_stopRequested.load() && !_sdRecorder->failed();
-        printf("SD TEST source %s words=%llu/%llu elapsedMs=%llu maxLagUs=%llu; "
-               "wait for SD SAVED/FAILED\n", ok ? "COMPLETE" : "FAILED",
-               static_cast<unsigned long long>(sent), static_cast<unsigned long long>(expected),
-               static_cast<unsigned long long>(elapsed / 1000), static_cast<unsigned long long>(maxLagUs));
-        // No further submissions follow publication of finishing. Readback and
-        // file close belong to the disk task; source completion is not SD success.
-        _sdRecorder->finish(ok);
+        else
+        {
+            // Integer formatting avoids the floating-point formatter's startup
+            // allocation and deeper call stack. This is outside the timed interval.
+            const uint32_t bitsPerSecond = _rate * 32U;
+            printf("SD TEST START %lu.%03lu Mbps for 60 seconds; generated data, ADC not used\n",
+                   static_cast<unsigned long>(bitsPerSecond / 1000000),
+                   static_cast<unsigned long>((bitsPerSecond % 1000000) / 1000));
+            const int64_t began = esp_timer_get_time();
+            const uint64_t expected = sdTestData::dueWords(sdTestData::durationUs, _rate);
+            uint64_t sent = 0;
+            uint64_t maxLagUs = 0;
+            bool ok = true;
+            while (sent < expected && ok)
+            {
+                // Compare submitted words with words due by wall-clock time. The
+                // difference converted to microseconds is how far the source lags.
+                const uint64_t elapsed = esp_timer_get_time() - began;
+                const uint64_t due = sdTestData::dueWords(elapsed, _rate);
+                const uint64_t lagUs = (due - sent) * 1000000 / _rate;
+                if (lagUs > maxLagUs) { maxLagUs = lagUs; }
+                ok = !_stopRequested.load() && !_sdRecorder->getFailed() && lagUs <= 100000 &&
+                     elapsed <= sdTestData::durationUs + 100000;
+                while (sent < due && ok)
+                {
+                    // Fill at most 512 words, each determined by its position.
+                    // submitBytes copies them, so this batch can be reused as soon
+                    // as it returns. Refusal ends the test; do not retry lost data.
+                    const size_t count = due - sent < 512 ? static_cast<size_t>(due - sent) : 512;
+                    for (size_t index = 0; index < count; ++index)
+                    {
+                        _batch[index] = sdTestData::word(static_cast<uint32_t>(sent + index));
+                    }
+                    ok = !_stopRequested.load() && _sdRecorder->submitBytes(reinterpret_cast<const uint8_t*>(_batch),
+                        static_cast<uint32_t>(count * sizeof(uint32_t)));
+                    if (ok) { sent += count; }
+                }
+                if (sent < expected && ok) { vTaskDelay(1); }
+            }
+            const uint64_t elapsed = esp_timer_get_time() - began;
+            ok = ok && sent == expected && elapsed <= sdTestData::durationUs + 100000 &&
+                 !_stopRequested.load() && !_sdRecorder->getFailed();
+            printf("SD TEST source %s words=%llu/%llu elapsedMs=%llu maxLagUs=%llu; "
+                   "wait for SD SAVED/FAILED\n", ok ? "COMPLETE" : "FAILED",
+                   static_cast<unsigned long long>(sent), static_cast<unsigned long long>(expected),
+                   static_cast<unsigned long long>(elapsed / 1000), static_cast<unsigned long long>(maxLagUs));
+            // No further submissions follow publication of finishing. Readback and
+            // file close belong to the disk task; source completion is not SD success.
+            _sdRecorder->finish(ok);
+        }
         _busy.store(false);
     }
 }

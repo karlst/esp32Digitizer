@@ -53,9 +53,9 @@ def analyze(feather, p4, progress=None, plotPath=None):
         if progress is not None:
             progress(message)
 
-    if 'SMOKE_FEATHER version=1 ready=1 seconds=30' not in feather or 'DAC MODE: SQUARE codes=110,135 levelSeconds=1' not in feather:
+    if not any(f'SMOKE_FEATHER version={version} ready=1 seconds=30' in feather for version in (1, 2, 3)) or 'DAC MODE: SQUARE codes=110,135 levelSeconds=1' not in feather:
         raise ValueError('Feather is not running the square-wave smoke firmware')
-    if 'SMOKE_P4 version=1 ready=1 seconds=30' not in p4:
+    if not any(f'SMOKE_P4 version={version} ready=1 seconds=30' in p4 for version in (1, 2, 3)):
         raise ValueError('P4 is not running fresh SD smoke firmware')
     run, count, clean, missed, gap = map(int, single(
         r'^INPUT_BEGIN run=(\d+) count=(\d+) clean=(\d+) missed=(\d+) maxGapUs=(\d+) mode=burst$', feather, 'Input measurements'))

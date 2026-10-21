@@ -18,25 +18,36 @@
 #pragma once
 #include "CaptureDestination.h"
 #include "RamWaveform.h"
+
 /** @brief Own a short waveform summary; Core 0 reads only after decoder drain. */
 class RamCaptureDestination : public CaptureDestination
 {
 public:
-    /** @brief RAM mode rejects SD preparation requests. */
-    bool prepare() override { return false; }
-    /** @brief Reset the summary before Core 1 receives any new raw blocks. */
-    bool claim(uint32_t run, uint32_t stage, uint32_t rate) override
-    { (void)run; (void)stage; _ramWaveform.reset(rate); return true; }
+
+    /** @brief Reset the RAM summary immediately; no disk work or delayed readiness exists. */
+    bool prepare(uint32_t run, const Ads127Config& adsConfigRequested) override
+    { (void)run; _ramWaveform.reset(adsConfigRequested._samplesPerSecond); _ready = true; return true; }
+
+    /** @brief Core 0 reads readiness set by prepare; this flag is not shared with Core 1. */
+    bool getReady() const override { return _ready; }
+
+    /** @brief Cancel before receiving begins; no background work needs draining. */
+    void cancelPreparation() override { _ready = false; }
+
     /** @brief Consume the batch immediately; no pointer survives this call. */
     bool submit(const uint32_t* words, size_t count) override
     { _ramWaveform.accept(words, count); return true; }
+
     /** @brief This bounded summary has no asynchronous storage operation to fail. */
-    bool failed() const override { return false; }
+    bool getFailed() const override { return false; }
+
     /** @brief Read the summary's atomic completion flag from Core 0. */
-    bool full() const override { return _ramWaveform.complete(); }
+    bool getFull() const override { return _ramWaveform.getComplete(); }
+
     /** @brief Export only after all Core 1 decoding has stopped. */
     void finish(uint32_t run, uint32_t rate, bool clean, uint32_t samples) override
     { (void)samples; _ramWaveform.report(run, rate, clean); }
 private:
+    bool _ready = false;
     RamWaveform _ramWaveform;
 };

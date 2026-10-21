@@ -74,7 +74,7 @@ def capture(featherPort, p4Port, output):
         while not finished:
             if time.monotonic() >= deadline:
                 reasons = {'identity': 'Boards did not identify as idle smoke firmware; close monitors and reset both boards',
-                           'prepare': 'SD card did not become ready',
+                           'prepare': 'Storage or receiver did not become ready; check both logs',
                            'capture': 'Recording or SD readback did not finish'}
                 raise ValueError(reasons[phase])
             try:
@@ -91,24 +91,28 @@ def capture(featherPort, p4Port, output):
                     raise ValueError(name + ' is not ready; reset both boards before retrying')
                 if phase == 'identity':
                     expected = 'SMOKE_FEATHER' if name == 'Feather' else 'SMOKE_P4'
-                    if line == expected + ' version=1 ready=1 seconds=30':
+                    if line == expected + ' version=3 ready=1 seconds=30':
                         ready.add(name)
+                    elif line.startswith(expected + ' version='):
+                        raise ValueError('Upload current hardware-smoke firmware to both boards (version 3 required)')
                     if len(ready) == 2:
-                        ports['P4'].write(b'p')
-                        phase = 'prepare'
-                        deadline = time.monotonic() + 180
-                        print('Preparing SD card...')
-                elif phase == 'prepare' and name == 'P4':
-                    if line.startswith('SD READY file='):
-                        # Mark started before the write so cleanup requests STOP
-                        # even if a partial serial write raises an exception.
+                        # One command requests preparation and recording. Mark
+                        # started first so an interrupted write still requests STOP.
                         started = True
-                        ports['Feather'].write(b'6')
+                        ports['Feather'].write(b'g')
+                        phase = 'prepare'
+                        deadline = time.monotonic() + 200
+                        print('Preparing SD card and receiver...')
+                elif phase == 'prepare':
+                    if name == 'Feather' and line.startswith('ADC START echo confirmed.'):
                         phase = 'capture'
                         deadline = time.monotonic() + 240
                         print('Recording 30 seconds, then reading the SD card back...')
-                    elif 'FAILED' in line or 'RAM mode:' in line or 'busy/already prepared' in line:
-                        raise ValueError('SD preparation failed; check the P4 log')
+                    elif ('FAILED' in line or 'PREPARE FAILED' in line or
+                          line.startswith(('No matching receiver READY', 'Test already pending/running',
+                                           'Source/ADC START failed', 'DAC setup failed',
+                                           'ADC127 FAULT', 'ADC127 TIMEOUT'))):
+                        raise ValueError('Preparation or capture start failed; check the board logs')
                 elif phase == 'capture':
                     refused = ('No matching receiver READY', 'ADC127 FAILED',
                                'Source/ADC START failed', 'DAC setup failed',

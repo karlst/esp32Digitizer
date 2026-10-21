@@ -25,7 +25,7 @@
  * This generator belongs to the web application, not the P4 bench firmware's
  * benchDac implementation. Do not apply its calibration or settings to that test.
  * Read begin() for task/timer setup, start() for settings, sample() for analog
- * work, and stateJson() for the browser snapshot. A task is a scheduled thread;
+ * work, and getStateJson() for the browser snapshot. A task is a scheduled thread;
  * a notification wakes it without carrying a sample value.
  * Shared data is locked only while reading/changing it; JSON formatting and network
  * transmission happen outside the lock so they cannot hold up sampling for long.
@@ -249,7 +249,7 @@ void DacGenerator::taskEntry(void* context)
 void DacGenerator::sample()
 {
     // Keep settings, phase, history, and the physical DAC write in one protected
-    // transaction. start(), setEnabled(), and stateJson() share this lock.
+    // transaction. start(), setEnabled(), and getStateJson() share this lock.
     // ADC work lengthens the hold time; web code must therefore avoid slow work
     // while holding the lock. This design favors simple, coherent sample records.
     xSemaphoreTake(_mutex, portMAX_DELAY);
@@ -310,7 +310,7 @@ void DacGenerator::sample()
  * state. Release the lock before formatting numbers and allocating the JSON
  * string. Network transmission happens later in webController with no lock held.
  */
-String DacGenerator::stateJson()
+String DacGenerator::getStateJson()
 {
     String retVal = "{\"ready\":false}";
     if (_ready)

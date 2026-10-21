@@ -19,6 +19,7 @@
 #include "profileMath.h"
 namespace profileMath
 {
+
 /**
  * @brief Add measured execution and elapsed times, rather than averaging percentages.
  * For example, a busy 0.1-second interval must not count as much as an idle

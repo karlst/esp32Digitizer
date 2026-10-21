@@ -141,7 +141,7 @@ def analyzeConstant(inputText, outputText, target):
     body += ('<p>Same wiring; no SD. A constant command does not guarantee a constant voltage. '
              'No waveform alignment or fitted gain/offset is used.</p>'
              '<p>Dark lines: approximately 0.5 ms averages (Feather: variable reading count; '
-             'P4: 512 samples at stage 6). Pale lines: lowest/highest individual readings '
+             'P4: 512 samples at 1,024,000 samples/s). Pale lines: lowest/highest individual readings '
              'within each group. Axes zoom independently and use different count units; '
              'do not compare line heights or count magnitudes as voltage noise.</p>')
     for name, units, means, lows, highs in panels:

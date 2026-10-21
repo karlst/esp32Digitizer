@@ -28,22 +28,26 @@
 class LedBlinker
 {
 public:
+
     /**
      * @brief Configure the LED in its stopped, off state.
      */
     void begin();
+
     /**
      * @brief Apply any LED transition due at the current time.
      */
     void update();
+
     /**
      * @brief Start or stop blinking; repeated commands preserve timing.
      */
     void setEnabled(bool enabled);
+
     /**
      * @brief Report commanded blinking, regardless of current LED level.
      */
-    bool isEnabled() const;
+    bool getEnabled() const;
 
 private:
     // Toggle every half second to produce one complete blink per second.

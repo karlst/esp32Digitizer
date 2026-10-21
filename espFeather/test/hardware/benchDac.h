@@ -37,7 +37,7 @@ public:
     bool initialize();
     bool start();
     void stop();
-    bool failed();
+    bool getFailed();
 private:
     static void tick(void* context);
     SemaphoreHandle_t _mutex = nullptr;

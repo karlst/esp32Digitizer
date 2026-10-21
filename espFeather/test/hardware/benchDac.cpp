@@ -135,7 +135,7 @@ void BenchDac::stop()
 }
 
 /** @brief Read the callback's failure latch safely from Arduino loop. */
-bool BenchDac::failed()
+bool BenchDac::getFailed()
 {
     bool retVal = true;
     if (_mutex != nullptr)

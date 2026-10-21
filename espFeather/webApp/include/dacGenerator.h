@@ -26,7 +26,7 @@
  * @brief Generate a sine wave independently of browser traffic and measure its loopback.
  *
  * Three execution contexts cooperate:
- * - Arduino's loop task handles HTTP and calls start(), setEnabled(), stateJson().
+ * - Arduino's loop task handles HTTP and calls start(), setEnabled(), getStateJson().
  * - ESP's timer service calls timerCallback() every nominal 500 microseconds.
  * - Our worker task wakes on that notification and calls sample().
  *
@@ -48,32 +48,39 @@ public:
     // Nominal 2 kHz updates give 20 DAC steps per period at the 100 Hz maximum.
     // Task scheduling introduces jitter; this is not a hardware-clocked DAC stream.
     static constexpr uint32_t _samplePeriodUs = 500;
+
     /**
      * @brief Initialize DAC/ADC and start sampling with waveform output disabled.
      */
     bool begin();
+
     /**
      * @brief Validate settings and atomically start output; running settings cannot change.
      */
     bool start(float frequency, float amplitude, float offset);
+
     /**
      * @brief Enable or disable the waveform; disabled output is DAC code zero.
      */
     bool setEnabled(bool enabled);
+
     /**
      * @brief Serialize a coherent snapshot of settings and measured graph samples.
      */
-    String stateJson();
+    String getStateJson();
 
 private:
+
     /**
      * @brief Wake the worker without doing analog conversions in the timer callback.
      */
     static void timerCallback(void* context);
+
     /**
      * @brief Run analog sampling independently of HTTP handling.
      */
     static void taskEntry(void* context);
+
     /**
      * @brief Measure the previous output, then write the next time-based sine sample.
      */

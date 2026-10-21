@@ -17,9 +17,10 @@
  */
 #pragma once
 #include "recordingFormat.h"
+
 /**
  * @brief Describe stored record size, readback checks and the final file header.
- * The default is the normal three-byte ADC format. claim() selects a borrowed
+ * The default is the normal three-byte ADC format. prepare() selects a borrowed
  * policy before producer submissions; it must remain alive through SD SAVED.
  * Disk-task callbacks see bytes read from the card, not the original RAM batch.
  * This interface allows other data sources without coupling the writer to tests.
@@ -27,20 +28,26 @@
 class RecordingLayout
 {
 public:
+
     /** @brief Allow destruction through this interface. */
     virtual ~RecordingLayout() = default;
+
     /** @brief Return bytes per stored record. */
-    virtual uint32_t recordBytes() const { return 3; }
+    virtual uint32_t getRecordBytes() const { return 3; }
+
     /** @brief Require exactly one stored record per reported source sample. */
     virtual bool countMatches(uint64_t bytes, uint32_t samples) const
-    { return bytes == static_cast<uint64_t>(samples) * recordBytes(); }
+    { return bytes == static_cast<uint64_t>(samples) * getRecordBytes(); }
+
     /** @brief Optional content check; normal ADC data have no predetermined values. */
     virtual uint64_t check(const uint8_t* data, uint32_t bytes, uint64_t offset) const
     { (void)data; (void)bytes; (void)offset; return 0; }
+
     /** @brief Fill the existing 512-byte ADC file header after payload verification. */
-    virtual void makeHeader(uint8_t* data, bool valid, uint32_t run, uint32_t stage,
+    virtual void makeHeader(uint8_t* data, bool valid, uint32_t run,
                             uint32_t rate, uint64_t bytes, uint32_t crc) const
-    { recordingFormat::makeHeader(data, valid, run, stage, rate, bytes, crc); }
+    { recordingFormat::makeHeader(data, valid, run, rate, bytes, crc); }
+
     /** @brief Optional extra result text, printed after file closure. */
     virtual void report(uint64_t errors) const { (void)errors; }
 };

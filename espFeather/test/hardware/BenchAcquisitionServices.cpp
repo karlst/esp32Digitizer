@@ -17,6 +17,7 @@
  */
 #include <Arduino.h>
 #include "BenchAcquisitionServices.h"
+
 /** @brief Prepare stopped source and measurement hardware; report combined readiness. */
 bool BenchAcquisitionServices::initialize()
 {
@@ -29,8 +30,9 @@ bool BenchAcquisitionServices::initialize()
 #endif
     return _ready;
 }
+
 /** @brief DAC tests use the external input; internal-short tests leave it disconnected. */
-bool BenchAcquisitionServices::externalInput() const
+bool BenchAcquisitionServices::getExternalInput() const
 {
 #if ADS127_P4_DAC_TEST
     return true;
@@ -38,12 +40,13 @@ bool BenchAcquisitionServices::externalInput() const
     return false;
 #endif
 }
+
 /** @brief Print the selected test identity and voltage pattern without starting it. */
 void BenchAcquisitionServices::describe(bool idle)
 {
     (void)idle;
 #if ADS127_HARDWARE_SMOKE
-    Serial.printf("SMOKE_FEATHER version=1 ready=%u seconds=30\n",
+    Serial.printf("SMOKE_FEATHER version=3 ready=%u seconds=30\n",
                   unsigned(_ready && idle));
 #endif
 #if ADS127_COMPARE_INPUT && !ADS127_HARDWARE_SMOKE
@@ -65,6 +68,7 @@ void BenchAcquisitionServices::describe(bool idle)
     Serial.println("ADS127 DMA CONTROL: DAC off; coax stays disconnected; SD untouched.");
 #endif
 }
+
 /** @brief Discard observations from the previous run before ARM is sent. */
 void BenchAcquisitionServices::reset()
 {
@@ -72,6 +76,7 @@ void BenchAcquisitionServices::reset()
     _inputSnapshot.reset();
 #endif
 }
+
 /** @brief Enable the source only after P4's matching READY reply. */
 bool BenchAcquisitionServices::start()
 {
@@ -81,6 +86,7 @@ bool BenchAcquisitionServices::start()
 #endif
     return retVal;
 }
+
 /** @brief Start the input-observation clock after ADC START is acknowledged. */
 void BenchAcquisitionServices::begin()
 {
@@ -88,6 +94,7 @@ void BenchAcquisitionServices::begin()
     _inputSnapshot.begin();
 #endif
 }
+
 /** @brief Collect pending input observations on Arduino's task without printing. */
 void BenchAcquisitionServices::poll()
 {
@@ -95,27 +102,30 @@ void BenchAcquisitionServices::poll()
     _inputSnapshot.poll();
 #endif
 }
+
 /** @brief Combine latched source and observation faults for coordinated shutdown. */
-bool BenchAcquisitionServices::failed()
+bool BenchAcquisitionServices::getFailed()
 {
     bool retVal = false;
 #if ADS127_P4_DAC_TEST
-    retVal = _benchDac.failed();
+    retVal = _benchDac.getFailed();
 #endif
 #if ADS127_COMPARE_INPUT
-    retVal = retVal || _inputSnapshot.failed();
+    retVal = retVal || _inputSnapshot.getFailed();
 #endif
     return retVal;
 }
+
 /** @brief Request fast polling only while the local ADC is measuring a window. */
-bool BenchAcquisitionServices::sampling() const
+bool BenchAcquisitionServices::getSampling() const
 {
     bool retVal = false;
 #if ADS127_COMPARE_INPUT
-    retVal = _inputSnapshot.sampling();
+    retVal = _inputSnapshot.getSampling();
 #endif
     return retVal;
 }
+
 /** @brief Disable the source and export retained observations after ADC stop request. */
 void BenchAcquisitionServices::finish(unsigned long runId, bool clean)
 {
@@ -125,6 +135,6 @@ void BenchAcquisitionServices::finish(unsigned long runId, bool clean)
     _benchDac.stop();
 #endif
 #if ADS127_COMPARE_INPUT
-    _inputSnapshot.report(runId, clean && !_benchDac.failed());
+    _inputSnapshot.report(runId, clean && !_benchDac.getFailed());
 #endif
 }

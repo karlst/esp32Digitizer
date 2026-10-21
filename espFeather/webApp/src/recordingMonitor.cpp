@@ -35,7 +35,7 @@
  * quoted strings for a consistent schema. JavaScript Number cannot represent all
  * 64-bit integer totals exactly, so totals must not be sent as unquoted numbers.
  */
-String RecordingMonitor::stateJson(bool connected) const
+String RecordingMonitor::getStateJson(bool connected) const
 {
     String retVal = "null";
     if (connected && _available)
@@ -50,7 +50,7 @@ String RecordingMonitor::stateJson(bool connected) const
             char value[24];
             snprintf(value, sizeof(value), "%llu", static_cast<unsigned long long>(_recordingStatus._values[index]));
             if (index) { retVal += ','; }
-            retVal += "\"" + String(RecordingStatus::fieldName(index)) + "\":\"" + String(value) + "\"";
+            retVal += "\"" + String(RecordingStatus::getFieldName(index)) + "\":\"" + String(value) + "\"";
         }
         retVal += '}';
     }

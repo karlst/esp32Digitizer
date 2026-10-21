@@ -16,7 +16,7 @@ captures into memory only; it does not write to SD. C6 wireless is not needed.
 
 Numbers below are GPIO labels, NOT physical header positions. Identify the
 printed board labels before connecting. The existing ADC wiring comes from
-shared/ads127Pins.h; the Feather link comes from the two capture test sources.
+espFeather/include/ads127Pins.h; the Feather link comes from the two capture test sources.
 
 | Signal | P4 endpoint |
 |---|---|
@@ -76,6 +76,6 @@ configuration. Header matches alone do not prove every payload bit is correct.
 
 - [Waveshare board and header pinout](https://docs.waveshare.com/ESP32-P4-Module-DEV-KIT)
 - [Waveshare schematic](https://files.waveshare.com/wiki/ESP32-P4-Module-DEV-KIT/ESP32-P4-Module-DEV-KIT.pdf)
-- Existing project: shared/ads127Pins.h, espFeather/test/hardware/ads127CaptureControl.cpp,
+- Existing project: espFeather/include/ads127Pins.h, espFeather/test/hardware/ads127CaptureControl.cpp,
   espP4/main/src/RecordingApplication.cpp, docs/P4-EARLY-TEST-HISTORY.md.
 - Installed ESP-IDF: components/esp_driver_parlio/src/parlio_rx.c (GPIO routing).

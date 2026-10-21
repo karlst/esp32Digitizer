@@ -9,13 +9,15 @@ The DAC is a test source, not a required part of recording.
 flowchart TD
     DAC[Feather DAC or another analog source] -->|voltage| ADC[ADS127L18]
     Feather[Feather AcquisitionApplication] -. SPI configuration and start/stop .-> ADC
-    Feather -. ARM / READY / STOP commands over UART .-> App[P4 RecordingApplication]
+    Feather -. ARM / READY / STOP commands over UART .-> Controller[P4 RecordingController]
+    Controller -. start / stop .-> App[RecordingApplication]
+    App -. control .-> Receiver[AdcReceiver]
     ADC -->|DOUT0 data, FSYNC sample marker, DCLK clock| PARLIO[P4 PARLIO receive hardware / FIFO]
     PARLIO --> DMA[DMA transfer hardware]
     DMA --> Raw[32 KiB raw DMA memory]
-    Raw -->|receiveBlock copies bytes| Private[16 private raw blocks, 4 KiB capacity each]
+    Raw -->|AdcReceiver.receiveBlock copies bytes| Private[16 private raw blocks, 4 KiB capacity each]
     Private -->|queue the block address| Ready[readyBlocks queue]
-    Ready --> Decode[Core 1: FrameDecoder.feed]
+    Ready --> Decode[Core 1: SampleDecoder calls FrameDecoder.feed]
     Decode -->|complete sample batches| Pack[SdRecorder.submitSamples: pack 3 bytes per sample]
     Pack -->|BufferedWriter.submit copies bytes| Ring[4 MiB PSRAM ring]
     Ring -->|Core 0: BufferedWriter.pump| Scratch[SdRecorder.write: copy slices to 16 KiB internal RAM]
@@ -31,18 +33,21 @@ flowchart TD
    the ADC clock. Its FIFO is hardware storage preserving incoming order. It is
    not the application's `readyBlocks` queue.
 2. **DMA** means direct memory access: hardware writes the packed pin states to
-   RAM. DMA is the transfer mechanism, not another software queue. At stage 6,
+   RAM. DMA is the transfer mechanism, not another software queue. At 1,024,000 samples/second,
    four clock positions occupy one byte and one ADC sample occupies eight raw bytes.
 3. The driver's **interrupt service routine (ISR)** calls
-   `RecordingApplication::receiveEntry`, which dispatches to `receiveBlock` on
+   `AdcReceiver::receiveEntry`, which dispatches to `receiveBlock` on
    Core 0. `memcpy` copies each completed DMA chunk into a free private block.
    The hardware can reuse its original DMA memory after this copy.
 4. `xQueueSendFromISR` queues the private block's **address**, not its bytes.
-   Core 1 takes that address with `xQueueReceive`, then `FrameDecoder::feed`
+   Core 1's `SampleDecoder` takes that address through `AdcReceiver::take`
+   (`xQueueReceive`), then `FrameDecoder::feed`
    reads the bytes. The block stays unavailable for reuse until decoding and
-   submission finish. `xQueueSend` then returns its address to `freeBlocks`.
+   submission finish. `AdcReceiver::release` uses `xQueueSend` to return its
+   address to `freeBlocks`.
 5. `FrameDecoder` reconstructs the ADC's eight status bits and 24 sample bits.
-   It checks framing and status and passes batches to the application's destination.
+   It checks framing and status; `SampleDecoder::recordWords` passes batches
+   to the application's selected destination.
    Ordinary recording uses `SdCaptureDestination` and `SdRecorder::submitSamples`.
 6. `recordingFormat::packSamples` removes the status byte and stores the sample
    as three little-endian bytes. `BufferedWriter::submit` copies those bytes into
@@ -84,7 +89,8 @@ writes the final header, synchronizes and closes the file.
 ## Where tests attach
 
 Production startup constructs `RecordingApplication` with `SdCaptureDestination`.
-Test startup adds `RecordingHarness`, which owns the SD test generator, optional
+Both startups use `RecordingController` for console/Feather commands and
+the `RecordingReporter` interface, with `ConsoleRecordingReporter` for terminal output. Test startup adds `RecordingHarness`, which owns the SD test generator, optional
 RAM summary and decoder timings; the profiling build also adds `CaptureProfile`.
 The recorder accepts a `RecordingLayout` policy and optional `RecordingReadback`
 observer. The normal layout is the ADC file format; the synthetic test supplies
@@ -94,6 +100,9 @@ For RAM inspection, `RamCaptureDestination` replaces the SD destination before
 capture. It summarizes samples and later prints them; it does not save each sample.
 For hardware smoke testing, `SdSmokeSummary` observes bytes returned by `f_read`.
 The normal full-payload checksum still runs.
+
+See [Recording classes](RECORDING-CLASSES.md) for the control interfaces,
+execution contexts and the boundary for replacing Feather's command role.
 
 Feather test startup supplies `BenchAcquisitionServices` to the same
 `AcquisitionApplication` used for recording. The service owns `BenchDac` and,

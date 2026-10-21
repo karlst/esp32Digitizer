@@ -89,6 +89,9 @@ These conventions apply throughout this project and may be updated as developmen
   or equivalent clear instruction for that work. Do not ask for a second
   conversational confirmation for the same authorized action. Discuss proposed
   changes first; read-only inspection may proceed without Go.
+- Before editing after Karl says Go, confirm that he has saved his editor changes.
+  An explicit statement that he has saved all changes already satisfies this check.
+  Preserve his spacing and blank lines when editing.
 - Karl handles all Git operations. Do not run Git commands, stage, commit, push,
   pull, switch branches, or otherwise change Git state unless he explicitly
   delegates a particular operation.

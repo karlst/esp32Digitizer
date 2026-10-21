@@ -6,7 +6,7 @@
 | --- | --- | --- |
 | `espP4` | Espressif ESP-IDF, using `idf.py` | ESP-IDF directly |
 | `espFeather` | PlatformIO | Arduino for ESP32 |
-| `shared` | Compiled by the board projects | No separate firmware build |
+| `common` | Compiled by the board projects | No separate firmware build |
 
 ESP-IDF means **Espressif IoT Development Framework**. Espressif makes the ESP32
 chips. Its toolkit supplies hardware drivers, task scheduling, and tools for

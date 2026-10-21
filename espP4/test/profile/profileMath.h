@@ -24,6 +24,7 @@
 
 namespace profileMath
 {
+
 /**
  * @brief Convert execution microseconds into tenths of a percent of ONE core.
  * Zero duration has no measurable percentage. Clamp minor snapshot/accounting

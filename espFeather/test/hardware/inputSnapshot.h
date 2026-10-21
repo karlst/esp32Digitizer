@@ -32,10 +32,11 @@ public:
     void reset();
     void begin();
     void poll();
-    bool sampling() const;
-    bool failed() const;
+    bool getSampling() const;
+    bool getFailed() const;
     void report(unsigned long run, bool hardwareClean);
 private:
+
     /**
      * @brief Measurements taken together during one scheduled A2 read interval.
      * timeUs is the midpoint, in microseconds since begin() after the START echo;

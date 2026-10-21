@@ -40,7 +40,8 @@ def inspectRecording(path):
         header = recording.read(512)
         if len(header) != 512 or header[:8] != b'P4ADC03\0':
             raise ValueError('Expected a P4ADC03 file with a complete 512-byte header')
-        version, valid, runId, stage, rate = struct.unpack_from('<5I', header, 8)
+        # Offset 20 is reserved in new files. Ignore historical index values.
+        version, valid, runId, reserved, rate = struct.unpack_from('<5I', header, 8)
         payloadBytes = struct.unpack_from('<Q', header, 28)[0]
         expectedCrc, width = struct.unpack_from('<2I', header, 36)
         count = struct.unpack_from('<Q', header, 44)[0]
@@ -56,7 +57,7 @@ def inspectRecording(path):
             if not chunk:
                 break
             crc = zlib.crc32(chunk, crc)
-        print(f'run={runId} stage={stage} rate={rate}/s samples={count} valid={valid}')
+        print(f'run={runId} rate={rate}/s samples={count} valid={valid}')
         print(f'CRC read={crc:08x} header={expectedCrc:08x}')
         if crc != expectedCrc or valid != 1:
             raise ValueError('Invalid capture flag or payload CRC mismatch; not a clean recording')

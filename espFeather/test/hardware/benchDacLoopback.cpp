@@ -46,7 +46,7 @@ static void finishMeasurement(bool clean)
 {
     benchDac.stop();
     running = false;
-    const bool good = clean && !benchDac.failed() && pointCount >= 200;
+    const bool good = clean && !benchDac.getFailed() && pointCount >= 200;
     Serial.printf("LOOP_BEGIN count=%u clean=%u missedReadSlots=%lu\n", pointCount,
                   unsigned(good), static_cast<unsigned long>(missedReadSlots));
     for (unsigned index = 0; index < pointCount; ++index)
@@ -103,7 +103,7 @@ void loop()
     if (running)
     {
         const int64_t now = esp_timer_get_time();
-        if (benchDac.failed()) { finishMeasurement(false); }
+        if (benchDac.getFailed()) { finishMeasurement(false); }
         else if (now - startedAt >= 1300000) { finishMeasurement(true); }
         else if (now >= nextReadAt)
         {

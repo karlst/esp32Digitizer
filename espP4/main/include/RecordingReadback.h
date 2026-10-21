@@ -18,6 +18,7 @@
 #pragma once
 #include <cstdint>
 #include <cstddef>
+
 /**
  * @brief Observe verification without owning the file or changing stored samples.
  * SdRecorder calls these methods only on its disk task, after capture ends.
@@ -27,6 +28,7 @@
 class RecordingReadback
 {
 public:
+
     /** @brief Allow destruction through the interface. */
     virtual ~RecordingReadback() = default;
     virtual void reset(uint32_t rate) = 0;

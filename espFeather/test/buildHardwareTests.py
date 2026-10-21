@@ -25,7 +25,7 @@ frameworkRoot = Path(env.PioPlatform().get_package_dir('framework-arduinoespress
 env.Append(CPPPATH=[str(projectRoot / 'include'),
                    str(projectRoot / 'include' / 'adc'),
                    str(projectRoot / 'test' / 'hardware'),
-                   str(projectRoot.parent / 'shared'),
+                   str(projectRoot.parent / 'common'),
                    str(frameworkRoot / 'libraries' / 'SPI' / 'src')])
 selectedSource = env.GetProjectOption('custom_test_source', 'ads127SpiDiagnostic.cpp')
 if selectedSource not in ['ads127SpiDiagnostic.cpp', 'ads127CaptureControl.cpp', 'benchDacLoopback.cpp']:

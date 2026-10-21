@@ -14,8 +14,8 @@ at boot, and ports can change after USB reconnection.
 | `ads127-hardware-smoke` | 30-second two-level DAC signal plus A2 measurements | P4 smoke build; SD recording/readback, 128 MiB reserve | [Hardware smoke instructions](../docs/HARDWARE-SMOKE.md) |
 | `ads127-spi-check` | ADC register communication check; no DAC | No P4 capture | [Feather test guide](../espFeather/test/README.md) |
 | `ads127-capture-control` | Five-second diagnostic; DAC off | No current P4 pairing | Feather USB commands |
-| `ads127-p4-capture-60s` | Internal-short ADC baseline; DAC off | P4 profile build, 60/65 seconds | [PROFILE.md](PROFILE.md); prepare SD, then Feather `6` |
-| `ads127-p4-capture-30min` | Endurance baseline; DAC off | P4 normal SD build, 1800/1805 seconds | [README.md](README.md); prepare SD, then Feather `6` |
+| `ads127-p4-capture-60s` | Internal-short ADC baseline; DAC off | P4 profile build, 60/65 seconds | [PROFILE.md](PROFILE.md); Feather `g`; SD prepares automatically |
+| `ads127-p4-capture-30min` | Endurance baseline; DAC off | P4 normal SD build, 1800/1805 seconds | [README.md](README.md); Feather `g`; SD prepares automatically |
 | `ads127-p4-dac-60s` | External CH0, nominal 10 Hz sine | P4 profile build; SD or RAM selected before run | [ANALOG-TEST.md](ANALOG-TEST.md) or [RAM-WAVEFORM.md](RAM-WAVEFORM.md) |
 | `bench-dac-loopback` | Sine measured locally at A2 | No P4 or SD | `python .\espFeather\test\captureDacLoopback.py --port COM4` |
 | `ads127-p4-compare` | Sine plus simultaneous A2 measurement | P4 profile/RAM build; no SD | `python .\espP4\test\captureComparison.py --feather COM4 --p4 COM3` |
@@ -35,7 +35,7 @@ and TI 6 V power must be present. No SD card is required for RAM capture.
 
 For RAM comparison, close both monitors, reset P4, then run the chosen comparison command. The PC
 requests Feather help (`h`) and P4 RAM mode (`w`), validates their identities,
-then sends stage `6` to Feather. READY is permission to start, not proof of
+then requests the default configuration with `g` on Feather. READY is permission to start, not proof of
 sample receipt. RAM mode locks until P4 reset; reset before every repeated run.
 The reader saves complete logs even when a run fails. A saved HTML report means
 its parsing/clean-capture checks succeeded, not that analog accuracy is proven.

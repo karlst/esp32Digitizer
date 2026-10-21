@@ -26,7 +26,9 @@ static Ads127LowRate ads127LowRate(ads127L18);
 static AcquisitionServices acquisitionServices;
 static AcquisitionApplication acquisitionApplication(ads127LowRate, acquisitionServices,
     1800000, 1805000);
+
 /** @brief Arduino calls once; initialize stopped hardware and command ports. */
 void setup() { acquisitionApplication.initialize(); }
+
 /** @brief Arduino calls repeatedly; service commands, replies and capture deadlines. */
 void loop() { acquisitionApplication.poll(); }

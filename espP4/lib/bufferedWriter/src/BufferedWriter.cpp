@@ -128,7 +128,7 @@ void BufferedWriter::start(ByteSink& byteSink, uint64_t (*clock)())
  * @param data Bytes to copy. The caller may reuse its memory when this returns.
  * @param length Number of BYTES, not samples; the board adapter chooses the format.
  * @return True means copied into RAM, NOT saved to disk. False means none of this
- * submission was copied. Acquisition must observe failed(), stop collecting, and
+ * submission was copied. Acquisition must observe getFailed(), stop collecting, and
  * ask the disk task to finish the earlier data; this function cannot stop the ADC.
  * No waiting is allowed here: incoming acquisition continues while disk writes
  * may stall. An ISR is an interrupt service routine, which briefly interrupts a
@@ -248,9 +248,9 @@ void BufferedWriter::measure(uint64_t beganUs, uint32_t kind, bool success)
  * @param drain False during recording: normally wait for a blockBytes-sized batch to
  * avoid a separate filesystem call for every sample. True after Stop:
  * allow the final short batch, even if it contains only one sample.
- * @return False if a disk write failed (now or previously). True can also mean
+ * @return False if a disk write getFailed (now or previously). True can also mean
  * NOTHING was written: for example, only 100 bytes are queued and drain is false.
- * Use failed() to check the separate buffer-overflow flag; pump() deliberately
+ * Use getFailed() to check the separate buffer-overflow flag; pump() deliberately
  * allows earlier good bytes to be saved after the producer has overflowed.
  */
 bool BufferedWriter::pump(bool drain)
@@ -329,7 +329,7 @@ bool BufferedWriter::finish()
     const bool flushed = _byteSink->flush();
     measure(began, 2, flushed);
     _active = false;
-    const bool retVal = !failed();
+    const bool retVal = !getFailed();
     return retVal;
 }
 
@@ -353,7 +353,7 @@ void BufferedWriter::cancel()
  * can set it on an I/O error, and submit() can set it on overflow. It remains true
  * until start() resets the next recording. Checking it performs no filesystem I/O.
  */
-bool BufferedWriter::failed() const
+bool BufferedWriter::getFailed() const
 {
     const bool retVal = _broken.load(std::memory_order_acquire);
     return retVal;
@@ -373,7 +373,7 @@ bool BufferedWriter::failed() const
  * failed write. Peak occupancy is conservative: a producer can observe an older
  * tail position if the consumer frees space while a submission is in progress.
  */
-BufferedWriter::Statistics BufferedWriter::snapshot()
+BufferedWriter::Statistics BufferedWriter::getStatistics()
 {
     Statistics retVal = _statistics;
     const uint32_t readAt = _tail.load(std::memory_order_relaxed);
@@ -404,7 +404,7 @@ BufferedWriter::Statistics BufferedWriter::snapshot()
  * Other tasks must use published snapshots. Do not call during start/reset.
  * This observes occupancy; it does not reserve space for a subsequent submit.
  */
-uint32_t BufferedWriter::queuedBytes() const
+uint32_t BufferedWriter::getQueuedBytes() const
 {
     const uint32_t written = _head.load(std::memory_order_acquire);
     const uint32_t retVal = written - _tail.load(std::memory_order_acquire);

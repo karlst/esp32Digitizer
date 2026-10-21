@@ -22,6 +22,7 @@
 #include <deque>
 #include <cstdio>
 extern bool testUartRxMapped;
+
 /** @brief Pretend to be a serial port using memory rather than a Windows device.
  * input supplies incoming characters, output records transmitted text, capacity
  * simulates available transmit space, and flushed records whether flush was called.

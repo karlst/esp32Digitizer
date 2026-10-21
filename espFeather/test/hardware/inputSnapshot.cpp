@@ -137,7 +137,7 @@ void InputSnapshot::poll()
  * 1 ms slots. Outside
  * this short interval loop retains its ordinary sleep. Never used in other builds.
  */
-bool InputSnapshot::sampling() const
+bool InputSnapshot::getSampling() const
 {
     // Sleeping between the sparse smoke bursts does not lose 100-ms slots.
 #if ADS127_HARDWARE_SMOKE
@@ -148,7 +148,7 @@ bool InputSnapshot::sampling() const
 }
 
 /** @brief loop reads its own latched ADC-driver/capacity failure state. */
-bool InputSnapshot::failed() const
+bool InputSnapshot::getFailed() const
 {
     return _broken;
 }

@@ -1,0 +1,15 @@
+Powershell Activate esp-idf
+. C:\Espressif\tools\Microsoft.v5.5.6.PowerShell_profile.ps1
+
+Build P4 test firmware
+cd C:\Users\karls\source\esp32Digitizer\espP4
+idf.py -B build/profile -D SDKCONFIG=sdkconfig.profile -D "SDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.sd.defaults;sdkconfig.profile.defaults" build
+
+Build and upload the H/W smoke firmware onto P4
+cd C:\Users\karls\source\esp32Digitizer\espP4
+idf.py -B build/smoke -D SDKCONFIG=sdkconfig.smoke -D "SDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.sd.defaults;sdkconfig.smoke.defaults" -p COM3 flash
+
+Run smoke tests
+cd C:\Users\karls\source\esp32Digitizer
+.\test\runHardwareSmoke.ps1
+

@@ -41,7 +41,7 @@ public:
     uint32_t _completedBins = 0;
     void reset(uint32_t rate);
     void accept(const uint32_t* words, size_t count);
-    bool complete() const;
+    bool getComplete() const;
     void report(unsigned long run, uint32_t rate, bool clean) const;
 private:
     uint32_t _skip = 0;

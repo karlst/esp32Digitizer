@@ -17,14 +17,14 @@ from hardwareSmokeReport import analyze, summary
 
 def fixture():
     """Make a complete synthetic log pair with an exact 1500/1800-mV signal."""
-    feather = ['SMOKE_FEATHER version=1 ready=1 seconds=30',
+    feather = ['SMOKE_FEATHER version=3 ready=1 seconds=30',
                'DAC MODE: SQUARE codes=110,135 levelSeconds=1',
                'ADC START echo confirmed.', 'ADC STOP command echo confirmed',
                'DAC OFF updates=60000 missedIntervals=0 maxGapUs=501 driverFault=0',
                'INPUT_CAL run=7 source=0 defaultVrefMv=1100']
     feather += [f'CAL,{raw},{raw}' for raw in list(range(0,4096,32)) + [4095]]
     feather += ['INPUT_BEGIN run=7 count=300 clean=1 missed=0 maxGapUs=100010 mode=burst']
-    p4 = ['SMOKE_P4 version=1 ready=1 seconds=30',
+    p4 = ['SMOKE_P4 version=3 ready=1 seconds=30',
           'ADC127 DONE 7 words=30720000 bad=0 periodErrors=0 short=0 drops=0 errors=0 rate=1024000.0/s',
           'SD SAVED file=0:/test.BIN bytes=92160000 crc=12345678 ringPeak=500/4194304 maxWriteOrFlushUs=100 overflow=0 errors=0 unsaved=0',
           'SMOKE_SD_BEGIN run=7 rate=1024000 samples=30720000 bins=300 clean=1']
@@ -72,6 +72,14 @@ class smokeReportChecks(unittest.TestCase):
         with self.assertRaises(ValueError):
             analyze(feather, p4.replace('overflow=0', 'overflow=1'), messages.append)
         self.assertNotIn('Recording buffer: no overflow', messages)
+
+    def testHistoricalFirmwareReports(self):
+        """Saved older reports remain readable; live runs require version 3."""
+        feather, p4 = fixture()
+        for version in (1, 2):
+            result = analyze(feather.replace('version=3', f'version={version}'),
+                             p4.replace('version=3', f'version={version}'))
+            self.assertLess(result['errorPercent'], 0.001)
 
     def testBadMetadata(self):
         """Wrong IDs, missing data, overflow and failed disk readback cannot pass."""

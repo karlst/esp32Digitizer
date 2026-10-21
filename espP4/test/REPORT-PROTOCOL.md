@@ -12,7 +12,7 @@ reports to the same requested experiment, not to exactly simultaneous readings.
 ## Preparation and completion
 
 PC sends Feather `h` and P4 `w`. It waits for `COMPARE READY:`, `DAC MODE:` and
-`RAM READY:` before sending Feather `6` (1,024,000 requested samples/second).
+`RAM READY:` before sending Feather `g` (1,024,000 requested samples/second).
 `--constant` requires `DAC MODE: CONSTANT code=135 ...`; the sine comparison
 uses the other mode. Older firmware without DAC MODE will time out: rebuild the
 matching Feather environment. P4 refusing mode selection requires a P4 reset.
@@ -47,7 +47,7 @@ each burst lasts approximately 500 us. `INPUT_END run=...` terminates the record
 
 `WAVE_BEGIN run=... rate=... bins=600 samplesPerBin=... clean=...` precedes
 `WAVE,index,min,max,mean` rows and matching `WAVE_END run=...`.
-Values are signed 24-bit counts. At stage 6, each bin combines 512 consecutive
+Values are signed 24-bit counts. At 1,024,000 samples/second, each bin combines 512 consecutive
 decoded samples, nominally 0.5 ms. P4 skips one second before collecting 300 ms.
 The PC derives bin midpoint time from the index, not USB arrival time.
 

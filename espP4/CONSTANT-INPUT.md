@@ -10,7 +10,7 @@ Separate Feather environment `ads127-p4-constant` holds DAC code 135, nominal
 It repeats the same write every 500 us to preserve the earlier scheduling load.
 Normal sine and production builds are unchanged. P4 firmware is unchanged.
 Keep A1->A2 and the existing TI coax/ground wiring. The reader still selects
-RAM mode, waits for both boards, then starts one bounded stage-6 capture.
+RAM mode, waits for both boards, then starts one bounded 1,024,000-sample/s capture.
 
 First run `python .\espP4\test\constantChecks.py` from the repository root.
 Then build/upload the Feather environment above using PlatformIO. Close serial

@@ -18,6 +18,7 @@
 #pragma once
 #include <cstdint>
 #include <vector>
+
 /** @brief Test-owned copy of submitted words, with an optional rejected batch. */
 struct OutputCheck
 {

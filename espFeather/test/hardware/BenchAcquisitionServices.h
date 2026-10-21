@@ -20,6 +20,7 @@
 #include "AcquisitionServices.h"
 #include "BenchDac.h"
 #include "InputSnapshot.h"
+
 /**
  * @brief Own the selected DAC test and optional A2 measurements for one firmware image.
  * Arduino's task owns these objects; BenchDac owns its separately scheduled timer.
@@ -29,14 +30,14 @@ class BenchAcquisitionServices : public AcquisitionServices
 {
 public:
     bool initialize() override;
-    bool externalInput() const override;
+    bool getExternalInput() const override;
     void describe(bool idle) override;
     void reset() override;
     bool start() override;
     void begin() override;
     void poll() override;
-    bool failed() override;
-    bool sampling() const override;
+    bool getFailed() override;
+    bool getSampling() const override;
     void finish(unsigned long runId, bool clean) override;
 private:
     bool _ready = false;

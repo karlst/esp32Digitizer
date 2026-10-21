@@ -55,7 +55,7 @@ midpoint bias when its control input is open; connected-board behavior and DAC
 loading still need verification. Keep the waveform, wiring and P4 firmware the
 same for the comparison. Expect `ADC register 0x08: wanted 0x04, read 0x04, OK`.
 
-Boot leaves DAC disabled and ADC idle. With P4 prepared, Feather `6` configures
+Boot leaves DAC disabled and ADC idle. When requested, Feather `g` configures
 the ADC and asks P4 to arm. Only matching READY starts the DAC, then ADC START.
 A DAC initialization/start failure refuses the test. Stop/timeout/receiver-fault
 paths request ADC stop and disable DAC output. Callback DAC driver errors also
@@ -96,7 +96,7 @@ configured behavior, not measured wiring or voltage. No P4 rebuild is needed.
 
 ## Run and interpretation
 
-After the powered wiring is ready: P4 `p` -> SD READY -> Feather `6` -> READY2,
+After the powered wiring is ready: Feather `g` -> automatic SD preparation -> READY3,
 DAC ON and ADC START echo -> automatic stop after 60s -> DAC OFF -> P4 PROFILE
 and final SD SAVED. Do not remove card/power before finalization. Retain the
 capture, header histogram, PROFILE, DAC and SD output. Repeated startup-handshake

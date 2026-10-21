@@ -27,7 +27,7 @@ $batch = @"
 @echo off
 call "$environmentScript" >nul
 if %errorlevel% neq 0 exit /b 1
-cl /nologo /std:c++17 /EHsc /W4 /I"$projectRoot/test/fakes" /I"$projectRoot/../shared" /I"$projectRoot/include/adc" /I"$projectRoot/test/hardware" "$projectRoot/test/ads127DriverChecks.cpp" "$projectRoot/src/adc/Ads127L18.cpp" "$projectRoot/src/adc/Ads127LowRate.cpp" /Fe:adcDriverChecks.exe
+cl /nologo /std:c++17 /EHsc /W4 /I"$projectRoot/test/fakes" /I"$projectRoot/../common" /I"$projectRoot/include/adc" /I"$projectRoot/test/hardware" "$projectRoot/test/ads127DriverChecks.cpp" "$projectRoot/src/adc/Ads127L18.cpp" "$projectRoot/src/adc/Ads127LowRate.cpp" /Fe:adcDriverChecks.exe
 if %errorlevel% neq 0 exit /b 1
 adcDriverChecks.exe
 exit /b %errorlevel%

@@ -62,23 +62,25 @@ static void checkRecordingFormat()
     // Build headers in RAM, then inspect fixed offsets independently. This checks
     // the format and large counts, not an actual card write or a 30-minute run.
     uint8_t header[512];
-    recordingFormat::makeHeader(header, true, 0x12345678, 6, 1024000, 18, 0xabcdef01);
+    recordingFormat::makeHeader(header, true, 0x12345678, 1024000, 18, 0xabcdef01);
     assert(std::memcmp(header, "P4ADC03", 8) == 0);
     assert(header[8] == 3 && header[12] == 1);
     assert(header[16] == 0x78 && header[19] == 0x12);
+    assert(header[20] == 0 && header[21] == 0 && header[22] == 0 && header[23] == 0);
     assert(header64(header + 28) == 18 && header[36] == 1 && header[39] == 0xab);
     assert(header[40] == 3 && header64(header + 44) == 6);
     for (size_t index = 52; index < sizeof(header); ++index) { assert(header[index] == 0); }
     for (uint64_t payloadBytes : {0xffffffffULL, 0x100000000ULL, 5529600000ULL, 10000000000ULL})
     {
-        recordingFormat::makeHeader(header, false, 1, 6, 1024000, payloadBytes, 0xabcdef01);
+        recordingFormat::makeHeader(header, false, 1, 1024000, payloadBytes, 0xabcdef01);
         assert(header64(header + 28) == payloadBytes && header64(header + 44) == payloadBytes / 3);
         assert(header[36] == 1 && header[39] == 0xab && header[40] == 3 && header[12] == 0);
     }
-    sdTestData::makeHeader(header, true, 1, 0xffffffff, 812500, 20, 0);
+    sdTestData::makeHeader(header, true, 1, 812500, 20, 0);
     assert(std::memcmp(header, "P4SYN01", 8) == 0 && header[8] == 1);
+    assert(header[20] == 0 && header[21] == 0 && header[22] == 0 && header[23] == 0);
     for (size_t index = 36; index < sizeof(header); ++index) { assert(header[index] == 0); }
-    recordingFormat::makeHeader(header, false, 0, 0, 0, 0, 0);
+    recordingFormat::makeHeader(header, false, 0, 0, 0, 0);
     assert(header[12] == 0 && header64(header + 28) == 0 && header64(header + 44) == 0);
     assert(ads127BenchTiming::runMs == 1800000 && ads127BenchTiming::receiverTimeoutMs == 1805000);
     assert(uint64_t{1024000} * ads127BenchTiming::runMs / 1000 == 1843200000ULL);
@@ -237,12 +239,12 @@ static void checkReference(const std::vector<unsigned>& pairs, unsigned frameClo
     FrameDecoder frameDecoder;
     frameDecoder.reset(frameClocks);
     feedChunks(frameDecoder, pairs, chunkSize, memoryOffset);
-    const auto& captureStatsActual = frameDecoder.stats();
+    const auto& captureStatsActual = frameDecoder.getCaptureStats();
     assert(captureStatsActual._clocks == expected._clocks && captureStatsActual._frames == expected._frames);
     assert(captureStatsActual._words == expected._words && captureStatsActual._badHeaders == expected._badHeaders);
     assert(captureStatsActual._badPeriods == expected._badPeriods && captureStatsActual._shortWords == expected._shortWords);
     assert(captureStatsActual._latestWord == expected._latestWord && captureStatsActual._latestSample == expected._latestSample);
-    assert(frameDecoder.pendingBits() == expectedPending);
+    assert(frameDecoder.getPendingBits() == expectedPending);
     for (unsigned index = 0; index < 256; ++index)
     {
         assert(captureStatsActual._headers[index] == expected._headers[index]);
@@ -293,7 +295,7 @@ static void checkOutput()
         frameDecoder.setOutput(collectOutput, &outputCheck);
         frameDecoder.reset(32);
         feedChunks(frameDecoder, pairs, chunk);
-        assert(outputCheck._words == expected && !frameDecoder.outputFailed());
+        assert(outputCheck._words == expected && !frameDecoder.getOutputFailed());
         assert(outputCheck._packed.size() == expected.size() * 3);
         for (size_t index = 0; index < expected.size(); ++index)
         {
@@ -302,7 +304,7 @@ static void checkOutput()
                 (static_cast<uint32_t>(outputCheck._packed[index * 3 + 2]) << 16);
             assert(restored == (expected[index] & 0xffffff));
         }
-        assert(frameDecoder.stats()._words == expected.size());
+        assert(frameDecoder.getCaptureStats()._words == expected.size());
     }
 
     FrameDecoder frameDecoder;
@@ -311,8 +313,8 @@ static void checkOutput()
     frameDecoder.setOutput(collectOutput, &outputCheck);
     frameDecoder.reset(32);
     feedChunks(frameDecoder, pairs, 20000);
-    assert(frameDecoder.outputFailed() && outputCheck._calls == 2 && outputCheck._words.size() == 512);
-    assert(frameDecoder.stats()._words == expected.size());
+    assert(frameDecoder.getOutputFailed() && outputCheck._calls == 2 && outputCheck._words.size() == 512);
+    assert(frameDecoder.getCaptureStats()._words == expected.size());
     for (size_t index = 0; index < outputCheck._words.size(); ++index)
     {
         assert(outputCheck._words[index] == expected[index]);
@@ -320,7 +322,7 @@ static void checkOutput()
     outputCheck = {};
     frameDecoder.reset(32);
     feedChunks(frameDecoder, pairs, 4096);
-    assert(outputCheck._words == expected && !frameDecoder.outputFailed());
+    assert(outputCheck._words == expected && !frameDecoder.getOutputFailed());
     puts("PASS: all output words, batch boundaries, rejection latch and reset.");
 }
 
@@ -430,11 +432,11 @@ int main()
             }
             appendFrame(pairs, slots * 32, 0x08ffffffU);
             feedChunks(frameDecoder, pairs);
-            const auto& captureStats = frameDecoder.stats();
+            const auto& captureStats = frameDecoder.getCaptureStats();
             assert(captureStats._words == 101 && captureStats._frames == 101);
             assert(captureStats._badHeaders == 0 && captureStats._badPeriods == 0 && captureStats._shortWords == 0);
             assert(captureStats._headers[8] == 101 && captureStats._latestSample == -1);
-            assert(frameDecoder.pendingBits() == 0);
+            assert(frameDecoder.getPendingBits() == 0);
 
             // A fresh run must clear counters and discard an initially high
             // partial frame. The next real rising edge recovers alignment.
@@ -443,8 +445,8 @@ int main()
             appendFrame(pairs, slots * 32, 0x08123456U);
             appendFrame(pairs, slots * 32, 0x08800000U);
             feedChunks(frameDecoder, pairs);
-            assert(frameDecoder.stats()._words == 1);
-            assert(frameDecoder.stats()._latestSample == -8388608);
+            assert(frameDecoder.getCaptureStats()._words == 1);
+            assert(frameDecoder.getCaptureStats()._latestSample == -8388608);
         }
     }
 
@@ -457,8 +459,8 @@ int main()
     appendFrame(pairs, 32, 0x18123456U);
     appendFrame(pairs, 32, 0x48123456U);
     feedChunks(frameDecoder, pairs);
-    assert(frameDecoder.stats()._badHeaders == 3);
-    assert(frameDecoder.stats()._badExamples[0] == 0x09123456U);
+    assert(frameDecoder.getCaptureStats()._badHeaders == 3);
+    assert(frameDecoder.getCaptureStats()._badExamples[0] == 0x09123456U);
 
     // Remove a single clock in the first frame. Its next rising FSYNC is early;
     // recovery at that edge must retain the error and decode the following word.
@@ -468,8 +470,8 @@ int main()
     appendFrame(pairs, 32, 0x087fffffU);
     pairs.erase(pairs.begin() + 24);
     feedChunks(frameDecoder, pairs);
-    assert(frameDecoder.stats()._badPeriods == 1 && frameDecoder.stats()._shortWords == 1);
-    assert(frameDecoder.stats()._latestSample == 8388607);
+    assert(frameDecoder.getCaptureStats()._badPeriods == 1 && frameDecoder.getCaptureStats()._shortWords == 1);
+    assert(frameDecoder.getCaptureStats()._latestSample == 8388607);
 
     // A final incomplete word is reported separately, never counted as complete.
     frameDecoder.reset(32);
@@ -477,7 +479,7 @@ int main()
     appendFrame(pairs, 32, 0x08123456U);
     pairs.resize(16);
     feedChunks(frameDecoder, pairs);
-    assert(frameDecoder.stats()._words == 0 && frameDecoder.pendingBits() == 12);
+    assert(frameDecoder.getCaptureStats()._words == 0 && frameDecoder.getPendingBits() == 12);
 
     // Deliberately change only payload: headers cannot detect this corruption.
     frameDecoder.reset(32);
@@ -485,8 +487,8 @@ int main()
     appendFrame(pairs, 32, 0x08123456U);
     pairs[20] ^= 1;
     feedChunks(frameDecoder, pairs);
-    assert(frameDecoder.stats()._badHeaders == 0);
-    assert(frameDecoder.stats()._latestWord != 0x08123456U);
+    assert(frameDecoder.getCaptureStats()._badHeaders == 0);
+    assert(frameDecoder.getCaptureStats()._latestWord != 0x08123456U);
     puts("PASS: packing phases, frame lengths, block splits, sign, reset, bad headers, missing clock and partial tail.");
     puts("PASS: independent reference comparison, varied payloads, FSYNC glitches, truncated streams and all packed-byte values.");
     puts("PASS: sixteen edge positions, unaligned input addresses and fixed group/block splits.");

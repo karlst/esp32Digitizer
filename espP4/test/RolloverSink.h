@@ -19,6 +19,7 @@
 #include "ByteSink.h"
 #include <cassert>
 #include <cstring>
+
 /** @brief Mock destination verifies every block before the caller reuses its source. */
 class RolloverSink : public ByteSink
 {

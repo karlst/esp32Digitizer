@@ -7,18 +7,19 @@ From the repository root in ordinary PowerShell:
 ```
 
 The runner also works from other directories when invoked by its full path.
-It calls twelve suites in `espP4/test` and `espFeather/test`; test logic
+It calls thirteen suites in `espP4/test` and `espFeather/test`; test logic
 stays in those projects. It stops on the first failure, names the failed suite,
 and prints how many suites passed. A failed run returns a failing process exit
 when called through PowerShell `-File`.
 
 Requirements: Microsoft C++ build tools (as used by the existing runners) and
 Python 3 on PATH. Use `-Python 'C:\path\to\python.exe'` to select an interpreter.
-No Python packages beyond the standard library are needed by these twelve suites.
+No Python packages beyond the standard library are needed by these thirteen suites.
 The writer checks include the existing counter wraparound test beyond 4 GiB;
 that suite may take longer than the small arithmetic checks.
 
-Coverage: decoder, recording header/packing, shared writer, exact sample values,
+Coverage: recording lifecycle/command-independent sequencing, decoder,
+recording header/packing, buffered writer, exact sample values,
 RAM summaries, profiling math, Feather ADC driver/configuration, Feather DAC math, Feather status parsing, and
 Python recording/measurement analysis. Two suites check the hardware smoke
 readback parser and pass/fail rules using synthetic data, without accessing boards. PC tests cannot establish ADC/DAC analog

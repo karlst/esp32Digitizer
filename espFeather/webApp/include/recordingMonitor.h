@@ -18,7 +18,7 @@
  */
 #pragma once
 #include <Arduino.h>
-#include "../../../shared/RecordingStatus.h"
+#include "RecordingStatus.h"
 
 /**
  * @brief Format receiver recording telemetry without claiming stale data is current.
@@ -34,5 +34,5 @@ public:
     // True only when the accepted UART frame supports recording statistics.
     // This is protocol capability, not card-present or recording-active status.
     bool _available = false;
-    String stateJson(bool connected) const;
+    String getStateJson(bool connected) const;
 };

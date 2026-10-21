@@ -26,13 +26,14 @@
  * succeeded. flush must report whether storage synchronization succeeded.
  * Neither method is called from the sample-producing interrupt.
  * "Sink" simply means a destination for bytes. These pure virtual functions
- * (= 0) are a contract, not file-writing implementations. sdRecordingSink
+ * (= 0) are a contract, not file-writing implementations. SdRecorder
  * supplies them for this project; a different project can supply another class
  * without changing the buffer. The default destructor does not save/close data.
  */
 class ByteSink
 {
 public:
+
     /**
      * @brief Allow destruction through the interface after the writer stops.
      */

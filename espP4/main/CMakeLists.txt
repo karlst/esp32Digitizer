@@ -10,16 +10,18 @@
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General
 # Public License in the repository LICENSE file or <https://www.gnu.org/licenses/>.
 
-# Compile P4 capture and storage plus the shared byte writer. The reusable writer
+# Compile P4 capture and storage plus the P4-local reusable byte writer. The reusable writer
 # has no receiver dependency; these include paths expose its interface to sdRecorder.
 # Select one small startup file. Application and storage implementations are shared.
 set(startup "src/main.cpp")
 if(CONFIG_P4_HARDWARE_SMOKE OR CONFIG_P4_CAPTURE_PROFILE OR CONFIG_P4_DIAGNOSTICS)
     set(startup "../test/hardware/main.cpp")
 endif()
-idf_component_register(SRCS ${startup} "src/RecordingApplication.cpp" "src/FrameDecoder.cpp" "src/SdRecorder.cpp"
-    "../../shared/bufferedWriter/src/BufferedWriter.cpp"
-    INCLUDE_DIRS "include" "../../shared" "../../shared/bufferedWriter/src"
+idf_component_register(SRCS ${startup} "src/RecordingApplication.cpp"
+    "src/RecordingController.cpp" "src/ConsoleRecordingReporter.cpp"
+    "src/AdcReceiver.cpp" "src/SampleDecoder.cpp" "src/FrameDecoder.cpp" "src/SdRecorder.cpp"
+    "../lib/bufferedWriter/src/BufferedWriter.cpp"
+    INCLUDE_DIRS "include" "../../common" "../lib/bufferedWriter/src"
     REQUIRES esp_driver_parlio esp_driver_uart esp_driver_gpio esp_timer fatfs sdmmc esp_driver_sdmmc esp_psram esp_rom esp_hw_support)
 # Allocate the ring separately at runtime: 4 MiB total, writes of up to 128 KiB.
 # Apply identical definitions to all sources so class layouts agree.

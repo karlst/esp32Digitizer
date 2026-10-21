@@ -57,6 +57,20 @@ class AnalogReaderChecks(unittest.TestCase):
             self.assertIn('frequency=10.000 Hz', output.getvalue())
             self.assertIn('min=-100000 max=100000', output.getvalue())
 
+    def testReservedHeaderField(self):
+        """Both zeroed new headers and historical index values retain the same layout."""
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'test.bin'
+            for reserved in (0, 6):
+                self.makeFile(path)
+                data = bytearray(path.read_bytes())
+                struct.pack_into('<I', data, 20, reserved)
+                path.write_bytes(data)
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output):
+                    inspectRecording(path)
+                self.assertIn('frequency=10.000 Hz', output.getvalue())
+
     def testRejectInvalidCorruptAndTruncated(self):
         """A readable waveform must not conceal capture failure or storage damage."""
         with tempfile.TemporaryDirectory() as directory:

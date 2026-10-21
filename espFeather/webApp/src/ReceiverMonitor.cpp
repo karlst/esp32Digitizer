@@ -18,7 +18,7 @@
  *
  * webApp calls begin() once and update() on each Arduino loop pass. update()
  * assembles serial lines; acceptLine() validates every field before storing it.
- * stateJson() supplies the browser snapshot. sendCommand() sends a request once
+ * getStateJson() supplies the browser snapshot. sendCommand() sends a request once
  * and leaves it pending until a matching receiver report confirms or rejects it.
  *
  * A fresh serial message proves only that receiver is communicating. To say samples
@@ -203,7 +203,7 @@ bool ReceiverMonitor::acceptLine(uint32_t nowMs)
         }
         // Commit the complete validated snapshot at once. parsed indexes follow
         // wire-field order after the receiver tag and version; keep them aligned with
-        // shared/receiverStatusProtocol.md when extending the message.
+        // espFeather/webApp/receiverStatusProtocol.md when extending the message.
         _uptimeMs = static_cast<uint32_t>(parsed[0]);
         _adcReady = parsed[1] != 0;
         _sampleCount = parsed[2];
@@ -323,7 +323,7 @@ void ReceiverMonitor::update()
  * Version-2 reports lack diagnostics and show them as null. Command outcome fields
  * remain available even when live measurements become unknown.
  */
-String ReceiverMonitor::stateJson() const
+String ReceiverMonitor::getStateJson() const
 {
     const uint32_t nowMs = millis();
     const uint32_t ageMs = nowMs - _lastFrameMs;
@@ -337,7 +337,7 @@ String ReceiverMonitor::stateJson() const
     retVal += ",\"commandId\":" + String(_commandId);
     retVal += ",\"commandStatus\":\"" + _commandStatus + "\"";
     retVal += ",\"commandAction\":\"" + _commandAction + "\"";
-    retVal += ",\"recording\":" + _recordingMonitor.stateJson(connected);
+    retVal += ",\"recording\":" + _recordingMonitor.getStateJson(connected);
     // A counter is a decimal JSON string so browsers cannot round large totals.
     // Missing old-firmware diagnostics and disconnected values are explicitly null.
     const bool showDiagnostics = connected && _diagnosticsAvailable;

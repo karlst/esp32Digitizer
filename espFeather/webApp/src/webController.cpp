@@ -69,7 +69,7 @@ void WebController::begin()
     _webServer.on("/api/receiver", HTTP_GET, [this]()
     {
         _webServer.sendHeader("Cache-Control", "no-store");
-        _webServer.send(200, "application/json", _receiverMonitor.stateJson());
+        _webServer.send(200, "application/json", _receiverMonitor.getStateJson());
     });
 
     // State reads synchronize reloads and multiple browser clients.
@@ -152,7 +152,7 @@ void WebController::update()
 void WebController::sendDacState()
 {
     _webServer.sendHeader("Cache-Control", "no-store");
-    _webServer.send(200, "application/json", _dacGenerator.stateJson());
+    _webServer.send(200, "application/json", _dacGenerator.getStateJson());
 }
 
 /**
@@ -231,7 +231,7 @@ void WebController::commandReceiver(const char* action)
     _webServer.sendHeader("Cache-Control", "no-store");
     if (valid && validRecord && confirmed && _receiverMonitor.sendCommand(action, static_cast<uint32_t>(rate), record))
     {
-        _webServer.send(202, "application/json", _receiverMonitor.stateJson());
+        _webServer.send(202, "application/json", _receiverMonitor.getStateJson());
     }
     else
     {
@@ -273,5 +273,5 @@ void WebController::sendBlinkState()
     // Prevent caches from returning stale hardware command state.
     _webServer.sendHeader("Cache-Control", "no-store");
     _webServer.send(200, "application/json",
-        _ledBlinker.isEnabled() ? "{\"enabled\":true}" : "{\"enabled\":false}");
+        _ledBlinker.getEnabled() ? "{\"enabled\":true}" : "{\"enabled\":false}");
 }

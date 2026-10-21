@@ -23,7 +23,7 @@
 #include "SyntheticRecordingLayout.h"
 
 /** @brief One finite, explicitly requested test; no ADC or DMA control calls.
- * CPU0 starts only after preparation. CPU1 submits paced batches through the
+ * CPU0 requests preparation. CPU1 waits for readiness, then submits paced batches through the
  * same ring and checksum operation as the decoder. The disk task remains CPU0.
  */
 class SdWriteTest

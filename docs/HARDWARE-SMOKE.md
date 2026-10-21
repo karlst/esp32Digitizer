@@ -14,8 +14,8 @@ Run the PC smoke checks from the repository root:
 .\test\runSmokeChecks.ps1
 ```
 
-There are now eleven suites. The two additional suites exercise the real readback
-parser, square-wave timing, and rejection of missing, corrupt, or mismatched reports.
+There are thirteen suites, including recording lifecycle checks, readback
+parsing, square-wave timing, and rejection of missing, corrupt or mismatched reports.
 Passing these checks does not establish hardware performance.
 
 ## Build and upload Feather
@@ -50,7 +50,9 @@ build, close any COM3 monitor and upload:
 idf.py -B build/smoke -D SDKCONFIG=sdkconfig.smoke -p COM3 flash
 ```
 
-Neither board starts the signal or recording at boot.
+Neither board starts the signal or recording at boot. Rebuild and upload both
+boards for automatic preparation: the runner requires smoke firmware version 3
+on both boards and refuses older firmware before starting the test.
 
 ## Connect and run
 
@@ -72,8 +74,10 @@ Close serial monitors and reset both boards before each run. From the repository
 ```
 
 The script first checks that both boards identify as the correct idle firmware.
-It prepares SD, starts stage 6 (1,024,000 samples/second), records for 30 seconds,
-then waits for full readback. Preparation and readback add time beyond 30 seconds.
+It requests the default configuration with `g` (1,024,000 samples/second). P4 prepares SD automatically,
+then permits Feather to start the ADC. It records for 30 seconds,
+then waits for full readback. Preparation and readback add time beyond 30 seconds. Preparation has a
+180-second limit; Feather allows 185 seconds for readiness. No `p` is required.
 Alternate ports can be supplied as `-Feather COM4 -P4 COM3`. Python needs pyserial,
 as do the existing capture scripts. The runner never builds or uploads firmware.
 
@@ -100,7 +104,7 @@ not live claims about hardware still running.
 A failure gives a plain-language reason and a nonzero process result. Complete
 board logs and the result are retained under `captures/hardware-smoke/<timestamp>`.
 No card transfer to the PC is needed. If interrupted, the runner requests stop;
-Feather also has a 30-second stop and P4 a 35-second timeout. Keep the card installed
+After receiver readiness, Feather has a 30-second stop and P4 a 35-second timeout. Keep the card installed
 until writing/readback has finished. USB failure is not confirmation of a clean stop.
 
 ## What is checked

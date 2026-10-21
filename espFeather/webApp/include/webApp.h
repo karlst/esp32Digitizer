@@ -31,14 +31,17 @@
 class WebApp
 {
 public:
+
     /**
      * @brief Construct the server and bind its controller dependencies.
      */
     WebApp();
+
     /**
      * @brief Initialize hardware, filesystem, Wi-Fi, and routes; report success.
      */
     bool begin();
+
     /**
      * @brief Service HTTP and nonblocking hardware activity.
      */

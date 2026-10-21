@@ -1,6 +1,6 @@
 # Project status
 
-Updated October 20, 2026. This is the single current status document. Dated
+Updated October 21, 2026. This is the single current status document. Dated
 measurements and the reasons for earlier decisions are in
 [test history](P4-EARLY-TEST-HISTORY.md).
 
@@ -30,6 +30,24 @@ hardware runs; saved logs and console records support the conclusions.
 
 ## Current bench setup
 
+The latest source replaces configuration indexes with `Ads127Config` objects.
+`adsConfig` defaults to 1,024,000 samples/second; Feather `g` starts that default.
+ARM3/READY3 transmit the actual rate. The recorder no longer accepts a stage ID;
+its old header slot is reserved and zeroed. `RecordingReporter` is an interface
+with terminal output supplied by `ConsoleRecordingReporter`. Karl's earlier
+smoke pass predates these changes. They have not yet been built or tested on
+hardware; hardware testing remains deferred.
+
+
+The current source now prepares storage as part of a start request; the separate
+`p` command and `claim()` step have been removed. SD task startup is `initTask()`.
+Preparation has a 180-second limit; Feather waits 185 seconds for readiness.
+Neither interval counts toward recording time. Getter names and destination-lock
+names now follow the requested convention. These changes still need Karl's PC
+checks, both firmware builds/uploads, and a fresh hardware run. The hardware-smoke
+runner requires version 3 firmware on both boards; earlier results below do not
+verify this update.
+
 The last reported uploads are **Feather `ads127-hardware-smoke` on COM4** and
 **P4 `build/smoke`, `sdkconfig.smoke` on COM3**. Ports can change after reconnection.
 The last run used both USB supplies, ADC 6 V power, the existing digital wiring,
@@ -52,15 +70,16 @@ as the last uploaded smoke environment. Always select the intended experiment.
   one run command, report meanings, and acceptance limits.
 - [Experiment selection](../espP4/CURRENT-SETUP.md): matching Feather/P4 firmware
   choices for SD, RAM comparison, constant input, and endurance work.
-- [PC smoke checks](../test/README.md): twelve suites; these do not operate boards.
+- [PC smoke checks](../test/README.md): thirteen suites; these do not operate boards.
 - [Test history](P4-EARLY-TEST-HISTORY.md) and [retained evidence](evidence/README.md):
   dated results and supporting material.
 - [Open work](../TODO.md): proposed work and unresolved decisions.
 - [Working agreements](../AGENTS.md): coding conventions and Karl's control of
   Git, build/upload commands, and hardware operations.
 
-Application code is under `espP4` and `espFeather`; reusable
-components live under `shared`. Hardware tests and profiling live with tests.
+Application code is under `espP4` and `espFeather`. Definitions used by both
+boards live under `common`; the reusable writer is in `espP4/lib/bufferedWriter`.
+Hardware tests and profiling live with tests.
 The Feather web interface is preserved separately in `espFeather/webApp` and is
 excluded from the current terminal build.
 
@@ -106,5 +125,17 @@ live in Feather tests.
 
 Karl subsequently reported all twelve PC checks passed, P4 and both Feather
 builds succeeded, and a fresh 30-second hardware smoke test passed after uploads.
-These verify the refactor at smoke-test level. The later receiver-interface
-naming cleanup still needs its PC checks; it does not change the P4 capture path.
+These verify that earlier refactor at smoke-test level. Karl also reported PC
+checks passing after the receiver-interface naming cleanup, without another
+hardware run.
+
+October 21 changes separate P4 control, reporting and data transfer into
+`RecordingController`, `RecordingApplication`, `RecordingReporter`, `AdcReceiver`
+and `SampleDecoder`. The observer no longer handles commands. SD formatting
+moves into the reporter; file layout, buffer sizes and task placement are retained.
+`shared` is replaced by project-owned locations and a small `common` folder.
+See [Recording classes](RECORDING-CLASSES.md).
+
+A new PC suite exercises lifecycle sequencing and injected failures. **The
+October 21 refactor has not yet been built or tested.** Karl must run the PC
+smoke checks, P4 and Feather builds, and hardware smoke after uploading.

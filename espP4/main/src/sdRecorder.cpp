@@ -14,8 +14,8 @@
 
 /** @file SdRecorder.cpp
  * @brief Save received sample bytes to a new file on the P4's onboard SD card.
- * initialize() allocates memory once. prepare() asks the disk task to open and
- * reserve a file; claim() assigns that prepared file to a run. Core 1 then
+ * initTask() allocates memory and starts the disk task once. prepare() supplies
+ * run parameters and asks that task to open and reserve a file. Core 1 then
  * submits data while the Core 0 disk task writes it. finish() requests final
  * writing and verification after submissions stop. No method formats the card
  * or deletes existing files. Four-bit SD means four parallel data wires.
@@ -37,8 +37,8 @@
  * 128 KiB. This calls our write(), which uses a 16 KiB temporary internal-RAM
  * buffer and f_write(). The ring span remains unavailable for reuse until the
  * write succeeds. PSRAM is external RAM, separate from the internal DMA and
- * raw-block allocations in main.cpp. The 4 MiB ring holds about 1.37 seconds of
- * stage-6 three-byte samples when empty; it cannot fix a persistently slow card.
+ * raw-block allocations in AdcReceiver. The 4 MiB ring holds about 1.37 seconds of
+ * 1,024,000/s three-byte samples when empty; it cannot fix a persistently slow card.
  *
  * SD READY means the file was prepared, ADC DONE means capture stopped, and
  * SD SAVED means capture checks plus drain/readback/header/close succeeded.
@@ -59,6 +59,11 @@
 #include "sd_pwr_ctrl_by_on_chip_ldo.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "sdkconfig.h"
+
+#if !CONFIG_SPIRAM
+#error "SD recording needs PSRAM: build with sdkconfig.sd.defaults as documented."
+#endif
 
 static constexpr size_t scratchBytes = 16384;
 static_assert(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__, "File words require little endian");
@@ -71,8 +76,9 @@ static_assert(sizeof(FSIZE_t) == 8, "exFAT file sizes must be 64 bit");
  * Startup selects a smaller reservation for short recordings. The observer is
  * borrowed and must remain alive until the permanent disk task stops (normally reset).
  */
-SdRecorder::SdRecorder(uint64_t reservedBytes, RecordingReadback* recordingReadback)
-    : _reservedBytes(reservedBytes), _recordingReadback(recordingReadback) {}
+SdRecorder::SdRecorder(uint64_t reservedBytes, RecordingReadback* recordingReadback,
+    RecordingReporter* recordingReporter)
+    : _recordingReporter(recordingReporter), _reservedBytes(reservedBytes), _recordingReadback(recordingReadback) {}
 
 /** @brief Allocate ring storage in external PSRAM; never fall back to internal RAM. */
 static uint8_t* allocateRing(uint32_t bytes)
@@ -104,7 +110,7 @@ static uint64_t recordingClock()
  * the new task runs on Core 0 with an 8192-byte stack and priority 4.
  * A false return is fatal to startup in main.cpp; this is not a retry interface.
  */
-bool SdRecorder::initialize()
+bool SdRecorder::initTask()
 {
     // Retain the task handle for optional observers; this does not enable profiling.
     TaskHandle_t* taskHandle = &_diskTask;
@@ -117,46 +123,65 @@ bool SdRecorder::initialize()
 
 /**
  * @brief Borrow the persistent writer task handle for runtime/stack diagnostics.
- * Main calls this after initialize() succeeds. The task is never deleted, so
+ * Main calls this after initTask() succeeds. The task is never deleted, so
  * the profiler may inspect it without owning, stopping or scheduling it.
  */
-TaskHandle_t SdRecorder::taskHandle() const
+TaskHandle_t SdRecorder::getTaskHandle() const
 {
     return _diskTask;
 }
 
 /**
- * @brief Request a new file from Core 0 after idle, completed, or failed recording.
- * True means the request was queued by changing state. The disk task later
- * prints READY or PREPARE FAILED. False means busy or blocked after failed
- * close; neither result changes existing file contents in this function.
+ * @brief Request file setup with its recording parameters; Core 0 serializes requests.
+ * run identifies the recording; rate is
+ * samples (or test words) per second. Layout defaults to three-byte ADC samples.
+ * True means accepted. The disk task later makes getReady true or reports failure.
+ * Parameters are written before the atomic state change makes them visible to
+ * the disk task. A busy or unclosed file cannot be reassigned to another run.
  */
-bool SdRecorder::prepare()
+bool SdRecorder::prepare(uint32_t run, uint32_t rate, const RecordingLayout* recordingLayout)
 {
     const phase current = _state.load();
-    const bool retVal = current == phase::idle || current == phase::complete || current == phase::error;
-    if (retVal) { _state.store(phase::preparing); }
-    return retVal;
-}
-
-/**
- * @brief Assign an already prepared file to a test before it submits bytes.
- * run identifies the test, stage identifies its format/rate choice, and rate
- * is samples (or generated words) per second for the file header. True changes
- * ready to running; false means no file is ready. No card I/O occurs here.
- */
-bool SdRecorder::claim(uint32_t run, uint32_t stage, uint32_t rate, const RecordingLayout* recordingLayout)
-{
-    const bool retVal = _state.load() == phase::ready;
+    const bool retVal = _diskTask != nullptr &&
+        (current == phase::idle || current == phase::complete || current == phase::error);
     if (retVal)
     {
         _recordingLayout = recordingLayout != nullptr ? recordingLayout : &_recordingLayoutDefault;
         _runId = run;
-        _stageId = stage;
         _sampleRate = rate;
-        _state.store(phase::running);
+        _preparationCancelled.store(false);
+        _state.store(phase::preparing);
     }
     return retVal;
+}
+
+/** @brief Confirm file setup completed and cancellation has not been requested. */
+bool SdRecorder::getReady() const
+{
+    return _state.load() == phase::running && !_preparationCancelled.load();
+}
+
+/**
+ * @brief Prevent late readiness without waiting for a filesystem call to return.
+ * Called only before samples are submitted. The disk task closes the unused
+ * file; a new prepare remains refused until that cleanup finishes.
+ */
+void SdRecorder::cancelPreparation()
+{
+    _preparationCancelled.store(true);
+}
+
+/** @brief The disk task closes a cancelled file, retaining its invalid initial header. */
+void SdRecorder::closeCancelledPreparation()
+{
+    const bool closed = !_opened || f_close(&_file) == FR_OK;
+    _opened = !closed;
+    if (!closed && _recordingReporter != nullptr)
+    { _recordingReporter->storageError(RecordingReporter::StorageError::close); }
+
+    // Leave the file on the card; cancellation never deletes existing data.
+    // Publishing idle last allows the next request only after cleanup ends.
+    _state.store(closed ? phase::idle : phase::blocked);
 }
 
 /** @brief Pack at most 512 decoded samples into three-byte records, then copy to ring.
@@ -186,7 +211,7 @@ bool SdRecorder::submitSamples(const uint32_t* words, size_t count)
  */
 bool SdRecorder::submitBytes(const uint8_t* data, uint32_t bytes)
 {
-    const bool retVal = _bufferedWriter.submit(data, bytes);
+    const bool retVal = getReady() && _bufferedWriter.submit(data, bytes);
     if (retVal)
     {
         _submittedCrc = esp_rom_crc32_le(_submittedCrc, data, bytes);
@@ -195,10 +220,13 @@ bool SdRecorder::submitBytes(const uint8_t* data, uint32_t bytes)
     return retVal;
 }
 
-/** @brief Atomic writer failure status, safe for the control task during capture. */
-bool SdRecorder::failed() const
+/** @brief Read preparation or write failure without inspecting a ring being reinitialized. */
+bool SdRecorder::getFailed() const
 {
-    return _bufferedWriter.failed() || _storageBroken.load();
+    const phase current = _state.load();
+    return current == phase::error || current == phase::blocked ||
+        ((current == phase::running || current == phase::finishing || current == phase::complete) &&
+         (_bufferedWriter.getFailed() || _storageBroken.load()));
 }
 
 /** @brief Tell the disk task that no more bytes will be submitted for this run.
@@ -215,7 +243,7 @@ void SdRecorder::finish(bool captureClean, uint32_t expectedSamples)
 }
 
 /**
- * @brief OS task entry: context is the sdRecorder pointer supplied by initialize().
+ * @brief OS task entry: context is the sdRecorder pointer supplied by initTask().
  * Forward to that object's work() loop, which runs for the program's lifetime.
  */
 void SdRecorder::taskEntry(void* context)
@@ -244,11 +272,21 @@ void SdRecorder::work()
                 closed = f_close(&_file) == FR_OK;
                 _opened = !closed;
             }
-            printf("SD %s file=%s (existing files preserved)\n", prepared ? "READY" : "PREPARE FAILED", _path);
-            if (!closed) { printf("SD close failed; restart P4 before retrying\n"); }
-            _state.store(prepared ? phase::ready : (closed ? phase::error : phase::blocked));
+            if (_preparationCancelled.load()) { closeCancelledPreparation(); }
+            else
+            {
+                if (_recordingReporter != nullptr) { _recordingReporter->storagePrepared(prepared, _path); }
+                if (!closed && _recordingReporter != nullptr) { _recordingReporter->storageError(RecordingReporter::StorageError::close); }
+                _state.store(prepared ? phase::running : (closed ? phase::error : phase::blocked));
+            }
         }
-        else if (current == phase::running) { _bufferedWriter.pump(); }
+        else if (current == phase::running)
+        {
+            // Cancellation may arrive just after prepareFile finished. Check
+            // again here so that race cannot leave an unused file open.
+            if (_preparationCancelled.load()) { closeCancelledPreparation(); }
+            else { _bufferedWriter.pump(); }
+        }
         else if (current == phase::finishing) { finishFile(); }
         vTaskDelay(1);
     }
@@ -286,7 +324,7 @@ bool SdRecorder::prepareFile()
         mount.max_files = 2;
         if (error == ESP_OK) { error = esp_vfs_fat_sdmmc_mount("/sd", &host, &slot, &mount, &_card); }
         retVal = error == ESP_OK;
-        if (!retVal) { printf("SD mount failed: %s; no format attempted\n", esp_err_to_name(error)); }
+        if (!retVal && _recordingReporter != nullptr) { _recordingReporter->storageError(RecordingReporter::StorageError::mount, error); }
     }
     if (retVal)
     {
@@ -303,13 +341,12 @@ bool SdRecorder::prepareFile()
         _opened = result == FR_OK;
         if (_opened && _file.obj.fs->fs_type != FS_EXFAT)
         {
-            printf("SD preparation requires exFAT; no format attempted\n");
+            if (_recordingReporter != nullptr) { _recordingReporter->storageError(RecordingReporter::StorageError::needsExfat); }
             result = FR_DENIED;
         }
         if (result == FR_OK)
         {
-            printf("SD reserving %llu bytes; wait for SD READY\n",
-                   static_cast<unsigned long long>(_reservedBytes));
+            if (_recordingReporter != nullptr) { _recordingReporter->storageReserved(_reservedBytes); }
             // Reserve contiguous filesystem space before samples start. The
             // final argument 1 allocates it now. Failure leaves preparation
             // failed; work() attempts to close the newly created file.
@@ -320,14 +357,14 @@ bool SdRecorder::prepareFile()
         {
             // Write an invalid initial header and synchronize it to storage.
             // An interrupted capture must not leave a file marked successful.
-            recordingFormat::makeHeader(_scratch, false, 0, 0, 0, 0, 0);
+            _recordingLayout->makeHeader(_scratch, false, _runId, _sampleRate, 0, 0);
             UINT actual = 0;
             result = f_write(&_file, _scratch, 512, &actual);
             if (result == FR_OK && actual != 512) { result = FR_DISK_ERR; }
             if (result == FR_OK) { result = f_sync(&_file); }
         }
         retVal = result == FR_OK;
-        if (!retVal) { printf("SD prepare FatFS error=%u\n", unsigned(result)); }
+        if (!retVal && _recordingReporter != nullptr) { _recordingReporter->storageError(RecordingReporter::StorageError::prepare, int(result)); }
     }
     if (retVal)
     {
@@ -396,14 +433,14 @@ void SdRecorder::finishFile()
     // Yield between final blocks too, so a full ring drain cannot monopolize
     // CPU0. A failed pump stops here; finish still attempts the required flush.
     bool draining = true;
-    while (_bufferedWriter.queuedBytes() != 0 && draining)
+    while (_bufferedWriter.getQueuedBytes() != 0 && draining)
     {
         draining = _bufferedWriter.pump(true);
         vTaskDelay(1);
     }
     bool ok = _bufferedWriter.finish();
-    const auto statistics = _bufferedWriter.snapshot();
-    const uint32_t recordBytes = _recordingLayout->recordBytes();
+    const auto statistics = _bufferedWriter.getStatistics();
+    const uint32_t recordBytes = _recordingLayout->getRecordBytes();
     ok = ok && _clean && _submittedBytes != 0 && _submittedBytes == _writtenBytes &&
          _writtenBytes % recordBytes == 0;
     // Keep only the 512-byte header and the bytes actually written; release
@@ -415,8 +452,7 @@ void SdRecorder::finishFile()
     if (ioOk) { ioOk = f_lseek(&_file, 512) == FR_OK; }
     uint64_t remaining = _writtenBytes;
     uint64_t nextProgress = 256ULL * 1024 * 1024;
-    printf("SD verifying %llu bytes; keep card inserted until SD SAVED/FAILED\n",
-           static_cast<unsigned long long>(_writtenBytes));
+    if (_recordingReporter != nullptr) { _recordingReporter->storageVerifying(_writtenBytes); }
     if (_recordingReadback != nullptr && recordBytes == 3) { _recordingReadback->reset(_sampleRate); }
     uint32_t crc = 0;
     uint64_t patternErrors = 0;
@@ -435,9 +471,7 @@ void SdRecorder::finishFile()
             remaining -= actual;
             if (_writtenBytes - remaining >= nextProgress)
             {
-                printf("SD verified %llu / %llu bytes\n",
-                       static_cast<unsigned long long>(_writtenBytes - remaining),
-                       static_cast<unsigned long long>(_writtenBytes));
+                if (_recordingReporter != nullptr) { _recordingReporter->storageProgress(_writtenBytes - remaining, _writtenBytes); }
                 nextProgress += 256ULL * 1024 * 1024;
             }
         }
@@ -446,24 +480,21 @@ void SdRecorder::finishFile()
     // Mark valid only if acquisition, writing, and readback all passed so far.
     // Header synchronization and close must also pass before printing SAVED.
     ok = ok && ioOk && crc == _submittedCrc && patternErrors == 0;
-    _recordingLayout->makeHeader(_scratch, ok, _runId, _stageId, _sampleRate, _writtenBytes, _submittedCrc);
+    _recordingLayout->makeHeader(_scratch, ok, _runId, _sampleRate, _writtenBytes, _submittedCrc);
     UINT actual = 0;
     const bool headerOk = f_lseek(&_file, 0) == FR_OK &&
         f_write(&_file, _scratch, 512, &actual) == FR_OK && actual == 512 && f_sync(&_file) == FR_OK;
     const bool closeOk = f_close(&_file) == FR_OK;
     _opened = !closeOk;
     ok = ok && headerOk && closeOk;
-    printf("SD %s file=%s bytes=%llu crc=%08lx ringPeak=%lu/%lu maxWriteOrFlushUs=%lu "
-           "overflow=%lu errors=%lu unsaved=%lu\n", ok ? "SAVED" : "FAILED", _path,
-           static_cast<unsigned long long>(_writtenBytes), static_cast<unsigned long>(crc),
-           static_cast<unsigned long>(statistics._peak), static_cast<unsigned long>(BufferedWriter::_capacity),
-           static_cast<unsigned long>(statistics._maxUs), static_cast<unsigned long>(statistics._overflows),
-           static_cast<unsigned long>(statistics._errors), static_cast<unsigned long>(statistics._unsavedBytes));
-    if (!closeOk) { printf("SD close failed; restart P4 before retrying\n"); }
-    // This is time inside write(), including copying and card waits, excluding
-    // deliberate task sleeps, preparation and readback. Sustained success still
-    // requires the full timed source and SD SAVED, not this average alone.
-    printf("SD writeCallMbps=%.3f\n", _writeUs != 0 ? _writtenBytes * 8.0 / _writeUs : 0.0);
+    // Report only after the final header and close results are known. The
+    // optional reporter formats output; it cannot change the success decision.
+    if (_recordingReporter != nullptr)
+    {
+        _recordingReporter->storageFinished(ok, _path, _writtenBytes, crc, statistics,
+            _writeUs != 0 ? _writtenBytes * 8.0 / _writeUs : 0.0);
+        if (!closeOk) { _recordingReporter->storageError(RecordingReporter::StorageError::close); }
+    }
     _recordingLayout->report(patternErrors);
     if (_recordingReadback != nullptr && recordBytes == 3) { _recordingReadback->report(_runId, ok); }
     _state.store(ok ? phase::complete : (closeOk ? phase::error : phase::blocked));

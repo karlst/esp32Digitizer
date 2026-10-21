@@ -14,7 +14,7 @@
 
 /** @file SdSmokeSummary.cpp
  * @brief Reconstruct SD samples across arbitrary read boundaries and bin them.
- * Read reset(), accept(), complete(), report(). The only input is the recorded
+ * Read reset(), accept(), getComplete(), report(). The only input is the recorded
  * three-byte payload, excluding its header. Bin timestamps use the requested
  * sample rate; they are not an independent hardware clock measurement.
  */
@@ -38,7 +38,7 @@ void SdSmokeSummary::reset(uint32_t samplesPerSecond)
  * Low byte arrives first. Assemble into an unsigned word, then subtract 2^24
  * if sign bit 23 is set. This avoids relying on implementation-defined shifts.
  * E.g. bytes 00 00 80 become -8388608. Count samples beyond 30 seconds too,
- * although there are only 300 bins; complete() rejects an excessive duration.
+ * although there are only 300 bins; getComplete() rejects an excessive duration.
  */
 void SdSmokeSummary::accept(const uint8_t* data, size_t bytes)
 {
@@ -63,13 +63,13 @@ void SdSmokeSummary::accept(const uint8_t* data, size_t bytes)
     }
 }
 
-/** @brief Require stage-6 timing within 20 ms, all bins, and no saturated codes.
+/** @brief Require 1,024,000-sample/s timing within 20 ms, all bins, and no saturated codes.
  * The DMA receiver can omit its final partial block; 20 ms is a gross duration
  * tolerance, not proof of zero lost samples. CRC and receiver errors are checked
  * separately by the recorder. A disconnected but steady signal can pass these
  * structural checks; the PC must also compare against the measured input.
  */
-bool SdSmokeSummary::complete() const
+bool SdSmokeSummary::getComplete() const
 {
     bool retVal = _rate == 1024000 && _partialBytes == 0 && _clipped == 0 &&
         _samples >= uint64_t{_rate} * 30 - _rate / 50 &&
@@ -82,7 +82,7 @@ bool SdSmokeSummary::complete() const
 }
 
 /** @brief Return an individual disk-bin mean in ADC counts, or zero if absent. */
-double SdSmokeSummary::mean(unsigned index) const
+double SdSmokeSummary::getMean(unsigned index) const
 {
     const double retVal = index < 300 && _counts[index] != 0
         ? static_cast<double>(_sums[index]) / _counts[index] : 0.0;
@@ -90,7 +90,7 @@ double SdSmokeSummary::mean(unsigned index) const
 }
 
 /** @brief Return all complete three-byte samples read, including any excess tail. */
-uint64_t SdSmokeSummary::sampleCount() const
+uint64_t SdSmokeSummary::getSampleCount() const
 {
     return _samples;
 }
@@ -103,11 +103,11 @@ void SdSmokeSummary::report(uint32_t run, bool storageClean) const
 {
     std::printf("SMOKE_SD_BEGIN run=%lu rate=%lu samples=%llu bins=300 clean=%u\n",
                 static_cast<unsigned long>(run), static_cast<unsigned long>(_rate),
-                static_cast<unsigned long long>(_samples), unsigned(storageClean && complete()));
+                static_cast<unsigned long long>(_samples), unsigned(storageClean && getComplete()));
     for (unsigned index = 0; index < 300; ++index)
     {
         std::printf("SMOKE_SD,%u,%lu,%.6f\n", index,
-                    static_cast<unsigned long>(_counts[index]), mean(index));
+                    static_cast<unsigned long>(_counts[index]), getMean(index));
     }
     std::printf("SMOKE_SD_END run=%lu\n", static_cast<unsigned long>(run));
 }

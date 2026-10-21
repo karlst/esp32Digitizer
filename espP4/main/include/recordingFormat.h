@@ -80,7 +80,8 @@ inline void store64(uint8_t* output, uint64_t value)
 /** @brief Fill caller-owned 512-byte header; version identifies the payload layout.
  * ADC v3: magic P4ADC03, 64-bit byte count at 28, CRC32 at 36, width=3 at 40,
  * and 64-bit sample count at 44. Readers must select layout by version/magic.
- * run identifies the capture; stage selects the rate; rate is samples per second.
+ * run identifies the capture; rate is samples per second. Bytes 20-23 are
+ * reserved and written as zero; older files stored a configuration index there.
  * bytes excludes this header. Output must have
  * 512 writable bytes. The helper simply encodes the caller's valid flag; it
  * performs no verification itself. The recorder supplies true after capture
@@ -88,14 +89,14 @@ inline void store64(uint8_t* output, uint64_t value)
  * and CRC describe the stored representation, not the larger DMA input stream.
  */
 inline void makeHeader(uint8_t* output, bool valid, uint32_t run,
-                       uint32_t stage, uint32_t rate, uint64_t bytes, uint32_t crc)
+                       uint32_t rate, uint64_t bytes, uint32_t crc)
 {
     std::memset(output, 0, headerBytes);
     std::memcpy(output, "P4ADC03", 7);
     store32(output + 8, 3);
     store32(output + 12, valid ? 1 : 0);
     store32(output + 16, run);
-    store32(output + 20, stage);
+    store32(output + 20, 0); // Reserved; retain all existing field offsets.
     store32(output + 24, rate);
     store64(output + 28, bytes);
     store32(output + 36, crc);

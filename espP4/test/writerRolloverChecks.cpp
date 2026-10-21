@@ -57,7 +57,7 @@ int main()
     assert(bufferedWriter.submit(block, 3));
     assert(bufferedWriter.finish());
     const uint64_t expected = (uint64_t{1} << 32) + sizeof(block) + 3;
-    const auto statistics = bufferedWriter.snapshot();
+    const auto statistics = bufferedWriter.getStatistics();
     assert(rolloverSink._total == expected && statistics._bytes == expected);
     assert(statistics._used == 0 && statistics._unsavedBytes == 0 && statistics._errors == 0 && statistics._overflows == 0);
     puts("PASS: actual ring crossed 4 GiB position wrap; byte contents and 64-bit totals match.");

@@ -22,7 +22,7 @@
  */
 #include "Ads127LowRate.h"
 #include <Arduino.h>
-#include "Ads127BenchRate.h"
+#include "Ads127Config.h"
 
 /** @brief Remember the SPI driver without touching hardware. */
 Ads127LowRate::Ads127LowRate(Ads127L18& ads127L18) : _ads127L18(ads127L18)
@@ -110,8 +110,8 @@ bool Ads127LowRate::clearStartupFlags()
 }
 
 /**
- * @brief Identify and stop the ADC, then configure the requested bench stage.
- * stage indexes shared ads127BenchRates; default zero retains the 16-kHz test.
+ * @brief Identify and stop the ADC, then apply the supplied ADC configuration.
+ * The default is adsConfig (1,024,000 samples/s); unsupported settings are refused.
  * externalInput=false retains the internal-short baseline. True selects the
  * physical AIN0P/AIN0N inputs, driven through the EVM's analog front end. This
  * selects CH0_CFG1's external input and enables the ADC's midpoint-voltage
@@ -121,23 +121,22 @@ bool Ads127LowRate::clearStartupFlags()
  * startup flags are logged before clearing; other fault flags are never cleared.
  * A power cycle restores defaults.
  */
-bool Ads127LowRate::configure(unsigned stage, bool externalInput)
+bool Ads127LowRate::configure(const Ads127Config& adsConfigRequested, bool externalInput)
 {
     _configured = false;
-    if (stage >= ads127BenchRateCount)
+    if (!isSupportedAds127Config(adsConfigRequested))
     {
 
-        // Reject an unsupported request before any SPI or indexing operation.
+        // Reject an unsupported request before any SPI operation.
         return false;
     }
-    const Ads127BenchRate& ads127BenchRate = ads127BenchRates[stage];
     _ads127L18.begin();
     uint8_t device = 0;
     bool retVal = _ads127L18.readRegister(0, device) && device == 0x06 && stop() && clearStartupFlags();
 
     // All register writes occur stopped. Max-speed mode accommodates 32.768 MHz;
     // modulator clock = 32.768 MHz / 2; selected OSR determines output rate.
-    // OSR means the number of modulator readings combined into one output sample.
+    // OSR divides the internal 16.384-MHz conversion rate to produce the output rate.
     // GEN_CFG3 bit 7 selects output drive: zero gives full strength, matching
     // TI's specified output timing. This speeds signal transitions without
     // changing their 1.8-V logic level.
@@ -155,7 +154,7 @@ bool Ads127LowRate::configure(unsigned stage, bool externalInput)
                  setAndCheck(0x08, externalInput ? 0x04 : 0x00) &&
                  setAndCheck(0x0a, 0x00) &&  // 24 bits; full drive; SPI CRC remains off.
                  setAndCheck(0x0d, 0x08) &&  // CLK_SEL bit 3 selects external EVM clock; divider 1.
-                 setAndCheck(0x0c, ads127BenchRate._clockDividerCode) && // DCLK /8, /4, /2 or /1; default bit delay.
+                 setAndCheck(0x0c, adsConfigRequested._clockDividerCode) && // DCLK /8, /4, /2 or /1; default bit delay.
                  setAndCheck(0x0b, 0x70) &&  // Eight lanes; status header; no data CRC.
                  setAndCheck(0x10, 0x00) &&  // No GPIO override of sample outputs.
                  // TI Rev B table 8-20: MUX[6:4]=010 shorts internally; 000
@@ -169,7 +168,7 @@ bool Ads127LowRate::configure(unsigned stage, bool externalInput)
     for (uint8_t channel = 0; channel < 8 && retVal; ++channel)
     {
         retVal = setAndCheck(static_cast<uint8_t>(0x12 + channel * 8),
-                            ads127BenchRate._filterCode | (channel == 0 ? 0 : 0x20));
+                            adsConfigRequested._filterCode | (channel == 0 ? 0 : 0x20));
     }
     if (retVal)
     {

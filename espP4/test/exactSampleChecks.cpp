@@ -152,9 +152,9 @@ static void checkCase(const std::vector<int32_t>& expected, unsigned frameClocks
         ++block;
     }
     require(words.size() == expected.size(), "decoded sample count differs (missing/extra output)");
-    const auto& captureStats = frameDecoder.stats();
+    const auto& captureStats = frameDecoder.getCaptureStats();
     require(captureStats._words == expected.size() && captureStats._badHeaders == 0 && captureStats._badPeriods == 0 &&
-            captureStats._shortWords == 0 && !frameDecoder.outputFailed(), "decoder counters report a fault");
+            captureStats._shortWords == 0 && !frameDecoder.getOutputFailed(), "decoder counters report a fault");
 
     // Check raw status+sample words directly, before testing the recording packer.
     std::vector<int32_t> actual;
@@ -214,7 +214,7 @@ static void checkChangedWireBit(const std::vector<int32_t>& expected)
     std::vector<int32_t> actual;
     for (uint32_t word : words) { actual.push_back(signedPattern(word)); }
     require(mismatchAt(expected, actual) == 10, "known-sequence check missed a changed wire data bit");
-    require(frameDecoder.stats()._badHeaders == 0, "bit-change control accidentally altered a header");
+    require(frameDecoder.getCaptureStats()._badHeaders == 0, "bit-change control accidentally altered a header");
 }
 
 /** @brief Run all boundary cases plus deliberately altered sequence checks. */

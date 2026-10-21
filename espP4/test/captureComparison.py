@@ -89,7 +89,7 @@ def capture(inputPort, outputPort, folder, constant=False):
             thread.start()
             threads.append(thread)
         # Ask for identities before starting: h reports source mode, w locks
-        # P4 to RAM. Stage 6 is sent only after both boards and source mode agree.
+        # P4 to RAM. The default configuration is requested only after both boards and source mode agree.
         ports['Feather'].write(b'h')
         ports['P4'].write(b'w')
         deadline = time.monotonic() + preparationTimeoutSeconds
@@ -117,7 +117,7 @@ def capture(inputPort, outputPort, folder, constant=False):
                 if name == 'P4' and line.startswith('RAM READY:'):
                     ready.add(name)
                 if len(ready) == 2 and not started and modeIdentified:
-                    ports['Feather'].write(b'6')
+                    ports['Feather'].write(b'g')
                     started = True
                     deadline = time.monotonic() + captureTimeoutSeconds
                     print('Starting one simultaneous capture. No SD access.')

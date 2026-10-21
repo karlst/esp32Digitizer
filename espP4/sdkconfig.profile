@@ -791,6 +791,8 @@ CONFIG_PARTITION_TABLE_MD5=y
 #
 # P4 capture diagnostics
 #
+# CONFIG_P4_DIAGNOSTICS is not set
+# CONFIG_P4_HARDWARE_SMOKE is not set
 CONFIG_P4_CAPTURE_PROFILE=y
 # end of P4 capture diagnostics
 

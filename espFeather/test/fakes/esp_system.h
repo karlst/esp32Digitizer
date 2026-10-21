@@ -19,6 +19,7 @@
  * sequences differ across boots. This fake only makes desktop assertions predictable.
  */
 #pragma once
+
 /**
  * @brief Return a known starting ID so acknowledgement tests are reproducible.
  */

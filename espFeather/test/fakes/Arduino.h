@@ -32,10 +32,12 @@ class String : public std::string
 {
 public:
     using std::string::string;
+
     /**
      * @brief Accept concatenation results from the desktop standard library.
      */
     String(const std::string& value) : std::string(value) {}
+
     /**
      * @brief Format integer fields as decimal text, as Arduino String does.
      */
@@ -49,6 +51,7 @@ public:
 class HardwareSerial : public FakeSerial
 {
 public:
+
     /**
      * @brief Capture an outgoing command without accessing any physical port.
      */

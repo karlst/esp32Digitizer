@@ -18,6 +18,7 @@
 #pragma once
 #include <cstddef>
 #include <cstdint>
+
 /**
  * @brief One raw block copied by Core 0 and retained until Core 1 finishes decoding it.
  * length is the number of valid bytes, not the array capacity. arrivedAt is

@@ -69,7 +69,7 @@ int runWriterChecks()
     MemorySink memorySinkMissingMemory;
     bufferedWriter.start(memorySinkMissingMemory, clockUs);
     const uint8_t probe = 1;
-    assert(!bufferedWriter.submit(&probe, 1) && bufferedWriter.failed());
+    assert(!bufferedWriter.submit(&probe, 1) && bufferedWriter.getFailed());
     bufferedWriter.cancel();
     assert(bufferedWriter.initializeMemory([](uint32_t bytes) -> uint8_t* {
         return static_cast<uint8_t*>(std::malloc(bytes));
@@ -86,10 +86,10 @@ int runWriterChecks()
     assert(bufferedWriter.finish());
     const std::vector<uint8_t> expected = {255,255,255,255, 0,0,128,255, 255,255,127,0};
     assert(memorySink._bytes == expected);
-    assert(bufferedWriter.snapshot()._maxUs == 45000 && bufferedWriter.snapshot()._maxKind == 2);
-    const auto stoppedTime = bufferedWriter.snapshot()._elapsedUs;
+    assert(bufferedWriter.getStatistics()._maxUs == 45000 && bufferedWriter.getStatistics()._maxKind == 2);
+    const auto stoppedTime = bufferedWriter.getStatistics()._elapsedUs;
     writerTestUs += 100000;
-    assert(bufferedWriter.snapshot()._elapsedUs == stoppedTime);
+    assert(bufferedWriter.getStatistics()._elapsedUs == stoppedTime);
 
     // A seven-byte submission straddles the physical end of the ring. This
     // exercises both copies in the external-memory path, including odd lengths
@@ -110,28 +110,28 @@ int runWriterChecks()
     for (int index = 0; index < static_cast<int>(BufferedWriter::_blockBytes / 4); ++index) { submitWord(bufferedWriter, index); }
     memorySink._bufferedWriterDuringWrite = &bufferedWriter;
     bufferedWriter.pump();
-    assert(bufferedWriter.failed() && bufferedWriter.snapshot()._overflows == 1);
-    assert(!bufferedWriter.finish() && bufferedWriter.snapshot()._used == 0);
+    assert(bufferedWriter.getFailed() && bufferedWriter.getStatistics()._overflows == 1);
+    assert(!bufferedWriter.finish() && bufferedWriter.getStatistics()._used == 0);
 
     // Never retry a partially written block. Its accepted prefix is counted,
     // but the queue remains occupied so callers cannot assume everything saved.
     memorySink._bytes.clear(); memorySink._shortWrite = true;
     bufferedWriter.start(memorySink, clockUs); submitWord(bufferedWriter, 42);
     assert(!bufferedWriter.finish());
-    assert(memorySink._bytes.size() == 3 && bufferedWriter.snapshot()._bytes == 3 && bufferedWriter.snapshot()._used == 4);
-    assert(bufferedWriter.snapshot()._errors == 1);
+    assert(memorySink._bytes.size() == 3 && bufferedWriter.getStatistics()._bytes == 3 && bufferedWriter.getStatistics()._used == 4);
+    assert(bufferedWriter.getStatistics()._errors == 1);
 
     // A successful payload write still cannot make finish successful if its
     // final synchronization fails. Then separately test failed preparation timing.
     memorySink._shortWrite = false; memorySink._flushOk = false;
     bufferedWriter.start(memorySink, clockUs);
-    assert(!bufferedWriter.finish() && bufferedWriter.snapshot()._errors == 1);
+    assert(!bufferedWriter.finish() && bufferedWriter.getStatistics()._errors == 1);
     bufferedWriter.start(memorySink, clockUs);
     writerTestUs += 123;
     bufferedWriter.measure(writerTestUs - 123, 1, false);
     bufferedWriter.cancel();
     writerTestUs += 100000;
-    assert(bufferedWriter.snapshot()._elapsedUs == 123);
+    assert(bufferedWriter.getStatistics()._elapsedUs == 123);
 
     // A producer pauses BEFORE full capacity (it does not retry rejected data).
     // Real recording stops on full instead; this test isolates publication and
@@ -151,10 +151,10 @@ int runWriterChecks()
             assert(submitWord(bufferedWriter, static_cast<int32_t>(index)));
         }
     });
-    while (bufferedWriter.snapshot()._bytes < (count * 4 / BufferedWriter::_blockBytes) * BufferedWriter::_blockBytes)
+    while (bufferedWriter.getStatistics()._bytes < (count * 4 / BufferedWriter::_blockBytes) * BufferedWriter::_blockBytes)
     {
         assert(bufferedWriter.pump());
-        consumed.store(static_cast<uint32_t>(bufferedWriter.snapshot()._bytes / 4), std::memory_order_release);
+        consumed.store(static_cast<uint32_t>(bufferedWriter.getStatistics()._bytes / 4), std::memory_order_release);
         std::this_thread::yield();
     }
 

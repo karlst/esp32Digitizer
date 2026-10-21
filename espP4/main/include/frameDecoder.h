@@ -38,7 +38,7 @@
  * of at most 512. A rejected batch sets a persistent failure flag but does not hide diagnostic
  * counts. reset clears that latch while preserving the selected callback.
  * The output is 32-bit status+sample words, not the final three-byte SD format.
- * This class owns no DMA buffer or ready/free queue. main.cpp supplies each raw
+ * This class owns no DMA buffer or ready/free queue. SampleDecoder supplies each raw
  * block and must not return it to freeBlocks until feed() has finished reading.
  */
 class FrameDecoder
@@ -46,11 +46,11 @@ class FrameDecoder
 public:
     using outputCallback = bool (*)(const uint32_t*, size_t, void*);
     void setOutput(outputCallback callback, void* context);
-    bool outputFailed() const;
+    bool getOutputFailed() const;
     void reset(uint32_t clocksPerFrame);
     void feed(const uint8_t* data, size_t length);
-    const CaptureStats& stats() const;
-    uint32_t pendingBits() const;
+    const CaptureStats& getCaptureStats() const;
+    uint32_t getPendingBits() const;
 private:
     void flushOutput();
     outputCallback _output = nullptr;

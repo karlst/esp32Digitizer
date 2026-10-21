@@ -17,6 +17,7 @@
  */
 #pragma once
 #include <cstdint>
+
 /**
  * @brief Counts of what arrived, not proof that every ADC bit arrived.
  * clocks counts captured clock positions; frames counts FSYNC rising edges;

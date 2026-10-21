@@ -103,9 +103,9 @@ public:
     bool pump(bool drain = false);
     bool finish();
     void cancel();
-    bool failed() const;
-    Statistics snapshot();
-    uint32_t queuedBytes() const;
+    bool getFailed() const;
+    Statistics getStatistics();
+    uint32_t getQueuedBytes() const;
     void measure(uint64_t startedUs, uint32_t kind, bool success);
 private:
     // The actual ring memory. alignas(4) puts its start on a four-byte boundary.

@@ -23,46 +23,54 @@
 /**
  * @brief Own the UART receive buffer and last validated receiver acquisition status.
  *
- * begin(), update(), and stateJson() run only in Arduino's loop task. Unlike the
+ * begin(), update(), and getStateJson() run only in Arduino's loop task. Unlike the
  * DAC generator, this class has no worker accessing its state and needs no mutex.
  * The UART driver buffers incoming bytes; update() drains only a bounded amount
  * per loop pass so a noisy/disconnected link cannot monopolize web servicing.
- * Wire format and pin assignments are documented in shared/receiverStatusProtocol.md.
+ * Wire format and pin assignments are documented in espFeather/webApp/receiverStatusProtocol.md.
  */
 class ReceiverMonitor
 {
 public:
+
     /**
      * @brief Retain the dedicated serial port; USB debugging uses a different UART.
      */
     explicit ReceiverMonitor(HardwareSerial& hardwareSerial);
+
     /**
      * @brief Configure Feather RX/TX header pins for 115200-baud 3.3 V UART.
      */
     void begin();
+
     /**
      * @brief Drain available bytes, assemble lines, and accept complete valid frames.
      */
     void update();
+
     /**
      * @brief Return current connection/data freshness, hiding stale measurements.
      */
-    String stateJson() const;
+    String getStateJson() const;
+
     /**
-     * @brief Send one command; its eventual result is reported by stateJson().
+     * @brief Send one command; its eventual result is reported by getStateJson().
      * record applies only to Start and requires recording-capable receiver firmware.
      */
     bool sendCommand(const char* action, uint32_t rate, bool record = false);
+
     /**
      * @brief Accept only the supported rates exposed by the initial UI.
      */
     static bool validRate(uint32_t rate);
 
 private:
+
     /**
      * @brief Parse an entire line before replacing the last accepted snapshot.
      */
     bool acceptLine(uint32_t nowMs);
+
     /**
      * @brief Parse one unsigned decimal field with explicit overflow detection.
      */

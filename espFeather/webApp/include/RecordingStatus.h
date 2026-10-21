@@ -65,13 +65,14 @@ struct RecordingStatus
     // 0 unavailable/older firmware, 1 measured, 2 estimated during recording,
     // 3 stale after a failed scan. A stale number is never labeled measured.
     enum spaceCode : uint32_t { spaceUnknown, spaceMeasured, spaceEstimated, spaceStale };
+
     /**
      * @brief Return the JSON key for one numeric UART column.
      * recordingMonitor uses this to convert a numeric wire column into a browser
      * JSON property. index must be less than fieldCount; this internal helper does
      * not check bounds. The returned name points to permanent text, not new memory.
      */
-    static const char* fieldName(size_t index)
+    static const char* getFieldName(size_t index)
     {
         static const char* const names[_fieldCount] = {
             "state", "card", "enabled", "session", "part", "elapsedMs", "bytesWritten", "samplesWritten",

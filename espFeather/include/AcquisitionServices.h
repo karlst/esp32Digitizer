@@ -17,6 +17,7 @@
  * @brief Optional signal and measurement services supplied by the startup program.
  */
 #pragma once
+
 /**
  * @brief Coordinate an external source with ADC capture without owning that source.
  * AcquisitionApplication calls these methods on Arduino's single setup/loop task.
@@ -29,26 +30,37 @@
 class AcquisitionServices
 {
 public:
+
     /** @brief Allow deletion through the interface; this does not stop hardware. */
     virtual ~AcquisitionServices() = default;
+
     /** @brief Prepare optional hardware without starting a signal. */
     virtual bool initialize() { return true; }
+
     /** @brief Select the ADC's external channel rather than its internal short. */
-    virtual bool externalInput() const { return true; }
+    virtual bool getExternalInput() const { return true; }
+
     /** @brief Print optional operator information; idle describes controller state. */
     virtual void describe(bool idle) { (void)idle; }
+
     /** @brief Clear optional measurement state before asking P4 to receive. */
     virtual void reset() {}
+
     /** @brief Start an optional source after P4 confirms readiness. */
     virtual bool start() { return true; }
+
     /** @brief Start optional measurement after ADC START is acknowledged. */
     virtual void begin() {}
+
     /** @brief Collect any pending observations without printing during capture. */
     virtual void poll() {}
+
     /** @brief Report a latched service failure to the controller. */
-    virtual bool failed() { return false; }
+    virtual bool getFailed() { return false; }
+
     /** @brief Request frequent polling while collecting a short measurement burst. */
-    virtual bool sampling() const { return false; }
+    virtual bool getSampling() const { return false; }
+
     /** @brief Stop the source and report observations after ADC stop was requested. */
     virtual void finish(unsigned long runId, bool clean) { (void)runId; (void)clean; }
 };

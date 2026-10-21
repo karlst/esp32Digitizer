@@ -21,6 +21,7 @@
 #include "adc/Ads127LowRate.h"
 #include "AcquisitionServices.h"
 #include "BenchLine.h"
+
 /**
  * @brief Configure the ADC, wait for P4 readiness, then run until stop or timeout.
  * Arduino startup calls initialize once and poll repeatedly on the same task.
@@ -38,7 +39,7 @@ public:
     void poll();
 private:
     void printHelp();
-    void requestRun(unsigned requestedStage);
+    void requestRun(const Ads127Config& adsConfigRequested);
     void requestStop();
     void acceptReply(const char* line);
     enum class State { idle, waiting, running, stopping };
@@ -49,7 +50,7 @@ private:
     BenchLine _benchLine;
     State _state = State::idle;
     unsigned long _runId = 0;
-    unsigned _stage = 0;
+    Ads127Config _adsConfig = adsConfig;
     uint32_t _stateMs = 0;
     bool _servicesReady = false;
 };

@@ -76,8 +76,8 @@ banner; do not leave the 30-minute controller loaded for this test.
 
 ## Hardware run
 
-Use the established powered wiring. On P4 press `p`, wait for `SD READY`, then
-on Feather press `6`. Wait for the automatic stop, PROFILE summary, and final
+Use the established powered wiring. On Feather press `g`; P4 prepares SD automatically
+and replies READY3 after receiver setup. Wait for the automatic stop, PROFILE summary, and final
 `SD SAVED`/`SD FAILED`. Keep the card/power connected through file verification.
 No file is deleted or reformatted. The successful earlier recording is preserved.
 

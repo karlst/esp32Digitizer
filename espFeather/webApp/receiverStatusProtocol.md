@@ -37,7 +37,7 @@ These fields describe the retained interface contract, not confirmed hardware st
 
 Status 4 retains the first nineteen fields of status 3 in their existing order,
 changes its version field to `4`, and appends the following 24 unsigned decimal
-fields (43 fields total). `shared/RecordingStatus.h` defines the same order:
+fields (43 fields total). `espFeather/webApp/include/RecordingStatus.h` defines the same order:
 
 ```text
 state,card,enabled,session,part,elapsedMs,bytesWritten,samplesWritten,cardBytes,freeBytes,bufferBytes,usedBytes,peakBytes,writePosition,readPosition,bytesPerSecond,latestDelayUs,maxDelayUs,maxDelayAtMs,maxDelayKind,overflows,lostSamples,writeErrors,deletedFiles

@@ -61,7 +61,7 @@ void RamWaveform::accept(const uint32_t* words, size_t count)
 }
 
 /** @brief Core 0 polls only this atomic flag until the decoder has drained. */
-bool RamWaveform::complete() const
+bool RamWaveform::getComplete() const
 {
     return _ready.load();
 }
@@ -77,7 +77,7 @@ void RamWaveform::report(unsigned long run, uint32_t rate, bool clean) const
     printf("WAVE_BEGIN run=%lu rate=%lu bins=%lu samplesPerBin=%lu clean=%u\n",
            run, static_cast<unsigned long>(rate),
            static_cast<unsigned long>(_completedBins),
-           static_cast<unsigned long>(_samplesPerBin), unsigned(clean && complete()));
+           static_cast<unsigned long>(_samplesPerBin), unsigned(clean && getComplete()));
     for (unsigned index = 0; index < _completedBins; ++index)
     {
         const auto& waveformBin = _waveformBins[index];

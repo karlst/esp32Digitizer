@@ -17,6 +17,7 @@
  * @brief Selectable ADC bench configurations, independent of capture success.
  */
 #pragma once
+#include "Ads127Config.h"
 #include "Ads127L18.h"
 
 /**
@@ -30,7 +31,7 @@ class Ads127LowRate
 {
 public:
     explicit Ads127LowRate(Ads127L18& ads127L18);
-    bool configure(unsigned stage = 0, bool externalInput = false);
+    bool configure(const Ads127Config& adsConfigRequested = ::adsConfig, bool externalInput = false);
     bool start();
     bool stop();
     bool reportStatus(const char* phase);

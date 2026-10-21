@@ -47,6 +47,7 @@ struct SPISettings
 class SPIClass
 {
 public:
+
     /**
      * @brief Retain construction compatibility only.
      */

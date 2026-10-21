@@ -17,6 +17,7 @@
  */
 #pragma once
 #include <cstdint>
+
 /** @brief One 0.5 ms interval; extrema retain excursions hidden by averaging. */
 struct WaveformBin
 {

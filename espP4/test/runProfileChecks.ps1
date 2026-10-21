@@ -24,7 +24,7 @@ $batch = @"
 @echo off
 call "$environmentScript" >nul
 if %errorlevel% neq 0 exit /b 1
-cl /nologo /std:c++17 /O2 /EHsc /W4 /DADS127_P4_LONG_RUN=1 /I"$projectRoot/main/include" /I"$projectRoot/test/hardware" /I"$projectRoot/test/profile" /I"$projectRoot/../shared" "$projectRoot/test/profileChecks.cpp" /Fe:profileChecks.exe
+cl /nologo /std:c++17 /O2 /EHsc /W4 /DADS127_P4_LONG_RUN=1 /I"$projectRoot/main/include" /I"$projectRoot/test/hardware" /I"$projectRoot/test/profile" /I"$projectRoot/../common" "$projectRoot/test/profileChecks.cpp" /Fe:profileChecks.exe
 if %errorlevel% neq 0 exit /b 1
 profileChecks.exe
 exit /b %errorlevel%

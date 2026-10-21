@@ -37,11 +37,11 @@ static void checkRecordingLayouts()
     RecordingLayout recordingLayout;
     SyntheticRecordingLayout syntheticRecordingLayout;
     const RecordingLayout& recordingLayoutSynthetic = syntheticRecordingLayout;
-    assert(recordingLayout.recordBytes() == 3);
+    assert(recordingLayout.getRecordBytes() == 3);
     assert(recordingLayout.countMatches(12, 4));
     assert(!recordingLayout.countMatches(11, 4));
     assert(!recordingLayout.countMatches(12, 5));
-    assert(recordingLayoutSynthetic.recordBytes() == 4);
+    assert(recordingLayoutSynthetic.getRecordBytes() == 4);
     assert(recordingLayoutSynthetic.countMatches(16, 0));
     assert(!recordingLayoutSynthetic.countMatches(15, 0));
 
@@ -61,9 +61,9 @@ static void checkRecordingLayouts()
 
     // Selecting a policy must preserve the header signature expected by readers.
     uint8_t header[512] = {};
-    recordingLayout.makeHeader(header, true, 7, 6, 1024000, 12, 123);
+    recordingLayout.makeHeader(header, true, 7, 1024000, 12, 123);
     assert(std::memcmp(header, "P4ADC03", 8) == 0);
-    recordingLayoutSynthetic.makeHeader(header, true, 7, sdTestData::stage, 1024000, 16, 123);
+    recordingLayoutSynthetic.makeHeader(header, true, 7, 1024000, 16, 123);
     assert(std::memcmp(header, "P4SYN01", 8) == 0);
 }
 
@@ -86,12 +86,12 @@ int main()
     sdSmokeSummary.accept(signedValues, 1);
     sdSmokeSummary.accept(signedValues + 1, 3);
     sdSmokeSummary.accept(signedValues + 4, 8);
-    assert(sdSmokeSummary.sampleCount() == 4);
-    assert(sdSmokeSummary.mean(0) == -1);
-    assert(sdSmokeSummary.mean(1) == -8388608);
-    assert(sdSmokeSummary.mean(2) == 8388607);
-    assert(sdSmokeSummary.mean(3) == 1);
-    assert(!sdSmokeSummary.complete());
+    assert(sdSmokeSummary.getSampleCount() == 4);
+    assert(sdSmokeSummary.getMean(0) == -1);
+    assert(sdSmokeSummary.getMean(1) == -8388608);
+    assert(sdSmokeSummary.getMean(2) == 8388607);
+    assert(sdSmokeSummary.getMean(3) == 1);
+    assert(!sdSmokeSummary.getComplete());
 
     // Feed a complete 30-second file in awkward 4093-byte reads (not divisible
     // by three). This crosses both sample and 100-ms bin boundaries repeatedly.
@@ -111,16 +111,16 @@ int main()
         sdSmokeSummary.accept(block, amount);
         offset += amount;
     }
-    assert(sdSmokeSummary.complete());
-    assert(sdSmokeSummary.sampleCount() == 30720000);
+    assert(sdSmokeSummary.getComplete());
+    assert(sdSmokeSummary.getSampleCount() == 30720000);
     for (unsigned index = 0; index < 300; ++index)
     {
-        assert(sdSmokeSummary.mean(index) == (index / 10 % 2 == 0 ? 1000000 : 2000000));
+        assert(sdSmokeSummary.getMean(index) == (index / 10 % 2 == 0 ? 1000000 : 2000000));
     }
     sdSmokeSummary.accept(block, 1);
-    assert(!sdSmokeSummary.complete());
+    assert(!sdSmokeSummary.getComplete());
     sdSmokeSummary.reset(1024000);
-    assert(sdSmokeSummary.sampleCount() == 0 && !sdSmokeSummary.complete());
+    assert(sdSmokeSummary.getSampleCount() == 0 && !sdSmokeSummary.getComplete());
     std::puts("PASS: SD byte boundaries, signed samples, duration, square-wave timing and incomplete-file rejection");
     return 0;
 }

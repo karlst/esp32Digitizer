@@ -27,6 +27,7 @@
 class BenchLine
 {
 public:
+
     /**
      * @brief Add a character; true means a nonempty line ended at newline.
      * Ignore carriage return. Keep at most 383 characters; a longer line is
@@ -58,7 +59,7 @@ public:
     }
 
     /** @brief Return the last complete line; caller must use it before feeding more. */
-    const char* value() const { return _text; }
+    const char* getValue() const { return _text; }
 private:
     char _text[384] = {};
     size_t _length = 0;

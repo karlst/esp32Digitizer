@@ -19,7 +19,7 @@
  * means the ESP32 V2 board. All digital
  * signals pass through the SN74AXC8T245 translator, A=3.3 V and B=1.8 V.
  * This header only names wires; including it does not configure hardware.
- * P4 sample-input assignments are configured in RecordingApplication.cpp.
+ * P4 sample-input assignments are configured in AdcReceiver.cpp.
  */
 #pragma once
 
