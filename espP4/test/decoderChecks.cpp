@@ -14,7 +14,7 @@
 
 /**
  * @file decoderChecks.cpp
- * @brief Desktop synthetic-wire tests; no ADC, serial port or SD card is touched.
+ * Desktop synthetic-wire tests; no ADC, serial port or SD card is touched.
  * Build the real decoder with this independent wire encoder. Test all four
  * packing phases and all frame lengths, deliberately split DMA blocks, corrupt
  * headers, remove clock bits, and start mid-frame. Passing verifies software
@@ -29,26 +29,32 @@
 #include "recordingFormat.h"
 #include "test/support/ads127BenchTiming.h"
 
-/** @brief Read a test header's little-endian 64-bit field for boundary checks. */
+/* **
+ * header64 - Read a test header's little-endian 64-bit field for boundary
+ * checks.
+ */
 static uint64_t header64(const uint8_t* input)
 {
     uint64_t retVal = 0;
-    for (unsigned index = 0; index < 8; ++index)
+    for (unsigned iByte = 0; iByte < 8; ++iByte)
     {
-        retVal |= static_cast<uint64_t>(input[index]) << (8 * index);
+        retVal |= static_cast<uint64_t>(input[iByte]) << (8 * iByte);
     }
     return retVal;
 }
 
-/** @brief Check signed 24-bit limits, status removal, bounds and both file formats. */
+/* **
+ * checkRecordingFormat - Check signed 24-bit limits, status removal, bounds and
+ * both file formats.
+ */
 static void checkRecordingFormat()
 {
     // Known byte patterns check sign preservation and removal of the ADC status
     // byte. Sentinel bytes on both sides catch writes beyond the supplied space.
     const uint32_t words[] = {0x08000000, 0x08ffffff, 0x087fffff, 0x08800000,
-                              0x08123456, 0xff123456};
-    const uint8_t expected[] = {0,0,0, 255,255,255, 255,255,127, 0,0,128,
-                                0x56,0x34,0x12, 0x56,0x34,0x12};
+        0x08123456, 0xff123456};
+    const uint8_t expected[] = {0, 0, 0, 255, 255, 255, 255, 255, 127, 0, 0, 128,
+        0x56, 0x34, 0x12, 0x56, 0x34, 0x12};
     uint8_t bytes[20];
     std::memset(bytes, 0xaa, sizeof(bytes));
     assert(recordingFormat::packSamples(words, 6, bytes + 1, 18) == 18);
@@ -69,7 +75,10 @@ static void checkRecordingFormat()
     assert(header[20] == 0 && header[21] == 0 && header[22] == 0 && header[23] == 0);
     assert(header64(header + 28) == 18 && header[36] == 1 && header[39] == 0xab);
     assert(header[40] == 3 && header64(header + 44) == 6);
-    for (size_t index = 52; index < sizeof(header); ++index) { assert(header[index] == 0); }
+    for (size_t iByte = 52; iByte < sizeof(header); ++iByte)
+    {
+        assert(header[iByte] == 0);
+    }
     for (uint64_t payloadBytes : {0xffffffffULL, 0x100000000ULL, 5529600000ULL, 10000000000ULL})
     {
         recordingFormat::makeHeader(header, false, 1, 1024000, payloadBytes, 0xabcdef01);
@@ -79,7 +88,10 @@ static void checkRecordingFormat()
     sdTestData::makeHeader(header, true, 1, 812500, 20, 0);
     assert(std::memcmp(header, "P4SYN01", 8) == 0 && header[8] == 1);
     assert(header[20] == 0 && header[21] == 0 && header[22] == 0 && header[23] == 0);
-    for (size_t index = 36; index < sizeof(header); ++index) { assert(header[index] == 0); }
+    for (size_t iByte = 36; iByte < sizeof(header); ++iByte)
+    {
+        assert(header[iByte] == 0);
+    }
     recordingFormat::makeHeader(header, false, 0, 0, 0, 0);
     assert(header[12] == 0 && header64(header + 28) == 0 && header64(header + 44) == 0);
     assert(ads127BenchTiming::runMs == 1800000 && ads127BenchTiming::receiverTimeoutMs == 1805000);
@@ -89,8 +101,10 @@ static void checkRecordingFormat()
     puts("PASS: three-byte packing, signed limits, 64-bit ADC-v3 headers and 30-minute bounds.");
 }
 
-/** @brief Check SD-test rates, duration cap and reproducible file words on the PC.
- * These arithmetic checks do not measure card speed or execute the P4 task.
+/* **
+ * checkSdTestData - Check SD-test rates, duration cap and reproducible file
+ * words on the PC. These arithmetic checks do not measure card speed or execute
+ * the P4 task.
  */
 static void checkSdTestData()
 {
@@ -121,42 +135,43 @@ static void checkSdTestData()
     puts("PASS: SD-only rate arithmetic, 60-second cap and known file pattern.");
 }
 
-/**
- * @brief Append one simulated frame: FSYNC high for half, word MSB first.
+/* **
+ * appendFrame - Append one simulated frame: FSYNC high for half, word MSB first.
  * Remaining clocks carry arbitrary padding; they must not become extra samples.
  */
 static void appendFrame(std::vector<unsigned>& pairs, unsigned clocks, uint32_t word)
 {
-    for (unsigned index = 0; index < clocks; ++index)
+    for (unsigned iClock = 0; iClock < clocks; ++iClock)
     {
-        const unsigned data = index < 32 ? ((word >> (31 - index)) & 1U) : 1U;
-        pairs.push_back((index < clocks / 2 ? 2U : 0U) | data);
+        const unsigned data = iClock < 32 ? ((word >> (31 - iClock)) & 1U) : 1U;
+        pairs.push_back((iClock < clocks / 2 ? 2U : 0U) | data);
     }
 }
 
-/**
- * @brief Pack four simulated clock observations per byte, earliest in bits 0..1.
+/* **
+ * pack - Pack four simulated clock observations per byte, earliest in bits 0..1.
  * Each pair contains data in bit 0 and frame sync in bit 1. A final incomplete
  * byte is padded with zeros; this models the receiver's memory layout only.
  */
 static std::vector<uint8_t> pack(const std::vector<unsigned>& pairs)
 {
     std::vector<uint8_t> retVal((pairs.size() + 3) / 4, 0);
-    for (size_t index = 0; index < pairs.size(); ++index)
+    for (size_t iPair = 0; iPair < pairs.size(); ++iPair)
     {
-        retVal[index / 4] |= static_cast<uint8_t>(pairs[index] << ((index % 4) * 2));
+        retVal[iPair / 4] |= static_cast<uint8_t>(pairs[iPair] << ((iPair % 4) * 2));
     }
     return retVal;
 }
 
-/**
- * @brief Feed variable chunks, including one byte and odd descriptor sizes.
- * Hardware block boundaries must not affect framing, signed samples or counts.
- * A nonzero chunkSize selects a fixed split; memoryOffset deliberately misaligns
- * the first byte without feeding those leading storage bytes to the decoder.
+/* **
+ * feedChunks - Feed variable chunks, including one byte and odd descriptor
+ * sizes. Hardware block boundaries must not affect framing, signed samples or
+ * counts. A nonzero chunkSize selects a fixed split; memoryOffset deliberately
+ * misaligns the first byte without feeding those leading storage bytes to the
+ * decoder.
  */
 static void feedChunks(FrameDecoder& frameDecoder, const std::vector<unsigned>& pairs,
-                       size_t chunkSize = 0, size_t memoryOffset = 0)
+    size_t chunkSize = 0, size_t memoryOffset = 0)
 {
     auto bytes = pack(pairs);
     bytes.insert(bytes.begin(), memoryOffset, 0);
@@ -164,20 +179,24 @@ static void feedChunks(FrameDecoder& frameDecoder, const std::vector<unsigned>& 
     while (offset < bytes.size())
     {
         size_t count = chunkSize != 0 ? chunkSize : (offset % 71) + 1;
-        if (count > bytes.size() - offset) { count = bytes.size() - offset; }
+        if (count > bytes.size() - offset)
+        {
+            count = bytes.size() - offset;
+        }
         frameDecoder.feed(bytes.data() + offset, count);
         offset += count;
     }
 }
 
-/**
- * @brief Independent reference: find all frame starts, then extract each word.
- * This deliberately does not share the optimized decoder's streaming state or
- * lookup table. A frame shorter than 32 clocks is an error only if a following
- * rising edge cut it short; an incomplete final frame is a pending tail.
+/* **
+ * referenceDecode - Independent reference: find all frame starts, then extract
+ * each word. This deliberately does not share the optimized decoder's streaming
+ * state or lookup table. A frame shorter than 32 clocks is an error only if a
+ * following rising edge cut it short; an incomplete final frame is a pending
+ * tail.
  */
 static CaptureStats referenceDecode(std::vector<unsigned> pairs, unsigned frameClocks,
-                                    uint32_t& pending)
+    uint32_t& pending)
 {
     CaptureStats retVal;
     pending = 0;
@@ -185,37 +204,52 @@ static CaptureStats referenceDecode(std::vector<unsigned> pairs, unsigned frameC
     retVal._clocks = pairs.size();
     std::vector<size_t> starts;
     bool previousHigh = true;
-    for (size_t index = 0; index < pairs.size(); ++index)
+    for (size_t iPair = 0; iPair < pairs.size(); ++iPair)
     {
-        const bool high = (pairs[index] & 2U) != 0;
-        if (high && !previousHigh) { starts.push_back(index); }
+        const bool high = (pairs[iPair] & 2U) != 0;
+        if (high && !previousHigh)
+        {
+            starts.push_back(iPair);
+        }
         previousHigh = high;
     }
     retVal._frames = static_cast<uint32_t>(starts.size());
-    for (size_t frame = 0; frame < starts.size(); ++frame)
+    for (size_t iFrame = 0; iFrame < starts.size(); ++iFrame)
     {
-        const bool hasNext = frame + 1 < starts.size();
-        const size_t end = hasNext ? starts[frame + 1] : pairs.size();
-        const size_t length = end - starts[frame];
-        if (hasNext && length != frameClocks) { ++retVal._badPeriods; }
+        const bool hasNext = iFrame + 1 < starts.size();
+        const size_t end = hasNext ? starts[iFrame + 1] : pairs.size();
+        const size_t length = end - starts[iFrame];
+        if (hasNext && length != frameClocks)
+        {
+            ++retVal._badPeriods;
+        }
         if (length < 32)
         {
-            if (hasNext) { ++retVal._shortWords; }
-            else { pending = static_cast<uint32_t>(length); }
+            if (hasNext)
+            {
+                ++retVal._shortWords;
+            }
+            else
+            {
+                pending = static_cast<uint32_t>(length);
+            }
         }
         else
         {
             uint32_t word = 0;
             for (size_t bit = 0; bit < 32; ++bit)
             {
-                word = word * 2 + (pairs[starts[frame] + bit] & 1U);
+                word = word * 2 + (pairs[starts[iFrame] + bit] & 1U);
             }
             ++retVal._words;
             const unsigned header = word >> 24;
             ++retVal._headers[header];
             if ((header & 0x5fU) != 8)
             {
-                if (retVal._badHeaders < 8) { retVal._badExamples[retVal._badHeaders] = word; }
+                if (retVal._badHeaders < 8)
+                {
+                    retVal._badExamples[retVal._badHeaders] = word;
+                }
                 ++retVal._badHeaders;
             }
             retVal._latestWord = word;
@@ -226,13 +260,14 @@ static CaptureStats referenceDecode(std::vector<unsigned> pairs, unsigned frameC
     return retVal;
 }
 
-/**
- * @brief Compare every externally observable decoder field with the reference.
- * Generated bytes include valid words and deliberate FSYNC/data faults. Chunk
- * sizes vary so lookup paths and fallback paths must preserve state identically.
+/* **
+ * checkReference - Compare every externally observable decoder field with the
+ * reference. Generated bytes include valid words and deliberate FSYNC/data
+ * faults. Chunk sizes vary so lookup paths and fallback paths must preserve
+ * state identically.
  */
 static void checkReference(const std::vector<unsigned>& pairs, unsigned frameClocks,
-                           size_t chunkSize = 0, size_t memoryOffset = 0)
+    size_t chunkSize = 0, size_t memoryOffset = 0)
 {
     uint32_t expectedPending = 0;
     const auto expected = referenceDecode(pairs, frameClocks, expectedPending);
@@ -245,19 +280,20 @@ static void checkReference(const std::vector<unsigned>& pairs, unsigned frameClo
     assert(captureStatsActual._badPeriods == expected._badPeriods && captureStatsActual._shortWords == expected._shortWords);
     assert(captureStatsActual._latestWord == expected._latestWord && captureStatsActual._latestSample == expected._latestSample);
     assert(frameDecoder.getPendingBits() == expectedPending);
-    for (unsigned index = 0; index < 256; ++index)
+    for (unsigned iCounter = 0; iCounter < 256; ++iCounter)
     {
-        assert(captureStatsActual._headers[index] == expected._headers[index]);
+        assert(captureStatsActual._headers[iCounter] == expected._headers[iCounter]);
     }
-    for (unsigned index = 0; index < 8; ++index)
+    for (unsigned iCounter = 0; iCounter < 8; ++iCounter)
     {
-        assert(captureStatsActual._badExamples[index] == expected._badExamples[index]);
+        assert(captureStatsActual._badExamples[iCounter] == expected._badExamples[iCounter]);
     }
 }
 
-
-
-/** @brief Model a nonblocking destination that copies or refuses an entire batch. */
+/* **
+ * collectOutput - Model a nonblocking destination that copies or refuses an
+ * entire batch.
+ */
 static bool collectOutput(const uint32_t* words, size_t count, void* context)
 {
     auto& outputCheckContext = *static_cast<OutputCheck*>(context);
@@ -275,16 +311,19 @@ static bool collectOutput(const uint32_t* words, size_t count, void* context)
     return retVal;
 }
 
-/** @brief Verify every saved word, short final batches, refused output and recovery. */
+/* **
+ * checkOutput - Verify every saved word, short final batches, refused output and
+ * recovery.
+ */
 static void checkOutput()
 {
     std::vector<unsigned> pairs(7, 0);
     std::vector<uint32_t> expected;
-    for (uint32_t index = 0; index < 1301; ++index)
+    for (uint32_t iWord = 0; iWord < 1301; ++iWord)
     {
         // Include invalid headers and negative samples: recording preserves
         // the raw word while diagnostic counters still report their meaning.
-        const uint32_t word = index * 1664525U + 1013904223U;
+        const uint32_t word = iWord * 1664525U + 1013904223U;
         expected.push_back(word);
         appendFrame(pairs, 32, word);
     }
@@ -297,12 +336,12 @@ static void checkOutput()
         feedChunks(frameDecoder, pairs, chunk);
         assert(outputCheck._words == expected && !frameDecoder.getOutputFailed());
         assert(outputCheck._packed.size() == expected.size() * 3);
-        for (size_t index = 0; index < expected.size(); ++index)
+        for (size_t iWord = 0; iWord < expected.size(); ++iWord)
         {
-            const uint32_t restored = outputCheck._packed[index * 3] |
-                (static_cast<uint32_t>(outputCheck._packed[index * 3 + 1]) << 8) |
-                (static_cast<uint32_t>(outputCheck._packed[index * 3 + 2]) << 16);
-            assert(restored == (expected[index] & 0xffffff));
+            const uint32_t restored = outputCheck._packed[iWord * 3] |
+                                      (static_cast<uint32_t>(outputCheck._packed[iWord * 3 + 1]) << 8) |
+                                      (static_cast<uint32_t>(outputCheck._packed[iWord * 3 + 2]) << 16);
+            assert(restored == (expected[iWord] & 0xffffff));
         }
         assert(frameDecoder.getCaptureStats()._words == expected.size());
     }
@@ -315,9 +354,9 @@ static void checkOutput()
     feedChunks(frameDecoder, pairs, 20000);
     assert(frameDecoder.getOutputFailed() && outputCheck._calls == 2 && outputCheck._words.size() == 512);
     assert(frameDecoder.getCaptureStats()._words == expected.size());
-    for (size_t index = 0; index < outputCheck._words.size(); ++index)
+    for (size_t iWord = 0; iWord < outputCheck._words.size(); ++iWord)
     {
-        assert(outputCheck._words[index] == expected[index]);
+        assert(outputCheck._words[iWord] == expected[iWord]);
     }
     outputCheck = {};
     frameDecoder.reset(32);
@@ -326,7 +365,9 @@ static void checkOutput()
     puts("PASS: all output words, batch boundaries, rejection latch and reset.");
 }
 
-/** @brief Exercise good streams, boundary failures, reset, and diagnostic limits. */
+/* **
+ * main - Exercise good streams, boundary failures, reset, and diagnostic limits.
+ */
 int main()
 {
     checkRecordingFormat();
@@ -340,8 +381,7 @@ int main()
         for (uint32_t value = 0; value < 256; ++value)
         {
             std::vector<unsigned> pairs(4 + phase, 0);
-            appendFrame(pairs, 32, (value << 24) | (value << 16) |
-                ((255U - value) << 8) | value);
+            appendFrame(pairs, 32, (value << 24) | (value << 16) | ((255U - value) << 8) | value);
             checkReference(pairs, 32, 4, 1);
         }
     }
@@ -354,9 +394,9 @@ int main()
         for (unsigned phase = 0; phase < 16; ++phase)
         {
             std::vector<unsigned> pairs(4 + phase, 0);
-            for (unsigned frame = 0; frame < 20; ++frame)
+            for (unsigned iFrame = 0; iFrame < 20; ++iFrame)
             {
-                appendFrame(pairs, slots * 32, 0x08123456U + frame * 173U);
+                appendFrame(pairs, slots * 32, 0x08123456U + iFrame * 173U);
             }
             for (size_t alignment = 0; alignment < 4; ++alignment)
             {
@@ -386,7 +426,7 @@ int main()
         for (unsigned phase = 0; phase < 4; ++phase)
         {
             std::vector<unsigned> pairs(4 + phase, 0);
-            for (unsigned frame = 0; frame < 400; ++frame)
+            for (unsigned iFrame = 0; iFrame < 400; ++iFrame)
             {
                 generated = generated * 1664525U + 1013904223U;
                 appendFrame(pairs, slots * 32, generated);
@@ -395,9 +435,9 @@ int main()
 
             // Inject extra FSYNC edges, then missing clocks. All failures must
             // remain visible; optimization must not accidentally repair them.
-            for (size_t index = 37; index < pairs.size(); index += 277)
+            for (size_t iPair = 37; iPair < pairs.size(); iPair += 277)
             {
-                pairs[index] ^= 2U;
+                pairs[iPair] ^= 2U;
             }
             pairs.erase(pairs.begin() + 101);
             checkReference(pairs, slots * 32);
@@ -426,7 +466,7 @@ int main()
             FrameDecoder frameDecoder;
             frameDecoder.reset(slots * 32);
             std::vector<unsigned> pairs(4 + phase, 0);
-            for (unsigned index = 0; index < 100; ++index)
+            for (unsigned iPair = 0; iPair < 100; ++iPair)
             {
                 appendFrame(pairs, slots * 32, 0x08123456U);
             }

@@ -2,6 +2,10 @@
 
 Build tools and current commands: [Building the firmware](../docs/BUILDING.md).
 
+Separate storage-only experiment: [SD file-ring choke test](../docs/SD-CHOKE-TEST.md).
+That test explicitly formats and reuses files; the ADC recording behavior below
+does not. It needs only P4, SD and USB.
+
 Start with [CURRENT-SETUP.md](CURRENT-SETUP.md) for firmware choices, matching
 PC commands, current wiring and diagnostic boundaries. Results and their limits
 are recorded in [current status](../docs/STATUS.md).

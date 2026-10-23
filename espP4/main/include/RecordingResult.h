@@ -12,21 +12,27 @@
  * Public License in the repository LICENSE file or <https://www.gnu.org/licenses/>.
  */
 
-/** @file RecordingResult.h
- * @brief Receiver and decoder results, independent of console or Feather messages.
+/**
+ * @file RecordingResult.h
+ * Receiver and decoder results, independent of console or Feather messages.
  */
 #pragma once
 #include "CaptureStats.h"
 #include "ReceiverStats.h"
 
 /**
- * @brief Stable snapshot after receiving stops and queued decoding finishes.
+ * Stable snapshot after receiving stops and queued decoding finishes.
  * Clean refers to acquisition checks, not completed SD verification. SD writing
  * and readback can still fail later. The final partial hardware block can be lost.
  */
 struct RecordingResult
 {
-    enum class Reason { requested, fault, timeout };
+    enum class Reason
+    {
+        requested,
+        fault,
+        timeout
+    };
     Reason _reason = Reason::requested;
     uint32_t _run = 0, _sampleRate = 0, _slots = 0;
     uint32_t _pendingBits = 0, _commandErrors = 0;

@@ -14,7 +14,7 @@
 
 /**
  * @file DecoderTiming.h
- * @brief Per-block timing measurements used by the P4 bench receiver.
+ * Per-block timing measurements used by the P4 bench receiver.
  * This lightweight timing is retained in both existing builds. captureProfile
  * separately enables the more expensive task/CPU statistics. The receiver owns
  * clock reads and scheduler decisions; this object only accumulates and reports.
@@ -24,7 +24,7 @@
 #include <cstdio>
 
 /**
- * @brief Core 1's timing totals for one capture, read after all queued blocks finish.
+ * Core 1's timing totals for one capture, read after all queued blocks finish.
  * decodeUs measures time inside decoder.feed(); pauseUs measures deliberate
  * scheduling pauses. bytes and blocks count raw input processed by that task.
  * Times are elapsed microseconds, including time when another task interrupts
@@ -41,33 +41,47 @@ struct DecoderTiming
     int64_t _maxDecodeUs = 0;
     int64_t _maxWaitUs = 0;
 
-    /** @brief Record a block's queue delay in microseconds; called by Core 1. */
+    /* **
+     * recordWait - Record a block's queue delay in microseconds; called by Core 1.
+     */
     void recordWait(int64_t elapsedUs)
     {
-        if (elapsedUs > _maxWaitUs) { _maxWaitUs = elapsedUs; }
+        if (elapsedUs > _maxWaitUs)
+        {
+            _maxWaitUs = elapsedUs;
+        }
     }
 
-    /** @brief Add one decoder call's elapsed microseconds and raw input bytes. */
+    /* **
+     * recordDecode - Add one decoder call's elapsed microseconds and raw input
+     * bytes.
+     */
     void recordDecode(int64_t elapsedUs, uint32_t rawBytes)
     {
         _decodeUs += elapsedUs;
-        if (elapsedUs > _maxDecodeUs) { _maxDecodeUs = elapsedUs; }
+        if (elapsedUs > _maxDecodeUs)
+        {
+            _maxDecodeUs = elapsedUs;
+        }
         _bytes += rawBytes;
         ++_blocks;
     }
 
-    /** @brief Record an already-completed scheduler pause; this does not delay. */
+    /* **
+     * recordPause - Record an already-completed scheduler pause; this does not
+     * delay.
+     */
     void recordPause(int64_t elapsedUs)
     {
         _pauseUs += elapsedUs;
         ++_pauses;
     }
 
-    /**
-     * @brief Print timings on Core 0 after queued decoding has finished.
-     * rate is ADC samples/second; slots describes raw frame length. Callback
-     * gaps and copy times are microseconds measured by the receive interrupt.
-     * These elapsed-time estimates include interruptions, not just CPU work.
+    /* **
+     * report - Print timings on Core 0 after queued decoding has finished. rate is
+     * ADC samples/second; slots describes raw frame length. Callback gaps and copy
+     * times are microseconds measured by the receive interrupt. These elapsed-time
+     * estimates include interruptions, not just CPU work.
      */
     void report(uint32_t rate, uint32_t slots, int64_t maxCallbackGapUs, int64_t maxCopyUs) const
     {
@@ -77,13 +91,13 @@ struct DecoderTiming
         // smaller useful ADC payload rate. Maximum times expose occasional stalls.
         printf("TIMING decodeMBps=%.3f requiredRawMBps=%.3f decodeAvgUs=%.1f "
                "decodeMaxUs=%lld queueWaitMaxUs=%lld\n",
-               _decodeUs != 0 ? static_cast<double>(_bytes) / _decodeUs : 0.0,
-               rate *
-                   slots * 8.0 / 1000000.0,
-               _blocks != 0 ? static_cast<double>(_decodeUs) / _blocks : 0.0,
-               static_cast<long long>(_maxDecodeUs), static_cast<long long>(_maxWaitUs));
+            _decodeUs != 0 ? static_cast<double>(_bytes) / _decodeUs : 0.0,
+            rate *
+                slots * 8.0 / 1000000.0,
+            _blocks != 0 ? static_cast<double>(_decodeUs) / _blocks : 0.0,
+            static_cast<long long>(_maxDecodeUs), static_cast<long long>(_maxWaitUs));
         printf("TIMING callbackGapMaxUs=%lld copyMaxUs=%lld pauses=%lu pauseTotalUs=%llu\n",
-               static_cast<long long>(maxCallbackGapUs), static_cast<long long>(maxCopyUs),
-               static_cast<unsigned long>(_pauses), static_cast<unsigned long long>(_pauseUs));
+            static_cast<long long>(maxCallbackGapUs), static_cast<long long>(maxCopyUs),
+            static_cast<unsigned long>(_pauses), static_cast<unsigned long long>(_pauseUs));
     }
 };

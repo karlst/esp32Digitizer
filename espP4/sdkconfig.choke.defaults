@@ -1,0 +1,14 @@
+# P4-only destructive SD test. Apply after sdkconfig.defaults and sdkconfig.sd.defaults.
+# These defaults seed sdkconfig.choke on the first build. Afterwards change options
+# with menuconfig (P4 capture diagnostics), or edit the saved sdkconfig.choke.
+CONFIG_P4_SD_CHOKE=y
+CONFIG_P4_CHOKE_FILE_COUNT=5
+CONFIG_P4_CHOKE_FILE_SECONDS=15
+CONFIG_P4_CHOKE_RUN_SECONDS=300
+CONFIG_P4_CHOKE_RING_MIB=16
+CONFIG_P4_CHOKE_LIVE_REPORT=y
+CONFIG_FREERTOS_HZ=1000
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=6144
+# CONFIG_P4_HARDWARE_SMOKE is not set
+# CONFIG_P4_CAPTURE_PROFILE is not set
+# CONFIG_P4_DIAGNOSTICS is not set

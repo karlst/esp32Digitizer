@@ -12,82 +12,87 @@
  * Public License in the repository LICENSE file or <https://www.gnu.org/licenses/>.
  */
 
-/** @file SdRecorder.h
- * @brief P4 board adapter around the reusable buffered writer.
- * CPU1 packs ADC samples to three bytes; synthetic tests retain four-byte words.
- * A CPU0 disk task alone owns the file and card.
- * Read prepareFile(), work(), then finishFile() for the file lifecycle.
+/**
+ * @file SdRecorder.h
+ * Asynchronous ADC adapter for the reusable file-ring backend.
+ * Core 1 packs samples and submits RAM copies; the Core 0 disk task alone
+ * prepares, writes and reads files through FileRecordingBackend.
  */
 #pragma once
 #include <atomic>
-#include "BufferedWriter.h"
-#include "ff.h"
-#include "sdmmc_cmd.h"
+#include "FileRecordingBackend.h"
+#include "RetainedPayloadChecksums.h"
+#include "P4RecordingDisk.h"
 #include "RecordingLayout.h"
 #include "RecordingReadback.h"
 #include "RecordingReporter.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
-/** @brief One recording whose card operations run in a separate background task.
- * Requests change an atomic state shared with that task: preparing opens and
- * reserves the file, running permits Core 1 submissions, and finishing means Core 1 has stopped
- * submitting and finished its queued work. Disk
- * calls never occur in either submission method. Files are created exclusively,
- * never replaced.
- * bufferedWriter owns the ring and protects queued bytes until disk writing
- * finishes. This adapter owns board/card configuration and file metadata.
- * prepare()/finish() request work by changing atomic state; their return does
- * not mean the asynchronous disk work is complete. Console READY/SAVED/FAILED
- * is passed to the optional reporter by the disk task after the corresponding operation finishes.
+/**
+ * Bridge acquisition requests to one persistent disk task.
+ * Startup supplies file duration/count/preparation policy. prepare() copies run
+ * parameters before publishing a request; READY confirms actual disk preparation.
+ * submitBytes() never performs disk I/O. finish() is requested only after Core 1
+ * stops; SAVED requires retained-stream readback and matching per-generation CRC/counts.
+ * Circular sessions verify only surviving generations; whole-run reception/write
+ * counters are still checked. Startup or idle configuration chooses the pool policy.
+ * Standard headers describe storage completion, not analog or ADC validity; the
+ * final reporter result additionally checks acquisition validity.
  */
-class SdRecorder : public ByteSink
+class SdRecorder
 {
 public:
-    explicit SdRecorder(uint64_t reservedBytes = 10000000000ULL, RecordingReadback* recordingReadback = nullptr,
-        RecordingReporter* recordingReporter = nullptr);
+    explicit SdRecorder(const RecordingSessionConfig& recordingSessionConfig,
+        RecordingReadback* recordingReadback = nullptr, RecordingReporter* recordingReporter = nullptr);
     bool initTask();
+    bool configure(const RecordingSessionConfig& config);
     bool prepare(uint32_t run, uint32_t rate, const RecordingLayout* recordingLayout = nullptr);
     bool getReady() const;
     void cancelPreparation();
     bool submitBytes(const uint8_t* data, uint32_t bytes);
     bool submitSamples(const uint32_t* words, size_t count);
     bool getFailed() const;
+    bool getFull() const;
     void finish(bool captureClean, uint32_t expectedSamples = 0);
     TaskHandle_t getTaskHandle() const;
+
 private:
-    RecordingReporter* _recordingReporter;
-    const uint64_t _reservedBytes;
-    RecordingReadback* _recordingReadback;
-    RecordingLayout _recordingLayoutDefault;
-    const RecordingLayout* _recordingLayout = &_recordingLayoutDefault;
-    TaskHandle_t _diskTask = nullptr;
-    enum class phase { idle, preparing, running, finishing, complete, error, blocked };
+    enum class Phase
+    {
+        idle,
+        preparing,
+        running,
+        finishing,
+        complete,
+        error,
+        blocked
+    };
     static void taskEntry(void* context);
+    static bool checkReadback(void* context, const uint8_t* data, uint32_t bytes, uint64_t offset);
     void work();
     bool prepareFile();
+    static void reportProgress(void* context, const char* text);
     void closeCancelledPreparation();
     void finishFile();
-    size_t write(const uint8_t* data, size_t length) override;
-    bool flush() override;
-    std::atomic<phase> _state{phase::idle};
-    std::atomic<bool> _storageBroken{false};
-    // Core 0 can request cancellation while the disk task is inside a slow
-    // filesystem call. Only the disk task closes the file, after that call returns.
-    std::atomic<bool> _preparationCancelled{false};
-    BufferedWriter _bufferedWriter;
-    FIL _file = {};
-    sdmmc_card_t* _card = nullptr;
-    uint8_t* _scratch = nullptr;
-    bool _opened = false;
+    RecordingReporter* _recordingReporter;
+    RecordingReadback* _recordingReadback;
+    RecordingSessionConfig _recordingSessionConfig;
+    RecordingLayout _recordingLayoutDefault;
+    const RecordingLayout* _recordingLayout = &_recordingLayoutDefault;
+    FileRecordingBackend _fileRecordingBackend;
+    RetainedPayloadChecksums _retainedPayloadChecksums;
+    P4RecordingDisk _p4RecordingDisk;
+    TaskHandle_t _diskTask = nullptr;
+    std::atomic<Phase> _state{Phase::idle};
+    std::atomic<bool> _storageBroken{false}, _preparationCancelled{false};
     bool _clean = false;
     uint32_t _runId = 0, _sampleRate = 0;
-    uint32_t _submittedCrc = 0;
-    uint64_t _submittedBytes = 0, _writtenBytes = 0;
-    uint64_t _writeUs = 0;
-    char _path[32] = {};
+    uint32_t _readbackCrc = 0;
+    uint64_t _submittedBytes = 0, _readbackBytes = 0, _patternErrors = 0;
+    char _path[64] = {};
 
-    // CPU1's decoder exclusively owns this batch while capturing. Keep it in
-    // the global object's internal RAM, not on the decoder's small task stack.
+    // Core 1 owns this batch until submit() copies it into the backend ring.
+    // Keep it outside the decoder's stack; the global recorder owns its lifetime.
     uint8_t _packedSamples[512 * 3] = {};
 };

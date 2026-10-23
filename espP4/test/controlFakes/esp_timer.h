@@ -12,17 +12,25 @@
  * Public License in the repository LICENSE file or <https://www.gnu.org/licenses/>.
  */
 
-/** @file esp_timer.h
- * @brief Test-controlled clock and operation log; no real-time waits.
+/**
+ * @file esp_timer.h
+ * Test-controlled clock and operation log; no real-time waits.
  */
 #pragma once
 #include <cstdint>
 #include <string>
+
 namespace controlFake
 {
 inline int64_t nowUs = 1;
 inline std::string operations;
-}
+} // namespace controlFake
 
-/** @brief Return the test-selected time in microseconds, preserving the SDK API name. */
-inline int64_t esp_timer_get_time() { return controlFake::nowUs; }
+/* **
+ * esp_timer_get_time - Return the test-selected time in microseconds, preserving
+ * the SDK API name.
+ */
+inline int64_t esp_timer_get_time()
+{
+    return controlFake::nowUs;
+}

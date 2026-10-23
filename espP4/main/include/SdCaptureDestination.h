@@ -12,41 +12,96 @@
  * Public License in the repository LICENSE file or <https://www.gnu.org/licenses/>.
  */
 
-/** @file SdCaptureDestination.h
- * @brief Adapt the SD recorder to the decoder's destination interface.
+/**
+ * @file SdCaptureDestination.h
+ * Adapt the SD recorder to the decoder's destination interface.
  */
 #pragma once
 #include "CaptureDestination.h"
 #include "SdRecorder.h"
 
-/** @brief Borrow one recorder; all disk access remains on its own background task. */
+/**
+ * Connect the capture interface to an existing SdRecorder. The caller keeps the
+ * recorder alive. Sample submission copies into its ring buffer; its disk task
+ * performs all card access.
+ */
 class SdCaptureDestination : public CaptureDestination
 {
 public:
+    /* **
+     * SdCaptureDestination - Store the recorder reference without using the
+     * hardware.
+     */
+    explicit SdCaptureDestination(SdRecorder& sdRecorder)
+        : _sdRecorder(sdRecorder)
+    {
+    }
 
-    /** @brief Store the recorder reference without touching hardware. */
-    explicit SdCaptureDestination(SdRecorder& sdRecorder) : _sdRecorder(sdRecorder) {}
-
-    /** @brief Request a new recording file; poll getReady before submitting samples. */
+    /* **
+     * prepare - Ask the recorder to prepare its file pool for this run and sample
+     * rate. True means the request was accepted; wait for getReady before submitting
+     * samples.
+     */
     bool prepare(uint32_t run, const Ads127Config& adsConfigRequested) override
-    { return _sdRecorder.prepare(run, adsConfigRequested._samplesPerSecond); }
+    {
+        return _sdRecorder.prepare(run, adsConfigRequested._samplesPerSecond);
+    }
 
-    /** @brief Confirm the asynchronous file setup finished for this recording. */
-    bool getReady() const override { return _sdRecorder.getReady(); }
+    /* **
+     * getReady - Return true when the requested file-pool preparation has finished
+     * and was not cancelled.
+     */
+    bool getReady() const override
+    {
+        return _sdRecorder.getReady();
+    }
 
-    /** @brief Prevent late readiness and ask the SD task to close the unused file. */
-    void cancelPreparation() override { _sdRecorder.cancelPreparation(); }
+    /* **
+     * cancelPreparation - Cancel a pending preparation. The disk task closes any
+     * opened file; late completion must not start capture.
+     */
+    void cancelPreparation() override
+    {
+        _sdRecorder.cancelPreparation();
+    }
 
-    /** @brief Pack and copy samples into the recorder's ring without disk I/O. */
+    /* **
+     * submit - Pack and copy samples into the recorder's ring without disk I/O.
+     */
     bool submit(const uint32_t* words, size_t count) override
-    { return _sdRecorder.submitSamples(words, count); }
+    {
+        return _sdRecorder.submitSamples(words, count);
+    }
 
-    /** @brief Read the recorder's latched failure status. */
-    bool getFailed() const override { return _sdRecorder.getFailed(); }
+    /* **
+     * getFailed - Read the recorder's recorded failure status.
+     */
+    bool getFailed() const override
+    {
+        return _sdRecorder.getFailed();
+    }
 
-    /** @brief Request draining and verification after decoder submissions have stopped. */
+    /* **
+     * getFull - Return whether the selected stopWhenFull file pool is full. The
+     * controller uses this to request ADC shutdown. Samples rejected while shutdown
+     * is pending still make the capture fail.
+     */
+    bool getFull() const override
+    {
+        return _sdRecorder.getFull();
+    }
+
+    /* **
+     * finish - Request draining and verification after decoder submissions have
+     * stopped.
+     */
     void finish(uint32_t run, uint32_t rate, bool clean, uint32_t samples) override
-    { (void)run; (void)rate; _sdRecorder.finish(clean, samples); }
+    {
+        (void)run;
+        (void)rate;
+        _sdRecorder.finish(clean, samples);
+    }
+
 private:
     SdRecorder& _sdRecorder;
 };

@@ -14,12 +14,13 @@
 
 /**
  * @file bufferedWriterChecks.h
- * @brief Shared PC checks for ring ordering and storage failures, without hardware.
+ * Shared PC checks for ring ordering and storage failures, without hardware.
  */
 #pragma once
 
-/**
- * @brief Run the shared writer checks; assertions abort on failure, zero means pass.
- * Both project runners call this with their selected buffer configuration.
+/* **
+ * runWriterChecks - Run the shared writer checks; assertions abort on failure,
+ * zero means pass. Both project runners call this with their selected buffer
+ * configuration.
  */
 int runWriterChecks();

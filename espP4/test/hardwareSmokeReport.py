@@ -45,6 +45,9 @@ def analyze(feather, p4, progress=None, plotPath=None):
     fails. plotPath optionally saves one HTML voltage plot before that verdict.
     Each is evidence for that step only, never an early overall PASS.
     """
+    if 'SMOKE_P4 version=5 ' in p4:
+        from hardwareSmokeRetainedReport import analyzeRetained
+        return analyzeRetained(feather, p4, progress, plotPath)
     checks = []
 
     def confirm(message):
@@ -55,7 +58,7 @@ def analyze(feather, p4, progress=None, plotPath=None):
 
     if not any(f'SMOKE_FEATHER version={version} ready=1 seconds=30' in feather for version in (1, 2, 3)) or 'DAC MODE: SQUARE codes=110,135 levelSeconds=1' not in feather:
         raise ValueError('Feather is not running the square-wave smoke firmware')
-    if not any(f'SMOKE_P4 version={version} ready=1 seconds=30' in p4 for version in (1, 2, 3)):
+    if not any(f'SMOKE_P4 version={version} ready=1 seconds=30' in p4 for version in (1, 2, 3, 4)):
         raise ValueError('P4 is not running fresh SD smoke firmware')
     run, count, clean, missed, gap = map(int, single(
         r'^INPUT_BEGIN run=(\d+) count=(\d+) clean=(\d+) missed=(\d+) maxGapUs=(\d+) mode=burst$', feather, 'Input measurements'))
@@ -65,8 +68,21 @@ def analyze(feather, p4, progress=None, plotPath=None):
         raise ValueError('Input report belongs to a different run')
     diskRun, rate, samples, bins, clean = map(int, single(
         r'^SMOKE_SD_BEGIN run=(\d+) rate=(\d+) samples=(\d+) bins=(\d+) clean=(\d+)$', p4, 'SD readback'))
-    if diskRun != run or rate != 1024000 or bins != 300 or clean != 1:
-        raise ValueError('SD readback or capture checks failed, or reports do not match')
+    if diskRun != run or rate != 1024000 or bins != 300:
+        raise ValueError('SD readback run, sample rate or bin count does not match the test')
+
+    # Version 4 uses SD files. RAMFULL is the existing Feather shutdown token,
+    # also used for exhausted SD capacity; it does not mean ring-buffer overflow.
+    # Report it before the general clean flag hides the actionable cause.
+    if ('SMOKE_P4 version=4 ready=1 seconds=30' in p4 and
+            re.search(rf'^ADC127 RAMFULL {run}$', p4, re.M)):
+        received = re.search(rf'^ADC127 (?:FAULT|DONE) {run} words=(\d+) ', p4, re.M)
+        detail = ''
+        if received and int(received[1]) > samples:
+            detail = f'; received {int(received[1]) - samples:,} more samples than were stored'
+        raise ValueError(f'SD file capacity exhausted{detail}. Increase the preallocated file capacity; this is not ring-buffer overflow.')
+    if clean != 1:
+        raise ValueError('P4 marked the capture or SD verification unclean; see ADC127 and SD FAILED lines in p4.txt')
     if single(r'^SMOKE_SD_END run=(\d+)$', p4, 'SD completion') != str(run):
         raise ValueError('SD report belongs to a different run')
     if not 29.98 <= samples / rate <= 30.02:
@@ -84,6 +100,12 @@ def analyze(feather, p4, progress=None, plotPath=None):
     confirm('Recording buffer: no overflow')
     confirm(f'SD written: {int(saved[1]):,} sample bytes')
     confirm('SD readback: checksum matches')
+    if 'SMOKE_P4 version=4 ready=1 seconds=30' in p4:
+        session, files, changes, reuses, lost = map(int, single(
+            r'^SD SESSION id=(\d+) files=(\d+) changes=(\d+) reuses=(\d+) lost=(\d+)$', p4, 'File-ring completion'))
+        if session == 0 or files != 2 or changes != 1 or reuses != 0 or lost != 0:
+            raise ValueError('Expected two files, one changeover, no reuse and no lost input')
+        confirm('SD files: two files verified, one changeover, no overwrite')
     if 'ADC STOP command echo confirmed' not in feather or 'ADC START echo confirmed.' not in feather:
         raise ValueError('ADC start/stop was not confirmed')
     single(r'^DAC OFF updates=\d+ missedIntervals=\d+ maxGapUs=\d+ driverFault=0$', feather, 'DAC completion')
@@ -96,24 +118,24 @@ def analyze(feather, p4, progress=None, plotPath=None):
     if len(inputRows) != 300 or len(outputRows) != 300:
         raise ValueError('Input or disk measurements are incomplete')
     inputs, outputs = [], []
-    for index, row in enumerate(inputRows):
+    for iRow, row in enumerate(inputRows):
         if len(row) != 8:
             raise ValueError('Malformed input measurement')
         _, position, timestamp, mean, minimum, maximum, reads, duration = row
         mean = float(mean)
-        if (int(position) != index or not math.isfinite(mean) or
+        if (int(position) != iRow or not math.isfinite(mean) or
                 not 0 <= int(minimum) <= mean <= int(maximum) <= 4095 or
                 not 2 <= int(reads) <= 4096 or not 1 <= int(duration) <= 20000 or
-                not 0 <= int(timestamp) - (50000 + index * 100000) <= 20000):
+                not 0 <= int(timestamp) - (50000 + iRow * 100000) <= 20000):
             raise ValueError('Input measurement timing or voltage is invalid')
         inputs.append(converter(mean))
-    for index, row in enumerate(outputRows):
+    for iRow, row in enumerate(outputRows):
         if len(row) != 4:
             raise ValueError('Malformed disk measurement')
         _, position, count, mean = row
         mean = float(mean)
-        expected = rate // 10 if index < 299 else min(rate // 10, samples - 299 * (rate // 10))
-        if int(position) != index or int(count) != expected or not math.isfinite(mean) or not -8388608 < mean < 8388607:
+        expected = rate // 10 if iRow < 299 else min(rate // 10, samples - 299 * (rate // 10))
+        if int(position) != iRow or int(count) != expected or not math.isfinite(mean) or not -8388608 < mean < 8388607:
             raise ValueError('Disk measurement order, size, or range is invalid')
         outputs.append(mean * 2500.0 / 8388608)
 
@@ -172,9 +194,9 @@ def summary(result, includeChecks=True):
     is called only after analyze succeeds; failures retain partial checks instead.
     """
     checks = ''.join(message + '\n' for message in result['checks']) if includeChecks else ''
-    return (f"Hardware smoke test: 30 seconds\n"
+    return (f"Hardware smoke test: {result.get('requestedSeconds', 30)} seconds\n"
             f"Recorded: {result['seconds']:.3f} seconds\n"
             f"{checks}"
-            f"Signal: {result['low']/1000:.3f} / {result['high']/1000:.3f} V; 29 level changes verified\n"
+            f"Signal: {result['low']/1000:.3f} / {result['high']/1000:.3f} V; {result.get('transitions', 29)} retained level changes verified\n"
             f"Largest plateau-average error: {result['errorPercent']:.1f}% of signal swing (limit: {result['errorLimitPercent']:g}%)\n"
             f"PASS")

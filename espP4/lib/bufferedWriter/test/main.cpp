@@ -14,12 +14,12 @@
 
 /**
  * @file main.cpp
- * @brief Standalone PC entry point for the shared writer checks.
+ * Standalone PC entry point for the shared writer checks.
  */
 #include "bufferedWriterChecks.h"
 
-/**
- * @brief Run only generic writer checks; no board or receiver source is needed.
+/* **
+ * main - Run only generic writer checks; no board or receiver source is needed.
  */
 int main()
 {

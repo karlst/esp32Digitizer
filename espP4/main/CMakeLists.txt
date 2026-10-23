@@ -13,6 +13,21 @@
 # Compile P4 capture and storage plus the P4-local reusable byte writer. The reusable writer
 # has no receiver dependency; these include paths expose its interface to sdRecorder.
 # Select one small startup file. Application and storage implementations are shared.
+if(CONFIG_P4_SD_CHOKE)
+    # Standalone storage workload: no receiver, Feather link or recording startup.
+    idf_component_register(SRCS "../test/choke/main.cpp" "../test/choke/SdChokeTest.cpp"
+        "../test/choke/PreservedFiles.cpp" "src/P4RecordingDisk.cpp"
+        "../lib/fileRecorder/src/FileRecordingBackend.cpp" "../lib/fileRecorder/src/SessionFileHeader.cpp"
+        "../lib/fileRecorder/src/RetainedPayloadChecksums.cpp"
+        "../lib/bufferedWriter/src/BufferedWriter.cpp"
+        INCLUDE_DIRS "include" "../test/choke" "../lib/bufferedWriter/src" "../lib/fileRecorder/src"
+        REQUIRES esp_timer fatfs sdmmc esp_driver_sdmmc esp_psram esp_hw_support esp_rom)
+    math(EXPR chokeRingBytes "${CONFIG_P4_CHOKE_RING_MIB} * 1048576")
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE
+        BUFFERED_WRITER_EXTERNAL=1 BUFFERED_WRITER_CAPACITY=${chokeRingBytes} BUFFERED_WRITER_BLOCK_BYTES=131072)
+    return()
+endif()
+
 set(startup "src/main.cpp")
 if(CONFIG_P4_HARDWARE_SMOKE OR CONFIG_P4_CAPTURE_PROFILE OR CONFIG_P4_DIAGNOSTICS)
     set(startup "../test/hardware/main.cpp")
@@ -20,13 +35,15 @@ endif()
 idf_component_register(SRCS ${startup} "src/RecordingApplication.cpp"
     "src/RecordingController.cpp" "src/ConsoleRecordingReporter.cpp"
     "src/AdcReceiver.cpp" "src/SampleDecoder.cpp" "src/FrameDecoder.cpp" "src/SdRecorder.cpp"
-    "../lib/bufferedWriter/src/BufferedWriter.cpp"
-    INCLUDE_DIRS "include" "../../common" "../lib/bufferedWriter/src"
+    "../lib/bufferedWriter/src/BufferedWriter.cpp" "src/P4RecordingDisk.cpp"
+    "../lib/fileRecorder/src/FileRecordingBackend.cpp" "../lib/fileRecorder/src/SessionFileHeader.cpp"
+        "../lib/fileRecorder/src/RetainedPayloadChecksums.cpp"
+    INCLUDE_DIRS "include" "../../common" "../lib/bufferedWriter/src" "../lib/fileRecorder/src"
     REQUIRES esp_driver_parlio esp_driver_uart esp_driver_gpio esp_timer fatfs sdmmc esp_driver_sdmmc esp_psram esp_rom esp_hw_support)
-# Allocate the ring separately at runtime: 4 MiB total, writes of up to 128 KiB.
+# Allocate the ring separately at runtime: 16 MiB total, writes of up to 128 KiB.
 # Apply identical definitions to all sources so class layouts agree.
 target_compile_definitions(${COMPONENT_LIB} PRIVATE
-    BUFFERED_WRITER_EXTERNAL=1 BUFFERED_WRITER_CAPACITY=4194304 BUFFERED_WRITER_BLOCK_BYTES=131072)
+    BUFFERED_WRITER_EXTERNAL=1 BUFFERED_WRITER_CAPACITY=16777216 BUFFERED_WRITER_BLOCK_BYTES=131072)
 
 # Test implementations are absent from ordinary recording builds.
 if(CONFIG_P4_HARDWARE_SMOKE OR CONFIG_P4_CAPTURE_PROFILE OR CONFIG_P4_DIAGNOSTICS)

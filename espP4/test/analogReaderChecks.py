@@ -28,8 +28,8 @@ class AnalogReaderChecks(unittest.TestCase):
     def makeFile(self, path, valid=1):
         """Generate a 4s 10Hz signal at 1kHz with a negative-to-positive swing."""
         payload = bytearray()
-        for index in range(4000):
-            value = round(100000 * math.sin(2 * math.pi * 10 * index / 1000))
+        for iSample in range(4000):
+            value = round(100000 * math.sin(2 * math.pi * 10 * iSample / 1000))
             payload.extend((value & 0xffffff).to_bytes(3, 'little'))
         header = bytearray(512)
         header[:8] = b'P4ADC03\0'

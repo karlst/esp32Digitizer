@@ -12,25 +12,43 @@
  * Public License in the repository LICENSE file or <https://www.gnu.org/licenses/>.
  */
 
-/** @file FrameDecoder.h
- * @brief Inject decoder results for lifecycle checks; real decoding has its own suites.
+/**
+ * @file FrameDecoder.h
+ * Inject decoder results for lifecycle checks; real decoding has its own suites.
  */
 #pragma once
 #include "CaptureStats.h"
 
-/** @brief A result holder, not a second implementation of the decoding algorithm. */
+/**
+ * A result holder, not a second implementation of the decoding algorithm.
+ */
 class FrameDecoder
 {
 public:
     CaptureStats _captureStats;
     bool _outputFailed = false;
 
-    /** @brief Return values arranged by the test. */
-    const CaptureStats& getCaptureStats() const { return _captureStats; }
+    /* **
+     * getCaptureStats - Return values arranged by the test.
+     */
+    const CaptureStats& getCaptureStats() const
+    {
+        return _captureStats;
+    }
 
-    /** @brief This fake has no unfinished raw word. */
-    uint32_t getPendingBits() const { return 0; }
+    /* **
+     * getPendingBits - This fake has no unfinished raw word.
+     */
+    uint32_t getPendingBits() const
+    {
+        return 0;
+    }
 
-    /** @brief Inject refusal by a destination. */
-    bool getOutputFailed() const { return _outputFailed; }
+    /* **
+     * getOutputFailed - Inject refusal by a destination.
+     */
+    bool getOutputFailed() const
+    {
+        return _outputFailed;
+    }
 };

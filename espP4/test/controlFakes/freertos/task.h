@@ -12,11 +12,17 @@
  * Public License in the repository LICENSE file or <https://www.gnu.org/licenses/>.
  */
 
-/** @file task.h
- * @brief Provide the SDK task identity function used by optional observers.
+/**
+ * @file task.h
+ * Provide the SDK task identity function used by optional observers.
  */
 #pragma once
 #include "FreeRTOS.h"
 
-/** @brief No real task exists in this host test. */
-inline TaskHandle_t xTaskGetCurrentTaskHandle() { return nullptr; }
+/* **
+ * xTaskGetCurrentTaskHandle - No real task exists in this host test.
+ */
+inline TaskHandle_t xTaskGetCurrentTaskHandle()
+{
+    return nullptr;
+}

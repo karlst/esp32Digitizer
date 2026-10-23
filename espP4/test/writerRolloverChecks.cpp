@@ -12,8 +12,9 @@
  * Public License in the repository LICENSE file or <https://www.gnu.org/licenses/>.
  */
 
-/** @file writerRolloverChecks.cpp
- * @brief Exercise the actual ring past its 32-bit byte-position wrap, without disk I/O.
+/**
+ * @file writerRolloverChecks.cpp
+ * Exercise the actual ring past its 32-bit byte-position wrap, without disk I/O.
  * Memory use stays bounded: one ring and one block, not a multi-gigabyte file.
  */
 #include "RolloverSink.h"
@@ -23,18 +24,36 @@
 #include <cstring>
 #include <cstdio>
 
+/* **
+ * clockUs - Provide deterministic timing; this test measures ordering, not
+ * throughput.
+ */
+static uint64_t clockUs()
+{
+    return 1;
+}
 
+/* **
+ * allocate - Use host heap for the external ring, matching the firmware's
+ * ownership model.
+ */
+static uint8_t* allocate(uint32_t bytes)
+{
+    return static_cast<uint8_t*>(std::malloc(bytes));
+}
 
-/** @brief Provide deterministic timing; this test measures ordering, not throughput. */
-static uint64_t clockUs() { return 1; }
+/* **
+ * release - Release the host allocation when the writer goes out of scope.
+ */
+static void release(uint8_t* memory)
+{
+    std::free(memory);
+}
 
-/** @brief Use host heap for the external ring, matching the firmware's ownership model. */
-static uint8_t* allocate(uint32_t bytes) { return static_cast<uint8_t*>(std::malloc(bytes)); }
-
-/** @brief Release the host allocation when the writer goes out of scope. */
-static void release(uint8_t* memory) { std::free(memory); }
-
-/** @brief Transfer slightly over 4 GiB, checking actual wrap and 64-bit saved-byte totals. */
+/* **
+ * main - Transfer slightly over 4 GiB, checking actual wrap and 64-bit
+ * saved-byte totals.
+ */
 int main()
 {
     BufferedWriter bufferedWriter;
@@ -46,10 +65,10 @@ int main()
     rolloverSink._expectedBytes = sizeof(block);
     bufferedWriter.start(rolloverSink, clockUs);
     const uint32_t blocks = static_cast<uint32_t>((uint64_t{1} << 32) / sizeof(block)) + 1;
-    for (uint32_t index = 0; index < blocks; ++index)
+    for (uint32_t iBlock = 0; iBlock < blocks; ++iBlock)
     {
         // Distinguish successive blocks to expose a stale block at wraparound.
-        std::memcpy(block, &index, sizeof(index));
+        std::memcpy(block, &iBlock, sizeof(iBlock));
         assert(bufferedWriter.submit(block, sizeof(block)));
         assert(bufferedWriter.pump());
     }

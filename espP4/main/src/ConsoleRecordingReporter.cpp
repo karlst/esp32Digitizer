@@ -12,26 +12,41 @@
  * Public License in the repository LICENSE file or <https://www.gnu.org/licenses/>.
  */
 
-/** @file ConsoleRecordingReporter.cpp
- * @brief Format terminal diagnostics from completed recording snapshots.
+/**
+ * @file ConsoleRecordingReporter.cpp
+ * Format terminal diagnostics from completed recording snapshots.
  */
 #include "ConsoleRecordingReporter.h"
 #include "AdcReceiver.h"
 #include <cstdio>
 #include "esp_err.h"
 
-/** @brief Explain the current console controller's startup actions; no recording has started. */
+/* **
+ * startup - Explain the current console controller's startup actions; no
+ * recording has started.
+ */
 void ConsoleRecordingReporter::startup() const
 {
     message("P4 receiver ready for commands. Start from Feather; storage prepares automatically. DCLK=0 FSYNC=1 DOUT0=2 RX=4 TX=5.\n");
     message("ADC files: 3 bytes/sample, status still checked; 1,024,000 samples/s requires 24.576 Mbps to SD.\n");
 }
 
-/** @brief Echo a complete controller message to the PC without interpreting percent signs. */
+/* **
+ * message - Echo a complete controller message to the PC without interpreting
+ * percent signs.
+ */
 void ConsoleRecordingReporter::message(const char* text) const
-{ if (_enabled) { printf("%s", text); } }
+{
+    if (_enabled)
+    {
+        printf("%s", text);
+    }
+}
 
-/** @brief Print frozen receive/decode details; these do not certify final SD contents. */
+/* **
+ * capture - Print completed receive/decode details; these do not certify final
+ * SD contents.
+ */
 void ConsoleRecordingReporter::capture(const RecordingResult& recordingResult) const
 {
     if (_enabled)
@@ -39,12 +54,13 @@ void ConsoleRecordingReporter::capture(const RecordingResult& recordingResult) c
         const auto& captureStats = recordingResult._captureStats;
         const auto& receiverStats = recordingResult._receiverStats;
         printf("requested=%lu/s bytes=%llu blocks=%lu queueHigh=%lu/%u "
-               "tailBits=%lu raw=%08lx sample=%ld\n", static_cast<unsigned long>(recordingResult._sampleRate),
-               static_cast<unsigned long long>(receiverStats._rawBytes),
-               static_cast<unsigned long>(receiverStats._callbacks),
-               static_cast<unsigned long>(receiverStats._queueHighWater), AdcReceiver::getBlockCount(),
-               static_cast<unsigned long>(recordingResult._pendingBits),
-               static_cast<unsigned long>(captureStats._latestWord), static_cast<long>(captureStats._latestSample));
+               "tailBits=%lu raw=%08lx sample=%ld\n",
+            static_cast<unsigned long>(recordingResult._sampleRate),
+            static_cast<unsigned long long>(receiverStats._rawBytes),
+            static_cast<unsigned long>(receiverStats._callbacks),
+            static_cast<unsigned long>(receiverStats._queueHighWater), AdcReceiver::getBlockCount(),
+            static_cast<unsigned long>(recordingResult._pendingBits),
+            static_cast<unsigned long>(captureStats._latestWord), static_cast<long>(captureStats._latestSample));
 
         // "header" here is the ADC's eight-bit status value, not the file header.
         // Print counts for every observed value, plus up to eight suspect words
@@ -54,27 +70,37 @@ void ConsoleRecordingReporter::capture(const RecordingResult& recordingResult) c
             if (captureStats._headers[header] != 0)
             {
                 printf("header=%02x count=%lu\n", header,
-                       static_cast<unsigned long>(captureStats._headers[header]));
+                    static_cast<unsigned long>(captureStats._headers[header]));
             }
         }
 
-        for (unsigned index = 0; index < 8 && index < captureStats._badHeaders; ++index)
+        for (unsigned iExample = 0; iExample < 8 && iExample < captureStats._badHeaders; ++iExample)
         {
-            printf("badWord[%u]=%08lx\n", index,
-                   static_cast<unsigned long>(captureStats._badExamples[index]));
+            printf("badWord[%u]=%08lx\n", iExample,
+                static_cast<unsigned long>(captureStats._badExamples[iExample]));
         }
-        
+
         printf("DONE means receiver stopped. Missing final DMA tail and undetected "
                "hardware loss remain possible; review counts and errors.\n");
-    
     }
 }
 
-/** @brief The SD task reports actual preparation completion, not just request acceptance. */
+/* **
+ * storagePrepared - The SD task reports actual preparation completion, not just
+ * request acceptance.
+ */
 void ConsoleRecordingReporter::storagePrepared(bool ready, const char* path) const
-{ if (_enabled) { printf("SD %s file=%s (existing files preserved)\n", ready ? "READY" : "PREPARE FAILED", path); } }
+{
+    if (_enabled)
+    {
+        printf("SD %s file=%s (existing files preserved)\n", ready ? "READY" : "PREPARE FAILED", path);
+    }
+}
 
-/** @brief Report a storage failure without changing retry or recording policy. */
+/* **
+ * storageError - Report a storage failure without changing retry or recording
+ * policy.
+ */
 void ConsoleRecordingReporter::storageError(StorageError error, int code) const
 {
     if (_enabled)
@@ -97,22 +123,77 @@ void ConsoleRecordingReporter::storageError(StorageError error, int code) const
     }
 }
 
-/** @brief Report the requested allocation size; READY confirms later success. */
+/* **
+ * storageRetention - Identify exactly which accepted bytes survived and were
+ * read back.
+ */
+void ConsoleRecordingReporter::storageRetention(uint64_t firstByte, uint64_t bytes, uint64_t total) const
+{
+    if (_enabled)
+    {
+        printf("SD RETAINED firstByte=%llu bytes=%llu totalBytes=%llu\n",
+            static_cast<unsigned long long>(firstByte), static_cast<unsigned long long>(bytes),
+            static_cast<unsigned long long>(total));
+    }
+}
+
+/* **
+ * storageSession - Report final pool counters so tests can confirm rollover
+ * without overwriting.
+ */
+void ConsoleRecordingReporter::storageSession(uint64_t session, uint32_t files, uint32_t rollovers,
+    uint32_t reuses, uint64_t lostBytes) const
+{
+    if (_enabled)
+    {
+        printf("SD SESSION id=%llu files=%lu changes=%lu reuses=%lu lost=%llu\n",
+            static_cast<unsigned long long>(session), static_cast<unsigned long>(files),
+            static_cast<unsigned long>(rollovers), static_cast<unsigned long>(reuses),
+            static_cast<unsigned long long>(lostBytes));
+    }
+}
+
+/* **
+ * storageReserved - Report the requested allocation size; READY confirms later
+ * success.
+ */
 void ConsoleRecordingReporter::storageReserved(uint64_t bytes) const
-{ if (_enabled) { printf("SD reserving %llu bytes; wait for SD READY\n", static_cast<unsigned long long>(bytes)); } }
+{
+    if (_enabled)
+    {
+        printf("SD reserving %llu bytes; wait for SD READY\n", static_cast<unsigned long long>(bytes));
+    }
+}
 
-/** @brief Announce readback of the recorded payload after pending writes finish. */
+/* **
+ * storageVerifying - Announce readback of the recorded payload after pending
+ * writes finish.
+ */
 void ConsoleRecordingReporter::storageVerifying(uint64_t bytes) const
-{ if (_enabled) { printf("SD verifying %llu bytes; keep card inserted until SD SAVED/FAILED\n", static_cast<unsigned long long>(bytes)); } }
+{
+    if (_enabled)
+    {
+        printf("SD verifying %llu bytes; keep card inserted until SD SAVED/FAILED\n", static_cast<unsigned long long>(bytes));
+    }
+}
 
-/** @brief Report how many bytes have actually been read back, not merely queued. */
+/* **
+ * storageProgress - Report how many bytes have actually been read back, not
+ * merely queued.
+ */
 void ConsoleRecordingReporter::storageProgress(uint64_t bytes, uint64_t total) const
-{ if (_enabled) { printf("SD verified %llu / %llu bytes\n", static_cast<unsigned long long>(bytes), static_cast<unsigned long long>(total)); } }
+{
+    if (_enabled)
+    {
+        printf("SD verified %llu / %llu bytes\n", static_cast<unsigned long long>(bytes), static_cast<unsigned long long>(total));
+    }
+}
 
-/**
- * @brief Report final file status and frozen ring statistics after close was attempted.
- * The recorder supplies success only after acquisition, writing and readback
- * checks. Write Mbps counts time inside write calls, not end-to-end throughput.
+/* **
+ * storageFinished - Report final file status and final ring-buffer statistics
+ * after close was attempted. The recorder supplies success only after
+ * acquisition, writing and readback checks. Write Mbps counts time inside write
+ * calls, not end-to-end throughput.
  */
 void ConsoleRecordingReporter::storageFinished(bool ok, const char* path, uint64_t bytes, uint32_t crc,
     const BufferedWriter::Statistics& statistics, double writeMbps) const
@@ -120,11 +201,15 @@ void ConsoleRecordingReporter::storageFinished(bool ok, const char* path, uint64
     if (_enabled)
     {
         printf("SD %s file=%s bytes=%llu crc=%08lx ringPeak=%lu/%lu maxWriteOrFlushUs=%lu "
-               "overflow=%lu errors=%lu unsaved=%lu\n", ok ? "SAVED" : "FAILED", path,
-               static_cast<unsigned long long>(bytes), static_cast<unsigned long>(crc),
-               static_cast<unsigned long>(statistics._peak), static_cast<unsigned long>(BufferedWriter::_capacity),
-               static_cast<unsigned long>(statistics._maxUs), static_cast<unsigned long>(statistics._overflows),
-               static_cast<unsigned long>(statistics._errors), static_cast<unsigned long>(statistics._unsavedBytes));
-        printf("SD writeCallMbps=%.3f\n", writeMbps);
+               "overflow=%lu errors=%lu unsaved=%lu\n",
+            ok ? "SAVED" : "FAILED", path,
+            static_cast<unsigned long long>(bytes), static_cast<unsigned long>(crc),
+            static_cast<unsigned long>(statistics._peak), static_cast<unsigned long>(BufferedWriter::_capacity),
+            static_cast<unsigned long>(statistics._maxUs), static_cast<unsigned long>(statistics._overflows),
+            static_cast<unsigned long>(statistics._errors), static_cast<unsigned long>(statistics._unsavedBytes));
+        if (writeMbps > 0)
+        {
+            printf("SD writeCallMbps=%.3f\n", writeMbps);
+        }
     }
 }

@@ -12,15 +12,18 @@
  * Public License in the repository LICENSE file or <https://www.gnu.org/licenses/>.
  */
 
-/** @file AdcReceiver.h
- * @brief Host replacement for receive hardware, with explicit injected outcomes.
+/**
+ * @file AdcReceiver.h
+ * Host replacement for receive hardware, with explicit injected outcomes.
  */
 #pragma once
 #include "ReceiverStats.h"
 #include "esp_err.h"
 #include "esp_timer.h"
 
-/** @brief Record calls without DMA, queues or interrupts; hardware tests cover those. */
+/**
+ * Record calls without DMA, queues or interrupts; hardware tests cover those.
+ */
 class AdcReceiver
 {
 public:
@@ -30,18 +33,44 @@ public:
     uint32_t _clockHz = 0;
     ReceiverStats _receiverStats;
 
-    /** @brief No resources exist in this fake. */
-    void initialize() {}
+    /* **
+     * initialize - No resources exist in this fake.
+     */
+    void initialize()
+    {
+    }
 
-    /** @brief Record requested clock rate and return the injected setup result. */
-    esp_err_t start(uint32_t clockHz) { ++_starts; _clockHz = clockHz; return _startResult; }
+    /* **
+     * start - Record requested clock rate and return the injected setup result.
+     */
+    esp_err_t start(uint32_t clockHz)
+    {
+        ++_starts;
+        _clockHz = clockHz;
+        return _startResult;
+    }
 
-    /** @brief Record receiver shutdown for ordering checks. */
-    void stop() { controlFake::operations += "stop "; }
+    /* **
+     * stop - Record receiver shutdown for ordering checks.
+     */
+    void stop()
+    {
+        controlFake::operations += "stop ";
+    }
 
-    /** @brief Return an injected live receive failure. */
-    bool getFailed() const { return _failed; }
+    /* **
+     * getFailed - Return an injected live receive failure.
+     */
+    bool getFailed() const
+    {
+        return _failed;
+    }
 
-    /** @brief Return the injected frozen measurements. */
-    ReceiverStats getReceiverStats() const { return _receiverStats; }
+    /* **
+     * getReceiverStats - Return the injected frozen measurements.
+     */
+    ReceiverStats getReceiverStats() const
+    {
+        return _receiverStats;
+    }
 };

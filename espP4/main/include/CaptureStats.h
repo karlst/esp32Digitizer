@@ -12,14 +12,15 @@
  * Public License in the repository LICENSE file or <https://www.gnu.org/licenses/>.
  */
 
-/** @file CaptureStats.h
- * @brief CaptureStats declaration shared by its callers.
+/**
+ * @file CaptureStats.h
+ * CaptureStats declaration shared by its callers.
  */
 #pragma once
 #include <cstdint>
 
 /**
- * @brief Counts of what arrived, not proof that every ADC bit arrived.
+ * Counts of what arrived, not proof that every ADC bit arrived.
  * clocks counts captured clock positions; frames counts FSYNC rising edges;
  * words counts complete 32-bit status+sample values. badPeriods counts wrong
  * distances between frame starts; shortWords counts a new start interrupting

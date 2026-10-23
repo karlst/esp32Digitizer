@@ -12,8 +12,9 @@
  * Public License in the repository LICENSE file or <https://www.gnu.org/licenses/>.
  */
 
-/** @file RecordingController.cpp
- * @brief Console and Feather commands, including their required handshake replies.
+/**
+ * @file RecordingController.cpp
+ * Console and Feather commands, including their required handshake replies.
  * Read initialize, poll and handleLine. ARM3 asks P4 to receive; READY3 grants
  * permission for Feather to start the ADC. STOP reports that Feather stopped.
  * UART is the serial link between boards; samples arrive on separate ADC pins.
@@ -21,26 +22,38 @@
 #include "RecordingController.h"
 #include <cstdarg>
 #include <cstdio>
+#include <cstring>
 #include <fcntl.h>
 #include <unistd.h>
+#include <sys/time.h>
 
-/** @brief Borrow permanent application/reporting services and bind control notifications. */
+/* **
+ * RecordingController - Save the application and reporter references, and
+ * register this controller to receive application events. The optional console
+ * handler supplies test commands. All supplied objects must remain alive while
+ * the controller uses them.
+ */
 RecordingController::RecordingController(RecordingApplication& recordingApplication,
     RecordingReporter& recordingReporter, RecordingConsoleCommands* recordingConsoleCommands)
     : _recordingApplication(recordingApplication), _recordingReporter(recordingReporter),
       _recordingConsoleCommands(recordingConsoleCommands)
-{ _recordingApplication.setEvents(*this); }
+{
+    _recordingApplication.setEvents(*this);
+}
 
-/**
- * @brief Core 0 opens nonblocking console input and UART1, without starting capture.
- * Nonblocking reads let polling supervise the application even when no user
- * types. UART errors are read separately so damaged commands are discarded.
+/* **
+ * initialize - Core 0 opens nonblocking console input and UART1, without
+ * starting capture. Nonblocking reads let polling supervise the application even
+ * when no user types. UART errors are read separately so damaged commands are
+ * discarded.
  */
 void RecordingController::initialize()
 {
     const int consoleFlags = fcntl(STDIN_FILENO, F_GETFL, 0);
     ESP_ERROR_CHECK(consoleFlags >= 0 && fcntl(STDIN_FILENO, F_SETFL,
-        consoleFlags | O_NONBLOCK) == 0 ? ESP_OK : ESP_FAIL);
+                                             consoleFlags | O_NONBLOCK) == 0
+                        ? ESP_OK
+                        : ESP_FAIL);
 
     // Eight data bits, no parity, one stop bit, no flow-control wires.
     // GPIO4 receives commands; GPIO5 sends replies. RX/TX buffers hold bytes,
@@ -58,14 +71,15 @@ void RecordingController::initialize()
     _recordingReporter.startup();
 }
 
-/**
- * @brief Core 0 sends a control reply to Feather and offers an optional PC echo.
- * Callers supply printf-style format text and values. Replies describe setup,
- * stop requests, or results; READY3 and RAMFULL can be sent during an active
- * capture. This function is never called from the receive interrupt handler.
- * uart_write_bytes() queues text for UART1 transmission on GPIO5; the reporter
- * optionally prints it on the PC. Neither confirms that Feather received it.
- * Formatting failure or a line too large for the 384-byte array sends nothing.
+/* **
+ * reply - Core 0 sends a control reply to Feather and offers an optional PC
+ * echo. Callers supply printf-style format text and values. Replies describe
+ * setup, stop requests, or results; READY3 and RAMFULL can be sent during an
+ * active capture. This function is never called from the receive interrupt
+ * handler. uart_write_bytes() queues text for UART1 transmission on GPIO5; the
+ * reporter optionally prints it on the PC. Neither confirms that Feather
+ * received it. Formatting failure or a line too large for the 384-byte array
+ * sends nothing.
  */
 void RecordingController::reply(const char* format, ...)
 {
@@ -85,12 +99,14 @@ void RecordingController::reply(const char* format, ...)
     }
 }
 
-/**
- * @brief Parse a complete Feather line on Core 0; ignore unknown or malformed lines.
- * The trailing %c rejects extra arguments. The application enforces preparation
- * and run sequencing; the controller only translates its result into protocol.
- * Duplicate active ARM3 replies READY3 without restarting. Matching STOP after
- * completion replies DONE without repeating cleanup, preserving the handshake.
+/* **
+ * handleLine - Interpret one complete Feather command on Core 0. ARM3 requests
+ * preparation for a run number and sample rate. A matching STOP ends that run.
+ * LINK echoes a test number while idle without starting acquisition.
+ *
+ * Ignore malformed commands; the extra %c in sscanf detects unwanted trailing
+ * arguments. Repeated ARM3 for the active run replies READY3 without restarting.
+ * A repeated matching STOP replies DONE without repeating cleanup.
  */
 void RecordingController::handleLine(const char* line)
 {
@@ -98,15 +114,23 @@ void RecordingController::handleLine(const char* line)
     unsigned long samplesPerSecond = 0;
     char extra = 0;
 
-    if (sscanf(line, "ADC127 ARM3 %lu %lu %c", &run, &samplesPerSecond, &extra) == 2)
+    if (sscanf(line, "ADC127 LINK %lu %c", &run, &extra) == 1 && _recordingApplication.getIdle())
     {
+        // Probe echoes a nonce without preparing storage or starting acquisition.
+        reply("ADC127 LINK_OK %lu\n", run);
+    }
+    else if (sscanf(line, "ADC127 ARM3 %lu %lu %c", &run, &samplesPerSecond, &extra) == 2)
+    {
+        _linkDiagnostics = false;
+        _recordingReporter.message("PREP: Feather request received\n");
         using StartResult = RecordingApplication::StartResult;
         // The wire carries samples/second, never a table index. Only known
         // configurations can reach the application. ARM3 distinguishes this
         // meaning from old ARM2 messages, which must not start a recording.
         const Ads127Config* adsConfigRequested = getAds127Config(samplesPerSecond);
         const StartResult result = adsConfigRequested != nullptr
-            ? _recordingApplication.start(run, *adsConfigRequested) : StartResult::invalidRequest;
+                                       ? _recordingApplication.start(run, *adsConfigRequested)
+                                       : StartResult::invalidRequest;
         switch (result)
         {
         case StartResult::preparing:
@@ -130,7 +154,7 @@ void RecordingController::handleLine(const char* line)
             break;
         }
     }
-    
+
     else if (sscanf(line, "ADC127 STOP %lu %c", &run, &extra) == 1 &&
              run == _recordingApplication.getRecordingState()._run)
     {
@@ -138,25 +162,47 @@ void RecordingController::handleLine(const char* line)
         _recordingApplication.stop();
         // Active capture reports DONE through stopped(). A cancelled pending
         // request has no receive counters, but still acknowledges Feather STOP.
-        if (!wasActive) { reply("ADC127 DONE %lu\n", run); }
+        if (!wasActive)
+        {
+            reply("ADC127 DONE %lu\n", run);
+        }
+    }
+    else if (_linkDiagnostics)
+    {
+        _recordingReporter.message("LINK REJECTED: unrecognized UART line; see received hex\n");
     }
 }
 
-/** @brief Request source shutdown when RAM is full; this is not confirmation that ADC stopped. */
+/* **
+ * destinationFull - Request shutdown when the destination is full; ADC stop is
+ * not yet confirmed. Keep the existing RAMFULL wire token for Feather
+ * compatibility; it now also represents exhausted preallocated SD capacity.
+ */
 void RecordingController::destinationFull(uint32_t run)
-{ reply("ADC127 RAMFULL %lu\n", static_cast<unsigned long>(run)); }
+{
+    reply("ADC127 RAMFULL %lu\n", static_cast<unsigned long>(run));
+}
 
-/** @brief Notify Feather of an unrecoverable decoder stall before the application aborts. */
+/* **
+ * decoderStalled - Notify Feather of an unrecoverable decoder stall before the
+ * application aborts.
+ */
 void RecordingController::decoderStalled(uint32_t run)
-{ reply("ADC127 FAULT %lu reason=decoder-stalled\n", static_cast<unsigned long>(run)); }
+{
+    reply("ADC127 FAULT %lu reason=decoder-stalled\n", static_cast<unsigned long>(run));
+}
 
-/** @brief Send required final control reply first, then optional PC diagnostics. */
+/* **
+ * stopped - Tell Feather that reception ended, then send the acquisition
+ * statistics to the reporter. DONE, FAULT or TIMEOUT describes why reception
+ * stopped. It does not confirm that pending SD writes or readback have finished.
+ */
 void RecordingController::stopped(const RecordingResult& recordingResult)
 {
     const auto& captureStats = recordingResult._captureStats;
     const auto& receiverStats = recordingResult._receiverStats;
-    const char* kind = recordingResult._reason == RecordingResult::Reason::requested ? "DONE" :
-        recordingResult._reason == RecordingResult::Reason::fault ? "FAULT" : "TIMEOUT";
+    const char* kind = recordingResult._reason == RecordingResult::Reason::requested ? "DONE" : recordingResult._reason == RecordingResult::Reason::fault ? "FAULT"
+                                                                                                                                                          : "TIMEOUT";
     reply("ADC127 %s %lu words=%lu bad=%lu periodErrors=%lu short=%lu drops=%lu errors=%lu rate=%.1f/s\n",
         kind, static_cast<unsigned long>(recordingResult._run),
         static_cast<unsigned long>(captureStats._words), static_cast<unsigned long>(captureStats._badHeaders),
@@ -167,14 +213,103 @@ void RecordingController::stopped(const RecordingResult& recordingResult)
     _recordingReporter.capture(recordingResult);
 }
 
-/** @brief Service console and Feather once without blocking; startup separately polls the application. */
+/* **
+ * handleClockLine - Handle a complete console command beginning with @. @LINK
+ * enables serial diagnostics while idle; @LINKSTATUS reports their counters.
+ * Pass test commands to the optional test handler.
+ *
+ * For @UTC, set calendar time from seconds since 1970, accepting years 2020
+ * through 2099 only. Refuse time changes after the destination is locked. Serial
+ * delivery adds delay, so this timestamp is not a precise measurement of sample
+ * time.
+ */
+void RecordingController::handleClockLine(const char* line)
+{
+    // Explicit diagnostic mode is idle-only. Queries run in this same polling
+    // loop, so increasing polls establish that command processing is alive.
+    unsigned long nonce = 0;
+    char trailing = 0;
+    if (strcmp(line, "@LINKSTATUS") == 0)
+    {
+        reportLinkStatus();
+        return;
+    }
+    if (sscanf(line, "@LINK %lu %c", &nonce, &trailing) == 1)
+    {
+        if (_recordingApplication.getIdle() && !_recordingApplication.isRecordingDestinationLocked())
+        {
+            _linkBytes = _linkLines = _linkErrors = _linkPolls = 0;
+            _linkHexBytes = 0;
+            _linkDiagnostics = true;
+            char message[64];
+            snprintf(message, sizeof(message), "LINK ARMED %lu\n", nonce);
+            _recordingReporter.message(message);
+        }
+        else
+        {
+            _recordingReporter.message("LINK rejected: P4 not idle\n");
+        }
+        return;
+    }
+    // Bench startup may handle @TEST; production has no test extension.
+    if (_recordingConsoleCommands && _recordingConsoleCommands->line(_recordingApplication, line))
+    {
+        return;
+    }
+    unsigned long long seconds = 0;
+    char extra = 0;
+    bool accepted = sscanf(line, "@UTC %llu %c", &seconds, &extra) == 1 &&
+                    seconds >= 1577836800ULL && seconds < 4102444800ULL &&
+                    _recordingApplication.getIdle() && !_recordingApplication.isRecordingDestinationLocked();
+    if (accepted)
+    {
+        timeval utc = {};
+        utc.tv_sec = static_cast<time_t>(seconds);
+        accepted = settimeofday(&utc, nullptr) == 0;
+    }
+    _recordingReporter.message(accepted ? "UTC OK\n" : "UTC rejected\n");
+}
+
+/* **
+ * poll - Read console input and Feather serial commands once on Core 0. Reads do
+ * not wait for new input. Startup separately calls RecordingApplication::poll to
+ * check acquisition progress.
+ *
+ * Discard damaged serial input and notify the application of link errors.
+ * Optional link diagnostics print a limited byte dump before recording starts;
+ * these are command bytes, not ADC samples.
+ */
 void RecordingController::poll()
 {
+    ++_linkPolls;
     char consoleKey = 0;
     if (read(STDIN_FILENO, &consoleKey, 1) == 1)
     {
-        if (_recordingConsoleCommands != nullptr)
-        { _recordingConsoleCommands->command(_recordingApplication, consoleKey); }
+        if (consoleKey == '@' && !_collectingClock)
+        {
+            _consoleLine = BenchLine{};
+            _collectingClock = true;
+        }
+        if (_collectingClock)
+        {
+            const bool complete = _consoleLine.feed(consoleKey);
+            if (consoleKey == '\n')
+            {
+                _collectingClock = false;
+                if (complete)
+                {
+                    handleClockLine(_consoleLine.getValue());
+                }
+                else
+                {
+                    _recordingReporter.message("UTC rejected\n");
+                }
+            }
+        }
+        else if (_recordingConsoleCommands != nullptr)
+        {
+            _recordingConsoleCommands->command(_recordingApplication, consoleKey);
+        }
     }
 
     // A serial error invalidates the partial command and queued unread input.
@@ -185,10 +320,14 @@ void RecordingController::poll()
     {
         if (event.type == UART_FIFO_OVF || event.type == UART_BUFFER_FULL ||
             event.type == UART_PARITY_ERR || event.type == UART_FRAME_ERR)
-        { linkError = true; }
+        {
+            linkError = true;
+        }
     }
     if (linkError)
     {
+        ++_linkErrors;
+        _recordingReporter.message("LINK ERROR: Feather UART receive error; discarding damaged input\n");
         uart_flush_input(_featherPort);
         _benchLine = BenchLine{};
         _recordingApplication.commandFailed();
@@ -198,29 +337,80 @@ void RecordingController::poll()
     // a zero timeout means no waiting for the next byte or user command.
     uint8_t incoming[256];
     const int received = uart_read_bytes(_featherPort, incoming, sizeof(incoming), 0);
-    for (int index = 0; index < received; ++index)
+    if (received > 0)
     {
-        if (_benchLine.feed(static_cast<char>(incoming[index]))) { handleLine(_benchLine.getValue()); }
+        _linkBytes += static_cast<uint32_t>(received);
+    }
+    if (_linkDiagnostics && received > 0 && _linkHexBytes < 128)
+    {
+        // Cap diagnostics at 128 bytes, before capture only. Hex exposes hidden
+        // NULs, missing newline (0A) and boot garbage without terminal escapes.
+        char message[410];
+        unsigned used = static_cast<unsigned>(snprintf(message, sizeof(message), "LINK RX HEX:"));
+        for (int iByte = 0; iByte < received && _linkHexBytes < 128; ++iByte, ++_linkHexBytes)
+        {
+            used += static_cast<unsigned>(snprintf(message + used, sizeof(message) - used, " %02X", incoming[iByte]));
+        }
+        snprintf(message + used, sizeof(message) - used, "\n");
+        _recordingReporter.message(message);
+    }
+    for (int iByte = 0; iByte < received; ++iByte)
+    {
+        if (_benchLine.feed(static_cast<char>(incoming[iByte])))
+        {
+            ++_linkLines;
+            handleLine(_benchLine.getValue());
+        }
     }
 }
 
+/* **
+ * reportLinkStatus - Report control-loop counters; bytes received do not prove a
+ * valid command.
+ */
+void RecordingController::reportLinkStatus()
+{
+    char message[160];
+    snprintf(message, sizeof(message), "LINK STATUS polls=%lu bytes=%lu lines=%lu errors=%lu\n",
+        static_cast<unsigned long>(_linkPolls), static_cast<unsigned long>(_linkBytes),
+        static_cast<unsigned long>(_linkLines), static_cast<unsigned long>(_linkErrors));
+    _recordingReporter.message(message);
+}
 
-/** @brief The application confirms storage and receiver readiness; now allow ADC start. */
+/* **
+ * ready - The application confirms storage and receiver readiness; now allow ADC
+ * start.
+ */
 void RecordingController::ready(uint32_t run, const Ads127Config& adsConfigRequested)
-{ reply("ADC127 READY3 %lu %lu\n", static_cast<unsigned long>(run),
-        static_cast<unsigned long>(adsConfigRequested._samplesPerSecond)); }
+{
+    _recordingReporter.message("PREP: storage and receiver ready; sending READY to Feather\n");
+    reply("ADC127 READY3 %lu %lu\n", static_cast<unsigned long>(run),
+        static_cast<unsigned long>(adsConfigRequested._samplesPerSecond));
+}
 
-/** @brief Convert a failed/cancelled pending start into a required Feather failure reply. */
+/* **
+ * startFailed - Convert a failed/cancelled pending start into a required Feather
+ * failure reply.
+ */
 void RecordingController::startFailed(uint32_t run, StartFailure reason, int error)
 {
     const char* detail = "preparation-failed";
     switch (reason)
     {
-    case StartFailure::preparation: break;
-    case StartFailure::preparationTimeout: detail = "preparation-timeout"; break;
-    case StartFailure::receiver: detail = esp_err_to_name(error); break;
-    case StartFailure::cancelled: detail = "cancelled"; break;
-    case StartFailure::commandLink: detail = "command-link-error"; break;
+    case StartFailure::preparation:
+        break;
+    case StartFailure::preparationTimeout:
+        detail = "preparation-timeout";
+        break;
+    case StartFailure::receiver:
+        detail = esp_err_to_name(error);
+        break;
+    case StartFailure::cancelled:
+        detail = "cancelled";
+        break;
+    case StartFailure::commandLink:
+        detail = "command-link-error";
+        break;
     }
     reply("ADC127 FAILED %lu reason=%s\n", static_cast<unsigned long>(run), detail);
 }

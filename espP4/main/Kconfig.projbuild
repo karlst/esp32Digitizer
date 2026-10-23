@@ -12,7 +12,46 @@
 
 menu "P4 capture diagnostics"
 
+config P4_SD_CHOKE
+    bool "Standalone SD file-ring tests (fresh disk / add files)"
+    default n
+    help
+        Separate startup, no ADC or Feather. Select run fresh to format or
+        run addFiles to preserve/add. Both use the session backend. One run per reset.
+
+if P4_SD_CHOKE
+
+config P4_CHOKE_FILE_COUNT
+    int "Number of new files to preallocate per test"
+    range 1 64
+    default 5
+
+config P4_CHOKE_FILE_SECONDS
+    int "Payload capacity of each file in seconds at 3072000 bytes/s"
+    range 1 600
+    default 15
+
+config P4_CHOKE_RUN_SECONDS
+    int "Generated-input duration in seconds"
+    range 1 86400
+    default 300
+
+config P4_CHOKE_RING_MIB
+    int "Ring capacity in MiB (1, 2, 4, 8 or 16)"
+    range 1 16
+    default 16
+    help
+        Must be a power of two; the writer rejects other sizes at compile time.
+        Allocation can fail if insufficient PSRAM remains; that fails the test.
+
+config P4_CHOKE_LIVE_REPORT
+    bool "Report buffer use once per second"
+    default y
+
+endif
+
 config P4_DIAGNOSTICS
+    depends on !P4_SD_CHOKE
     bool "Include manual RAM and generated-data SD tests"
     default n
     help
@@ -22,6 +61,7 @@ config P4_DIAGNOSTICS
 
 
 config P4_HARDWARE_SMOKE
+    depends on !P4_SD_CHOKE
     bool "Thirty-second DAC-to-SD hardware smoke test"
     default n
     help
@@ -29,7 +69,7 @@ config P4_HARDWARE_SMOKE
         Pair with Feather ads127-hardware-smoke. No automatic capture at boot.
 
 config P4_CAPTURE_PROFILE
-    depends on !P4_HARDWARE_SMOKE
+    depends on !P4_HARDWARE_SMOKE && !P4_SD_CHOKE
     bool "Measure CPU headroom during a 60-second capture"
     default n
     select FREERTOS_GENERATE_RUN_TIME_STATS

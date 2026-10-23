@@ -12,8 +12,9 @@
  * Public License in the repository LICENSE file or <https://www.gnu.org/licenses/>.
  */
 
-/** @file main.cpp
- * @brief Ordinary P4 recording startup: construct services and run the command loop.
+/**
+ * @file main.cpp
+ * Ordinary P4 recording startup: construct services and run the command loop.
  * ESP-IDF calls app_main on Core 0 after boot. Static lifetime is required because
  * the recording and decoder tasks retain pointers to these objects until reset.
  * No test generator, waveform summary or profiler is constructed in this build.
@@ -27,15 +28,32 @@
 
 
 static ConsoleRecordingReporter consoleRecordingReporter;
-static SdRecorder sdRecorder(10000000000ULL, nullptr, &consoleRecordingReporter);
+
+/* **
+ * getRecordingSessionConfig - Preserve old recordings and reserve eleven
+ * five-minute files for this run.
+ */
+static RecordingSessionConfig getRecordingSessionConfig()
+{
+    RecordingSessionConfig recordingSessionConfig;
+    recordingSessionConfig._preparation = RecordingSessionConfig::Preparation::addFiles;
+    recordingSessionConfig._fullPolicy = RecordingSessionConfig::FullPolicy::stopWhenFull;
+    recordingSessionConfig._secondsPerFile = 300;
+    recordingSessionConfig._fileCount = 11;
+    return recordingSessionConfig;
+}
+
+static SdRecorder sdRecorder(getRecordingSessionConfig(), nullptr, &consoleRecordingReporter);
 static SdCaptureDestination sdCaptureDestination(sdRecorder);
 static AdcReceiver adcReceiver;
 static SampleDecoder sampleDecoder(adcReceiver);
 static RecordingApplication recordingApplication(adcReceiver, sampleDecoder, sdCaptureDestination, 1805000);
 static RecordingController recordingController(recordingApplication, consoleRecordingReporter);
 
-
-/** @brief Allocate recording resources, then service commands; no capture starts at boot. */
+/* **
+ * app_main - Allocate recording resources, then service commands; no capture
+ * starts at boot.
+ */
 extern "C" void app_main()
 {
     ESP_ERROR_CHECK(sdRecorder.initTask() ? ESP_OK : ESP_ERR_NO_MEM);

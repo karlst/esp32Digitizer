@@ -15,7 +15,10 @@ $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path $PSScriptRoot -Parent
 $vsWhere = "${env:ProgramFiles(x86)}/Microsoft Visual Studio/Installer/vswhere.exe"
 $installation = & $vsWhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-if (!$installation) { throw 'Microsoft C++ build tools are required.' }
+if (!$installation)
+{
+    throw 'Microsoft C++ build tools are required.'
+}
 $buildDir = Join-Path $projectRoot '.pio/profileChecks'
 New-Item -ItemType Directory -Force -Path $buildDir | Out-Null
 $environmentScript = Join-Path $installation 'VC/Auxiliary/Build/vcvars64.bat'
@@ -34,6 +37,9 @@ Set-Content -LiteralPath $batchPath -Value $batch -Encoding ascii
 Push-Location $buildDir
 try {
     & $env:ComSpec /c $batchPath
-    if ($LASTEXITCODE -ne 0) { throw "Profile checks failed: $LASTEXITCODE" }
+    if ($LASTEXITCODE -ne 0)
+    {
+        throw "Profile checks failed: $LASTEXITCODE"
+    }
 }
 finally { Pop-Location }

@@ -51,8 +51,8 @@ def calibrationMapping(text, run):
         """Estimate millivolts between neighboring table entries; reject counts outside 0..4095."""
         if not 0 <= raw <= 4095:
             raise ValueError('ADC count outside calibration range')
-        index = min(len(rows) - 2, max(0, bisect_right(expected, raw) - 1))
-        a, b = rows[index:index+2]
+        iRow = min(len(rows) - 2, max(0, bisect_right(expected, raw) - 1))
+        a, b = rows[iRow:iRow+2]
         return a[1]+(raw-a[0])*(b[1]-a[1])/(b[0]-a[0])
 
     labels = {0:'factory reference calibration',1:'factory two-point calibration',
@@ -69,11 +69,11 @@ def voltagePanels(panels, converter, label):
     timing fit or smoothing is applied here.
     """
     centered = []
-    for index, (name, units, means, lows, highs) in enumerate(panels):
+    for iPanel, (name, units, means, lows, highs) in enumerate(panels):
         # Feather uses the recorded calibration table. ADS127 uses the assumed
         # 2500-mV reference: 2^23 signed counts correspond to positive full scale.
         # Removing each trace's average compares fluctuations, not absolute voltage.
-        convert = converter if index == 0 else lambda raw: raw * 2500.0 / 8388608
+        convert = converter if iPanel == 0 else lambda raw: raw * 2500.0 / 8388608
         voltages = [(t,convert(v)) for t, v in means]
         center = statistics.mean(v for _,v in voltages)
         centered.append((name,[(t, v-center) for t, v in voltages]))

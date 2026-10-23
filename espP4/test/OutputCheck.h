@@ -12,14 +12,17 @@
  * Public License in the repository LICENSE file or <https://www.gnu.org/licenses/>.
  */
 
-/** @file OutputCheck.h
- * @brief OutputCheck declaration shared by its callers.
+/**
+ * @file OutputCheck.h
+ * OutputCheck declaration shared by its callers.
  */
 #pragma once
 #include <cstdint>
 #include <vector>
 
-/** @brief Test-owned copy of submitted words, with an optional rejected batch. */
+/**
+ * Test-owned copy of submitted words, with an optional rejected batch.
+ */
 struct OutputCheck
 {
     std::vector<uint32_t> _words;

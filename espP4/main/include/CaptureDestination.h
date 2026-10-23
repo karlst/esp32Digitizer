@@ -12,8 +12,9 @@
  * Public License in the repository LICENSE file or <https://www.gnu.org/licenses/>.
  */
 
-/** @file CaptureDestination.h
- * @brief Submission interface shared by recording and optional memory destinations.
+/**
+ * @file CaptureDestination.h
+ * Submission interface shared by recording and optional memory destinations.
  */
 #pragma once
 #include <cstdint>
@@ -21,7 +22,7 @@
 #include <cstddef>
 
 /**
- * @brief Accept complete decoder batches without retaining their pointers.
+ * Accept complete decoder batches without retaining their pointers.
  * Core 0 requests prepare with run parameters, then polls getReady/getFailed.
  * True from prepare means accepted, not ready. cancelPreparation must prevent
  * a late completion from permitting capture; it must not block on disk I/O.
@@ -34,8 +35,9 @@
 class CaptureDestination
 {
 public:
-
-    /** @brief Permit destruction through the interface. */
+    /* **
+     * ~CaptureDestination - Permit destruction through the interface.
+     */
     virtual ~CaptureDestination() = default;
     virtual bool prepare(uint32_t run, const Ads127Config& adsConfigRequested) = 0;
     virtual bool getReady() const = 0;
@@ -44,6 +46,11 @@ public:
     virtual bool getFailed() const = 0;
     virtual void finish(uint32_t run, uint32_t rate, bool clean, uint32_t samples) = 0;
 
-    /** @brief Unlimited storage does not request early source shutdown. */
-    virtual bool getFull() const { return false; }
+    /* **
+     * getFull - Unlimited storage does not request early source shutdown.
+     */
+    virtual bool getFull() const
+    {
+        return false;
+    }
 };

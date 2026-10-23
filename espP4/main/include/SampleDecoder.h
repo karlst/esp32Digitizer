@@ -12,8 +12,9 @@
  * Public License in the repository LICENSE file or <https://www.gnu.org/licenses/>.
  */
 
-/** @file SampleDecoder.h
- * @brief Core 1 task connecting raw receiver blocks to a sample destination.
+/**
+ * @file SampleDecoder.h
+ * Core 1 task connecting raw receiver blocks to a sample destination.
  */
 #pragma once
 #include "AdcReceiver.h"
@@ -23,7 +24,7 @@
 #include "freertos/semphr.h"
 
 /**
- * @brief Decode blocks in order, submit samples, then release each raw block.
+ * Decode blocks in order, submit samples, then release each raw block.
  * A task is a software thread scheduled on a core. This permanent task runs on
  * Core 1; initialize, configure and drain are called on Core 0. Configure and
  * statistics access require the previous run to have drained. Queue/semaphore
@@ -40,11 +41,23 @@ public:
     void configure(CaptureDestination& captureDestination, uint32_t clocksPerFrame);
     bool drain();
 
-    /** @brief Read decoder results only after drain succeeds. */
-    const FrameDecoder& getFrameDecoder() const { return _frameDecoder; }
+    /* **
+     * getFrameDecoder - Read decoder results only after drain succeeds.
+     */
+    const FrameDecoder& getFrameDecoder() const
+    {
+        return _frameDecoder;
+    }
 
-    /** @brief Return task identity for optional profiling; no ownership is transferred. */
-    TaskHandle_t getTaskHandle() const { return _decoderTaskHandle; }
+    /* **
+     * getTaskHandle - Return task identity for optional profiling; no ownership is
+     * transferred.
+     */
+    TaskHandle_t getTaskHandle() const
+    {
+        return _decoderTaskHandle;
+    }
+
 private:
     static void decodeTask(void* context);
     static bool recordWords(const uint32_t* words, size_t count, void* context);

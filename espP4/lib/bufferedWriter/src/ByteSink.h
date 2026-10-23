@@ -14,32 +14,32 @@
 
 /**
  * @file ByteSink.h
- * @brief Small storage interface used by the reusable buffered writer.
+ * Small storage interface used by the reusable buffered writer.
  */
 #pragma once
 #include <cstddef>
 #include <cstdint>
 
 /**
- * @brief Receive bytes on the disk task; implementations supply the actual file.
- * write must return the number really accepted, never pretend a short write
- * succeeded. flush must report whether storage synchronization succeeded.
- * Neither method is called from the sample-producing interrupt.
- * "Sink" simply means a destination for bytes. These pure virtual functions
- * (= 0) are a contract, not file-writing implementations. SdRecorder
- * supplies them for this project; a different project can supply another class
- * without changing the buffer. The default destructor does not save/close data.
+ * Interface used by BufferedWriter to write bytes and finish pending storage
+ * operations. A sink is simply a destination for data. FileRecordingBackend
+ * supplies the implementation in this project; PC tests supply an in-memory
+ * implementation.
+ *
+ * write returns the number of bytes actually accepted, including a short count
+ * on failure. flush returns whether pending storage writes completed
+ * successfully. Neither is called by submit. The default destructor does not
+ * save or close anything.
  */
 class ByteSink
 {
 public:
-
-    /**
-     * @brief Allow destruction through the interface after the writer stops.
+    /* **
+     * ~ByteSink - Allow destruction through the interface after the writer stops.
      */
     virtual ~ByteSink() = default;
 
-    // The ring calls this from its consumer task. Read length bytes at data and
+    // The disk-writing task calls this. Read length bytes at data and
     // return how many the storage API accepted. Do not retain data after returning:
     // the ring can reuse that memory immediately. A DMA adapter must wait for DMA
     // completion here before returning (DMA = hardware transfers without CPU copying).

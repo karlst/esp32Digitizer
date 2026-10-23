@@ -12,8 +12,9 @@
  * Public License in the repository LICENSE file or <https://www.gnu.org/licenses/>.
  */
 
-/** @file RamWaveform.h
- * @brief Keep a short summary of measured voltage samples in RAM, without an SD file.
+/**
+ * @file RamWaveform.h
+ * Keep a short summary of measured voltage samples in RAM, without an SD file.
  * Core 1 skips one second, then summarizes 300 ms into 600 half-millisecond
  * groups (called bins). Every sample contributes to its group's average and
  * minimum/maximum. Individual samples are not retained, and averaging can
@@ -25,10 +26,8 @@
 #include <cstddef>
 #include <cstdint>
 
-
-
 /**
- * @brief Core 1 accumulates the summary; Core 0 watches a completion flag.
+ * Core 1 accumulates the summary; Core 0 watches a completion flag.
  * The atomic flag can be read safely across cores. Other fields are ordinary
  * memory: Core 0 resets them before capture and reads them after decoding stops.
  */
@@ -43,6 +42,7 @@ public:
     void accept(const uint32_t* words, size_t count);
     bool getComplete() const;
     void report(unsigned long run, uint32_t rate, bool clean) const;
+
 private:
     uint32_t _skip = 0;
     uint32_t _inBin = 0;

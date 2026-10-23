@@ -12,8 +12,9 @@
  * Public License in the repository LICENSE file or <https://www.gnu.org/licenses/>.
  */
 
-/** @file RecordingApplication.h
- * @brief Recording operations and sequencing, with no command or display syntax.
+/**
+ * @file RecordingApplication.h
+ * Recording operations and sequencing, with no command or display syntax.
  */
 #pragma once
 #include "CaptureDestination.h"
@@ -24,7 +25,7 @@ class AdcReceiver;
 class SampleDecoder;
 
 /**
- * @brief Coordinate one recording through initialization, preparation, start and stop.
+ * Coordinate one recording through initialization, preparation, start and stop.
  * A controller calls operations and poll on Core 0. The receiver owns interrupt
  * work, SampleDecoder owns Core 1 decoding, and the destination owns storage.
  * Startup supplies permanent services. This class never reads a console/UART
@@ -33,7 +34,16 @@ class SampleDecoder;
 class RecordingApplication
 {
 public:
-    enum class StartResult { preparing, alreadyPreparing, alreadyRunning, busy, notInitialized, invalidRequest, storageBusy };
+    enum class StartResult
+    {
+        preparing,
+        alreadyPreparing,
+        alreadyRunning,
+        busy,
+        notInitialized,
+        invalidRequest,
+        storageBusy
+    };
     RecordingApplication(AdcReceiver& adcReceiver, SampleDecoder& sampleDecoder,
         CaptureDestination& captureDestination, uint32_t timeoutMs,
         RecordingObserver* recordingObserver = nullptr);
@@ -49,7 +59,9 @@ public:
     bool selectDestination(CaptureDestination& captureDestination, uint32_t timeoutMs);
     bool lockRecordingDestination();
     bool getIdle() const;
+    bool setTimeout(uint32_t timeoutMs);
     bool isRecordingDestinationLocked() const;
+
 private:
     void drain();
     void startPreparedRecording();

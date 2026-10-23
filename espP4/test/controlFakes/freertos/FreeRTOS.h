@@ -12,8 +12,9 @@
  * Public License in the repository LICENSE file or <https://www.gnu.org/licenses/>.
  */
 
-/** @file FreeRTOS.h
- * @brief Host task identity only; these checks never schedule threads.
+/**
+ * @file FreeRTOS.h
+ * Host task identity only; these checks never schedule threads.
  */
 #pragma once
 using TaskHandle_t = void*;

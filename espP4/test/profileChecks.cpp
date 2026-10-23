@@ -14,7 +14,7 @@
 
 /**
  * @file profileChecks.cpp
- * @brief Host checks for CPU normalization, interval weighting and 60s timing.
+ * Host checks for CPU normalization, interval weighting and 60s timing.
  * These do not validate FreeRTOS accounting, interrupt load or hardware capture.
  * Build with ADS127_P4_LONG_RUN=1, as in the profiling firmware.
  */
@@ -24,7 +24,9 @@
 #include <cassert>
 #include <cstdio>
 
-/** @brief Exercise cases that could otherwise overstate spare processor time. */
+/* **
+ * main - Exercise cases that could otherwise overstate spare processor time.
+ */
 int main()
 {
     // A fully occupied core is 100%, not 50% because the chip has two cores.

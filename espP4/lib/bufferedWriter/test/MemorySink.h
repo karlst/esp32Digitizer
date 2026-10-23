@@ -14,7 +14,7 @@
 
 /**
  * @file MemorySink.h
- * @brief In-memory byte destination for the reusable writer's desktop tests.
+ * In-memory byte destination for the reusable writer's desktop tests.
  */
 #pragma once
 #include <BufferedWriter.h>
@@ -23,7 +23,7 @@
 extern uint64_t writerTestUs;
 
 /**
- * @brief In-memory storage with controllable latency and failures.
+ * In-memory storage with controllable latency and failures.
  */
 class MemorySink : public ByteSink
 {
@@ -32,12 +32,12 @@ public:
     bool _shortWrite = false, _flushOk = true;
     BufferedWriter* _bufferedWriterDuringWrite = nullptr;
 
-    /**
-     * @brief Copy accepted bytes; optionally force producer activity while blocked.
+    /* **
+     * write - Copy accepted bytes; optionally force producer activity while blocked.
      * This fake replaces an actual filesystem. bytes records what storage accepted;
-     * shortWrite forces a one-byte-short result. duringWrite asks the producer to fill
-     * the ring WHILE this write still owns its input memory. That deliberately stresses
-     * the rule that tail must not advance before a write returns.
+     * shortWrite forces a one-byte-short result. duringWrite asks the producer to
+     * fill the ring WHILE this write still owns its input memory. That deliberately
+     * stresses the rule that tail must not advance before a write returns.
      */
     size_t write(const uint8_t* data, size_t length) override
     {
@@ -47,7 +47,9 @@ public:
         if (_bufferedWriterDuringWrite)
         {
             const uint8_t sample[4] = {9, 8, 7, 6};
-            while (_bufferedWriterDuringWrite->submit(sample, 4)) {}
+            while (_bufferedWriterDuringWrite->submit(sample, 4))
+            {
+            }
 
             // Buffer space must not be released until this call returns.
             assert(std::vector<uint8_t>(data, data + length) == before);
@@ -62,11 +64,15 @@ public:
         return retVal;
     }
 
-    /**
-     * @brief Make the final flush slower than writes to test retained maxima.
+    /* **
+     * flush - Make the final flush slower than writes to test retained maxima.
      * Advance simulated time, not real wall-clock time; no 45-ms sleep occurs.
      * Returning flushOk lets the test prove a failed synchronization is not hidden.
      */
-    bool flush() override { writerTestUs += 45000; return _flushOk; }
+    bool flush() override
+    {
+        writerTestUs += 45000;
+        return _flushOk;
+    }
 };
 

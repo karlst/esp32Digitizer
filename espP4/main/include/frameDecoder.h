@@ -14,7 +14,7 @@
 
 /**
  * @file FrameDecoder.h
- * @brief Reconstruct ADC samples from saved data-pin and sample-start-pin values.
+ * Reconstruct ADC samples from saved data-pin and sample-start-pin values.
  * Read feed() first, then beginFrame(), appendBits() and finishWord(). No hardware or RTOS
  * dependency: the same decoder is exercised by the desktop test program.
  */
@@ -23,10 +23,8 @@
 #include <cstddef>
 #include <cstdint>
 
-
-
 /**
- * @brief Core 1's decoder keeps unfinished samples between raw input blocks.
+ * Core 1's decoder keeps unfinished samples between raw input blocks.
  * A sample is one ADC conversion result. In our selected channel arrangement,
  * FSYNC (frame synchronization) rises once per sample; DCLK provides one clock
  * per serial bit. A rising edge means low-to-high, not every captured high level.
@@ -36,7 +34,7 @@
  * Idle clocks in the rest of a frame are deliberately ignored.
  * An optional output callback receives copies of complete raw words in batches
  * of at most 512. A rejected batch sets a persistent failure flag but does not hide diagnostic
- * counts. reset clears that latch while preserving the selected callback.
+ * counts. reset clears the failure flag but keeps the selected callback.
  * The output is 32-bit status+sample words, not the final three-byte SD format.
  * This class owns no DMA buffer or ready/free queue. SampleDecoder supplies each raw
  * block and must not return it to freeBlocks until feed() has finished reading.
@@ -51,6 +49,7 @@ public:
     void feed(const uint8_t* data, size_t length);
     const CaptureStats& getCaptureStats() const;
     uint32_t getPendingBits() const;
+
 private:
     void flushOutput();
     outputCallback _output = nullptr;

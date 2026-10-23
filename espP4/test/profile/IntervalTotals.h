@@ -12,16 +12,18 @@
  * Public License in the repository LICENSE file or <https://www.gnu.org/licenses/>.
  */
 
-/** @file IntervalTotals.h
- * @brief IntervalTotals declaration shared by its callers.
+/**
+ * @file IntervalTotals.h
+ * IntervalTotals declaration shared by its callers.
  */
 #pragma once
 #include "profileMath.h"
+
 namespace profileMath
 {
 
 /**
- * @brief Add measured execution and elapsed times, rather than averaging percentages.
+ * Add measured execution and elapsed times, rather than averaging percentages.
  * For example, a busy 0.1-second interval must not count as much as an idle
  * one-second interval. Dividing the summed times gives the proper average.
  * The final partial interval counts in averages, but intervals below 0.5 seconds
@@ -35,8 +37,8 @@ struct IntervalTotals
     uint32_t _maxTenths = 0;
     uint32_t _peakWindows = 0;
 
-    /**
-     * @brief Add elapsed and executed microseconds for one accepted interval.
+    /* **
+     * add - Add elapsed and executed microseconds for one accepted interval.
      * peakWindows counts all intervals eligible for the maximum (at least
      * 0.5 seconds), not just intervals that set a new maximum.
      */
@@ -47,10 +49,13 @@ struct IntervalTotals
         if (durationUs >= 500000)
         {
             const uint32_t value = percentTenths(runtimeUs, durationUs);
-            if (value > _maxTenths) { _maxTenths = value; }
+            if (value > _maxTenths)
+            {
+                _maxTenths = value;
+            }
             ++_peakWindows;
         }
     }
 };
-}
+} // namespace profileMath
 

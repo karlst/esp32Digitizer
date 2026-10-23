@@ -12,13 +12,16 @@
  * Public License in the repository LICENSE file or <https://www.gnu.org/licenses/>.
  */
 
-/** @file WaveformBin.h
- * @brief WaveformBin declaration shared by its callers.
+/**
+ * @file WaveformBin.h
+ * WaveformBin declaration shared by its callers.
  */
 #pragma once
 #include <cstdint>
 
-/** @brief One 0.5 ms interval; extrema retain excursions hidden by averaging. */
+/**
+ * One 0.5 ms interval; extrema retain excursions hidden by averaging.
+ */
 struct WaveformBin
 {
     int32_t _minimum = 8388607;

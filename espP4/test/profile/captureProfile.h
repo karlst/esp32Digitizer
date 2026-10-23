@@ -14,7 +14,7 @@
 
 /**
  * @file CaptureProfile.h
- * @brief Optional Core 0-owned capture diagnostics; no new worker or ISR work.
+ * Optional Core 0-owned capture diagnostics; no new worker or ISR work.
  * Read begin(), poll(), finish(), report() in that order. All calls come from
  * the main control task. Conditional compilation removes this class entirely
  * when CONFIG_P4_CAPTURE_PROFILE is off. It never owns capture or disk buffers.
@@ -28,7 +28,7 @@
 #include "IntervalTotals.h"
 
 /**
- * @brief Sample five persistent tasks and estimate each core's spare time.
+ * Sample five persistent tasks and estimate each core's spare time.
  * FreeRTOS idle tasks run when no other task is runnable. Busy is elapsed minus
  * idle, not a sum of our three application tasks: drivers/system tasks also run.
  * Runtime accounting includes interrupt time charged to the interrupted task,
@@ -42,6 +42,7 @@ public:
     void poll();
     void finish();
     void report();
+
 private:
     void sample(bool baseline);
     static constexpr unsigned _taskCount = 5;

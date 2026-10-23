@@ -14,16 +14,18 @@
 
 /**
  * @file BufferedWriter.cpp
- * @brief Copy quickly into RAM, then write whole blocks from the storage task.
+ * Copy quickly into RAM, then write whole blocks from the storage task.
  * Read start(), submit(), pump(), finish() in that order. No sample or board
  * knowledge belongs here; byteSink supplies storage and the caller supplies time.
  *
  * A ring buffer is a fixed array reused in a circle. It temporarily holds data
  * while the SD card is busy. The producer ADDS bytes; the consumer REMOVES them
  * only after writing them. The current caller is P4:
- * Core 1 sdRecorder::submitSamples() -> submit(); Core 0 sdRecorder::work()
- *     -> pump() -> sdRecorder::write() -> card. P4 supplies three-byte samples
- *     and uses a 4 MiB PSRAM ring with 128 KiB write batches. The library itself
+ * Core 1 SdRecorder::submitSamples() -> FileRecordingBackend::copyToRingBuffer() -> submit();
+ * Core 0 SdRecorder::work()
+ *     -> FileRecordingBackend::pump() -> pump() -> FileRecordingBackend::write()
+ *     -> card. P4 supplies three-byte samples and uses a 16 MiB PSRAM ring
+ *     with 128 KiB write batches. The library itself
  *     treats these as bytes; it does not understand ADC frames or status bits.
  *
  * head is the total producer position, tail the total consumer position. They
@@ -43,13 +45,14 @@ constexpr uint32_t BufferedWriter::_blockBytes;
 
 #if BUFFERED_WRITER_EXTERNAL
 
-/**
- * @brief Allocate owned ring memory before any producer or consumer starts.
- * The platform adapter supplies allocate(bytes) and release(pointer). Failure
- * to allocate leaves the writer unusable; callers must not start recording.
- * A true return means memory already exists or was just allocated. Repeated setup
- * reuses the successful allocation, so each Start does not allocate another ring.
- * No ring address is exposed to callers. Desktop tests supply ordinary RAM.
+/* **
+ * initializeMemory - Allocate the ring buffer before any task uses it. allocate
+ * takes a byte count and returns the memory address. Keep release so the
+ * destructor can later free that same memory.
+ *
+ * Return true if the buffer was already allocated or allocation succeeds now.
+ * Repeated calls reuse the allocation. This prepares RAM only; it does not start
+ * recording or open a file.
  */
 bool BufferedWriter::initializeMemory(uint8_t* (*allocate)(uint32_t), void (*release)(uint8_t*))
 {
@@ -66,9 +69,10 @@ bool BufferedWriter::initializeMemory(uint8_t* (*allocate)(uint32_t), void (*rel
     return retVal;
 }
 
-/**
- * @brief Release the owned allocation after all users have stopped.
- * Destruction does not flush a file; the owner must finish recording first.
+/* **
+ * ~BufferedWriter - Free the ring memory using the release function saved during
+ * initialization. All tasks must have stopped using the buffer. The destructor
+ * does not write pending data; finish must be called first.
  */
 BufferedWriter::~BufferedWriter()
 {
@@ -79,28 +83,29 @@ BufferedWriter::~BufferedWriter()
 }
 #endif
 
-/**
- * @brief Prepare an empty recording buffer while submitting and writing are stopped.
- * destination and clock must outlive the recording. The clock returns monotonic
- * microseconds. The adapter may open after this call to measure opening time,
- * but must not enable the producer until the file is ready.
+/* **
+ * start - Reset the ring for a new recording. Both the task adding bytes and the
+ * task writing them must be stopped while this runs. Resetting the read and
+ * write positions makes the buffer empty without clearing its memory.
  *
- * Called by SdRecorder when preparing a NEW recording.
- * This only prepares RAM; it does not open a file, start the ADC, or erase a card.
- * Resetting positions makes old bytes irrelevant without clearing the whole array.
- * @param destination Object that implements the actual write/flush operations.
- * @param clock Function returning a steadily increasing time in microseconds.
- * The writer borrows both; it does not construct or delete either one.
+ * byteSink supplies the actual write and flush functions; clock returns elapsed
+ * microseconds. Keep both available until recording finishes. overflowPolicy
+ * chooses whether a full ring stops further submissions or only rejects the
+ * current batch. This call does not open an SD file or start the ADC.
  */
-void BufferedWriter::start(ByteSink& byteSink, uint64_t (*clock)())
+void BufferedWriter::start(ByteSink& byteSink, uint64_t (*clock)(), OverflowPolicy overflowPolicy)
 {
     // Keep the storage adapter and clock for later calls; allocate no per-sample memory.
     _byteSink = &byteSink;
     _clockUs = clock;
+    _overflowPolicy = overflowPolicy;
 
     // Both counters restart together. Neither producer nor consumer may be using
     // the previous recording when this reset happens.
-    _head.store(0); _tail.store(0); _peak.store(0); _rejected.store(0);
+    _head.store(0);
+    _tail.store(0);
+    _peak.store(0);
+    _rejected.store(0);
 #if BUFFERED_WRITER_EXTERNAL
     _broken.store(_buffer == nullptr);
 #else
@@ -113,26 +118,20 @@ void BufferedWriter::start(ByteSink& byteSink, uint64_t (*clock)())
     _active = true;
 }
 
-/**
- * @brief Copy all supplied bytes or reject the entire submission without waiting.
- * A full buffer sets a failure flag until start(); later submissions are rejected too. This avoids
- * silently joining data on either side of a missing section. rejectedBytes counts
- * only bytes explicitly offered and rejected, not unseen hardware samples.
+/* **
+ * submit - Copy the entire batch into the ring, or reject it without waiting.
+ * data points to the bytes to copy and length is their byte count. Return true
+ * when the bytes are in RAM, not when they are on SD. The caller can reuse its
+ * input memory after this returns.
  *
- * P4 calls from its Core 1
- * decoder task with batches of packed three-byte samples (four-byte words for
- * its separate synthetic test). There must be ONE producer, never both paths
- * at once. The disk task may be reading other ring bytes simultaneously.
- * The caller must call start() first and stop submitting before finish() or
- * cancel(). submit() does not check active and cannot enforce that lifecycle.
- * @param data Bytes to copy. The caller may reuse its memory when this returns.
- * @param length Number of BYTES, not samples; the board adapter chooses the format.
- * @return True means copied into RAM, NOT saved to disk. False means none of this
- * submission was copied. Acquisition must observe getFailed(), stop collecting, and
- * ask the disk task to finish the earlier data; this function cannot stop the ADC.
- * No waiting is allowed here: incoming acquisition continues while disk writes
- * may stall. An ISR is an interrupt service routine, which briefly interrupts a
- * task. P4 submits from a task, not an ISR; its external-memory path uses memcpy.
+ * On P4, only the Core 1 decoder submits data. The disk task may simultaneously
+ * write older bytes from another part of the ring. start must have run first,
+ * and submission must stop before finish or cancel.
+ *
+ * If the batch will not fit, count all its bytes as rejected. The stop policy
+ * also prevents later submissions until start resets the writer. dropIncoming
+ * allows later batches once space becomes available, but saved data on either
+ * side of a loss will be adjacent; the caller must account for missing samples.
  */
 bool BufferedWriter::submit(const uint8_t* data, uint32_t length)
 {
@@ -150,8 +149,8 @@ bool BufferedWriter::submit(const uint8_t* data, uint32_t length)
 #if BUFFERED_WRITER_EXTERNAL
 
         // Task-only PSRAM path: copy the span up to the array end, then any
-        // wrapped remainder at zero. For example, 12 bytes starting 4 bytes
-        // before the end become memcpy lengths 4 and 8. Publish only after both.
+        // remainder from index zero. For example, 12 bytes starting 4 bytes
+        // before the end need two copies of 4 and 8 bytes. Update _head after both.
         const uint32_t offset = writeAt & (_capacity - 1);
         const uint32_t first = std::min(length, _capacity - offset);
         std::memcpy(_buffer + offset, data, first);
@@ -162,9 +161,9 @@ bool BufferedWriter::submit(const uint8_t* data, uint32_t length)
 #else
 
         // Internal-RAM ISR path avoids calling a flash-resident memcpy.
-        for (uint32_t index = 0; index < length; ++index)
+        for (uint32_t iByte = 0; iByte < length; ++iByte)
         {
-            _buffer[(writeAt + index) & (_capacity - 1)] = data[index];
+            _buffer[(writeAt + iByte) & (_capacity - 1)] = data[iByte];
         }
 #endif
         if (occupied + length > _peak.load(std::memory_order_relaxed))
@@ -186,23 +185,23 @@ bool BufferedWriter::submit(const uint8_t* data, uint32_t length)
         // Only this producer changes rejected, so no atomic read/modify/write
         // instruction or interrupt-unsafe library helper is needed.
         _rejected.store(_rejected.load(std::memory_order_relaxed) + length, std::memory_order_relaxed);
-        _broken.store(true, std::memory_order_release);
+        if (_overflowPolicy == OverflowPolicy::stop)
+        {
+            _broken.store(true, std::memory_order_release);
+        }
     }
     return retVal;
 }
 
-/**
- * @brief Record elapsed time for one write (kind 1) or synchronization (kind 2).
- * The adapter may also measure initial headers, part rollover, and final close.
- * Maxima are kept here until start(), including a slow final flush after Stop.
+/* **
+ * measure - Record how long a disk operation took. The disk task supplies
+ * beganUs, the clock value before the operation, and success, its result. kind
+ * identifies a write (1) or flush (2).
  *
- * Only the disk task calls this, immediately after an operation finishes.
- * @param beganUs Clock value captured BEFORE the operation, in microseconds.
- * @param kind 1 for a write/preparation operation; 2 for flush/final close.
- * @param success Whether that operation reported success. False increments the
- * error count and sets the cross-core failure flag; it does not retry the operation.
- * maxAtUs records WHEN the slow operation finished, relative to this recording's
- * start. Free-space queries are not measured here; their stalls can fill the ring.
+ * Save the latest duration, longest duration and when that longest operation
+ * ended. Times are microseconds since this recording began. A failed operation
+ * increments the error count and sets the shared failure flag. This function
+ * records results; it does not retry the operation.
  */
 void BufferedWriter::measure(uint64_t beganUs, uint32_t kind, bool success)
 {
@@ -226,32 +225,21 @@ void BufferedWriter::measure(uint64_t beganUs, uint32_t kind, bool success)
     }
 }
 
-/**
- * @brief Write up to blockBytes contiguous bytes; drain also permits a short final block.
- * Only the storage task calls this. Short writes are counted honestly, latch an
- * error, and leave the queued block unreleased; retrying could duplicate its prefix.
- * An overflow still allows earlier queued good bytes to be drained.
+/* **
+ * pump - Write one batch of the oldest queued bytes. Only the disk task calls
+ * this. drain is false during recording so small submissions can accumulate into
+ * an efficient batch; true allows a short final batch after submissions stop.
  *
- * THIS IS WHERE WE READ DATA OUT OF THE RING BUFFER.
- * SdRecorder::work() calls it from its Core 0 disk task. The adapter determines
- * scheduling; this reusable library does not create tasks or choose a CPU core.
- * Reading here does not mean reading the ADC or loading a file from the SD card.
- * It means giving the oldest queued RAM bytes to the object that writes the file.
+ * The call _byteSink->write(_buffer + offset, length) gives the destination a
+ * pointer directly into the ring. On P4 that calls FileRecordingBackend::write.
+ * The bytes remain occupied until the entire write succeeds, so the task adding
+ * samples cannot overwrite them while SD is busy.
  *
- * There is no separate ring read() method or temporary array in this library:
- * sink->write(buffer + offset, length) reads directly from our owned buffer.
- * It must finish using that memory before returning. While it waits for the card,
- * submit() may add samples elsewhere in the ring, but cannot reuse this block.
- * An adapter may use temporary storage internally: P4 copies 16 KiB slices to
- * internal RAM before f_write(). That does not release the source ring early.
- *
- * @param drain False during recording: normally wait for a blockBytes-sized batch to
- * avoid a separate filesystem call for every sample. True after Stop:
- * allow the final short batch, even if it contains only one sample.
- * @return False if a disk write getFailed (now or previously). True can also mean
- * NOTHING was written: for example, only 100 bytes are queued and drain is false.
- * Use getFailed() to check the separate buffer-overflow flag; pump() deliberately
- * allows earlier good bytes to be saved after the producer has overflowed.
+ * If the batch reaches the end of the ring array, a later pump writes the
+ * remainder from index zero. A short write records an error and is not retried,
+ * because part of it may already be on disk. Return false after a write error.
+ * True can mean no write was needed yet, not necessarily that any bytes were
+ * written.
  */
 bool BufferedWriter::pump(bool drain)
 {
@@ -275,8 +263,8 @@ bool BufferedWriter::pump(bool drain)
         // Start timing immediately before the storage call, including its wait.
         const uint64_t began = _clockUs();
 
-        // This call reads the ring memory and writes the file. sink is a byteSink
-        // interface; the P4 implementation is SdRecorder::write(). It must
+        // This call reads the ring memory and writes the file. _byteSink is the ByteSink
+        // interface; the P4 implementation is FileRecordingBackend::write(). It must
         // finish reading before returning.
         // It can block on storage. Crucially, tail has NOT moved yet.
         const size_t written = _byteSink->write(_buffer + offset, length);
@@ -303,18 +291,16 @@ bool BufferedWriter::pump(bool drain)
     return retVal;
 }
 
-/**
- * @brief Drain remaining data and synchronize storage after the producer stops.
- * False means the recording is incomplete, even if earlier bytes were saved.
- * After a write failure we still attempt flush, but never replay a partial block.
+/* **
+ * finish - Write all remaining queued bytes and flush the destination. Call from
+ * the disk task only after the task submitting data has stopped. pump(true)
+ * handles the final short batch; flush asks the destination to finish pending
+ * writes. Closing the file is the adapter's responsibility.
  *
- * Called by the disk task after acquisition has disabled the producer. Otherwise
- * new bytes could keep arriving while we try to empty the queue. pump(true) writes
- * one remaining block at a time until empty or a write has failed. flush() asks
- * the destination to synchronize its cached bytes with storage; it is not a new
- * ADC read. The project adapter closes the file separately after this returns.
- * An overflow makes the final result false even if all EARLIER queued bytes drain.
- * Saved counters and maximum delay remain available for inspection after Stop.
+ * After a write error, try to flush what reached the destination but never retry
+ * the partially written batch. Return false if the writer has failed. With
+ * dropIncoming, success still does not prove zero loss; the caller must check
+ * the rejected-byte count. Statistics remain available after finish.
  */
 bool BufferedWriter::finish()
 {
@@ -333,13 +319,11 @@ bool BufferedWriter::finish()
     return retVal;
 }
 
-/**
- * @brief Freeze a failed preparation without flushing a file that never opened.
- * Only valid before enabling the producer. Queued data must use finish() instead.
- *
- * recordingService calls this when file opening failed, before any sample was
- * allowed into the ring. It freezes elapsed time for that failed attempt. It does
- * not clear errors or queued bytes and is not an alternative to normal Stop.
+/* **
+ * cancel - End an attempt before any data has been submitted, without flushing
+ * the destination. This records its elapsed time and marks the writer inactive.
+ * It does not clear errors or discard queued bytes; a recording with submitted
+ * data must use finish instead.
  */
 void BufferedWriter::cancel()
 {
@@ -347,11 +331,11 @@ void BufferedWriter::cancel()
     _active = false;
 }
 
-/**
- * @brief True after overflow or storage failure; safe to check from the producer task.
- * The acquisition task checks this between sample-processing steps. The disk task
- * can set it on an I/O error, and submit() can set it on overflow. It remains true
- * until start() resets the next recording. Checking it performs no filesystem I/O.
+/* **
+ * getFailed - Return the failure flag. Either the sample-submission task or disk
+ * task may read it. A disk error sets it; a full ring also sets it under the
+ * stop policy. dropIncoming instead keeps overflow in the statistics. start
+ * clears it for a new recording.
  */
 bool BufferedWriter::getFailed() const
 {
@@ -359,19 +343,16 @@ bool BufferedWriter::getFailed() const
     return retVal;
 }
 
-/**
- * @brief Gather consumer totals and a conservative picture of the live ring.
- * Called only by the consumer. A producer may add bytes during the copy; the
- * reported positions/used refer to the head read here. Peak can already be newer.
+/* **
+ * getStatistics - Copy the current write counters and ring-buffer usage. Only
+ * the disk task may call this because it owns the non-atomic statistics. Another
+ * task must receive a safely shared copy.
  *
- * The caller is the disk task, not an arbitrary third thread. The ordinary totals
- * are only written by that task, so they need no lock here. Atomic fields are used
- * for information also touched by the producer. recordingService later publishes
- * this result under its own short lock for the communications task.
- * Positions shown to the user wrap within the array; totals.bytes does not wrap
- * with the array. The snapshot includes bytes still owned by an in-progress or
- * failed write. Peak occupancy is conservative: a producer can observe an older
- * tail position if the consumer frees space while a submission is in progress.
+ * The sample-submission task can add bytes during this copy, so usage and peak
+ * values may represent slightly different moments. Occupied bytes include a
+ * write still in progress. Unsaved bytes exclude the part of a failed write that
+ * the destination already accepted. After finish or cancel, elapsed time stops
+ * increasing.
  */
 BufferedWriter::Statistics BufferedWriter::getStatistics()
 {
@@ -390,7 +371,7 @@ BufferedWriter::Statistics BufferedWriter::getStatistics()
     retVal._unsavedBytes = retVal._used - _partialBytes;
 
     // After finish/cancel, use the frozen elapsed time. Leaving the page open
-    // after Stop must not make the completed recording appear to grow longer.
+    // after stopping must not make the completed recording appear to grow longer.
     if (_active)
     {
         retVal._elapsedUs = _clockUs() - _startedUs;
@@ -398,11 +379,11 @@ BufferedWriter::Statistics BufferedWriter::getStatistics()
     return retVal;
 }
 
-/**
- * @brief Read live occupied bytes on the producer OR consumer, without I/O.
- * Each caller owns one position, so it cannot move during these two loads.
- * Other tasks must use published snapshots. Do not call during start/reset.
- * This observes occupancy; it does not reserve space for a subsequent submit.
+/* **
+ * getQueuedBytes - Return the current number of occupied ring bytes without
+ * reading the disk. Call from either the single task submitting data or the
+ * single disk-writing task, not while start resets the counters. This observes
+ * available space; it does not reserve space for a later submission.
  */
 uint32_t BufferedWriter::getQueuedBytes() const
 {

@@ -12,8 +12,9 @@
  * Public License in the repository LICENSE file or <https://www.gnu.org/licenses/>.
  */
 
-/** @file ramWaveformChecks.cpp
- * @brief PC checks of grouping samples into minimum, maximum and average records.
+/**
+ * @file ramWaveformChecks.cpp
+ * PC checks of grouping samples into minimum, maximum and average records.
  * This calls the real RAM collector with invented words. No ADC, DMA receiver,
  * timing or inter-core synchronization is exercised.
  */
@@ -21,7 +22,9 @@
 #include <cassert>
 #include <cstdio>
 
-/** @brief Exercise actual collector with the lowest supported 16k sample rate. */
+/* **
+ * main - Exercise actual collector with the lowest supported 16k sample rate.
+ */
 int main()
 {
     // At 16,000 samples/second, the first 16,000 words are the one-second skip.
@@ -29,16 +32,19 @@ int main()
     RamWaveform ramWaveform;
     ramWaveform.reset(16000);
     const uint32_t startup = 0x087fffff;
-    for (unsigned index = 0; index < 16000; ++index) { ramWaveform.accept(&startup, 1); }
+    for (unsigned index = 0; index < 16000; ++index)
+    {
+        ramWaveform.accept(&startup, 1);
+    }
     assert(ramWaveform._completedBins == 0 && !ramWaveform.getComplete());
     // Eight samples make one 0.5-ms group at this rate. Split each group across
     // two accept() calls to check that a caller's batch boundary cannot reset it.
     const uint32_t batch[] = {0x08800000, 0x087fffff, 0x08ffffff, 0x08000001,
-                             0x08000000, 0x08000000, 0x08000000, 0x08000000};
-    for (unsigned bin = 0; bin < 600; ++bin)
+        0x08000000, 0x08000000, 0x08000000, 0x08000000};
+    for (unsigned iWaveformBin = 0; iWaveformBin < 600; ++iWaveformBin)
     {
         ramWaveform.accept(batch, 3);
-        assert(ramWaveform._completedBins == bin);
+        assert(ramWaveform._completedBins == iWaveformBin);
         ramWaveform.accept(batch + 3, 5);
     }
     assert(ramWaveform.getComplete() && ramWaveform._completedBins == 600);

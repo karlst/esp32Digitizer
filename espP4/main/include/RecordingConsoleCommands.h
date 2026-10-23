@@ -12,18 +12,32 @@
  * Public License in the repository LICENSE file or <https://www.gnu.org/licenses/>.
  */
 
-/** @file RecordingConsoleCommands.h
- * @brief Optional extra console commands supplied by test startup, not by an observer.
+/**
+ * @file RecordingConsoleCommands.h
+ * Optional extra console commands supplied by test startup, not by an observer.
  */
 #pragma once
 class RecordingApplication;
 
-/** @brief Core 0 command extension; production need not provide one. */
+/**
+ * Core 0 command extension; production need not provide one.
+ */
 class RecordingConsoleCommands
 {
 public:
-
-    /** @brief Permit destruction through the interface. */
+    /* **
+     * ~RecordingConsoleCommands - Permit destruction through the interface.
+     */
     virtual ~RecordingConsoleCommands() = default;
     virtual void command(RecordingApplication& recordingApplication, char key) = 0;
+
+    /* **
+     * line - Optional newline-terminated extension; true means command was handled.
+     */
+    virtual bool line(RecordingApplication& recordingApplication, const char* text)
+    {
+        (void)recordingApplication;
+        (void)text;
+        return false;
+    }
 };

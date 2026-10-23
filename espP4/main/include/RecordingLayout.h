@@ -12,42 +12,62 @@
  * Public License in the repository LICENSE file or <https://www.gnu.org/licenses/>.
  */
 
-/** @file RecordingLayout.h
- * @brief File-layout policy borrowed by the SD recorder for one recording.
+/**
+ * @file RecordingLayout.h
+ * File-layout policy borrowed by the SD recorder for one recording.
  */
 #pragma once
 #include "recordingFormat.h"
 
 /**
- * @brief Describe stored record size, readback checks and the final file header.
- * The default is the normal three-byte ADC format. prepare() selects a borrowed
- * policy before producer submissions; it must remain alive through SD SAVED.
- * Disk-task callbacks see bytes read from the card, not the original RAM batch.
- * This interface allows other data sources without coupling the writer to tests.
+ * Describe the number of bytes in each stored sample and any optional data
+ * check. The default is three bytes per ADC sample. SdRecorder selects this
+ * object during preparation and uses it until saving and readback finish, so the
+ * caller must keep it alive.
+ *
+ * The disk task passes bytes read from the card to check. Tests can supply known
+ * patterns through this interface without putting test logic in the recorder.
  */
 class RecordingLayout
 {
 public:
-
-    /** @brief Allow destruction through this interface. */
+    /* **
+     * ~RecordingLayout - Allow destruction through this interface.
+     */
     virtual ~RecordingLayout() = default;
 
-    /** @brief Return bytes per stored record. */
-    virtual uint32_t getRecordBytes() const { return 3; }
+    /* **
+     * getRecordBytes - Return bytes per stored record.
+     */
+    virtual uint32_t getRecordBytes() const
+    {
+        return 3;
+    }
 
-    /** @brief Require exactly one stored record per reported source sample. */
+    /* **
+     * countMatches - Require exactly one stored record per reported source sample.
+     */
     virtual bool countMatches(uint64_t bytes, uint32_t samples) const
-    { return bytes == static_cast<uint64_t>(samples) * getRecordBytes(); }
+    {
+        return bytes == static_cast<uint64_t>(samples) * getRecordBytes();
+    }
 
-    /** @brief Optional content check; normal ADC data have no predetermined values. */
+    /* **
+     * check - Optional content check; normal ADC data have no predetermined values.
+     */
     virtual uint64_t check(const uint8_t* data, uint32_t bytes, uint64_t offset) const
-    { (void)data; (void)bytes; (void)offset; return 0; }
+    {
+        (void)data;
+        (void)bytes;
+        (void)offset;
+        return 0;
+    }
 
-    /** @brief Fill the existing 512-byte ADC file header after payload verification. */
-    virtual void makeHeader(uint8_t* data, bool valid, uint32_t run,
-                            uint32_t rate, uint64_t bytes, uint32_t crc) const
-    { recordingFormat::makeHeader(data, valid, run, rate, bytes, crc); }
-
-    /** @brief Optional extra result text, printed after file closure. */
-    virtual void report(uint64_t errors) const { (void)errors; }
+    /* **
+     * report - Optional extra result text, printed after file closure.
+     */
+    virtual void report(uint64_t errors) const
+    {
+        (void)errors;
+    }
 };

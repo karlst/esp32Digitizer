@@ -26,10 +26,10 @@ def signal(at):
 
 def traces(distort=False):
     """Known gain=0.002, offset=500, shift=+2ms; optional later output corruption."""
-    inputs=[(index+0.4,signal(index+0.4)) for index in range(300)]
+    inputs=[(iSample+0.4,signal(iSample+0.4)) for iSample in range(300)]
     outputs=[]
-    for index in range(600):
-        at=(index+0.5)*0.5
+    for iSample in range(600):
+        at=(iSample+0.5)*0.5
         value=(signal(at-2)-500)/0.002
         if distort and at>130:
             value+=60000*math.sin(2*math.pi*at/37)

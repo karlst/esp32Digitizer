@@ -14,7 +14,7 @@
 
 /**
  * @file BufferedWriter.h
- * @brief Reusable byte recording with an owned ring buffer and measured disk delays.
+ * Reusable byte recording with an owned ring buffer and measured disk delays.
  */
 #pragma once
 #include "ByteSink.h"
@@ -35,22 +35,21 @@ static_assert(ATOMIC_INT_LOCK_FREE == 2 && ATOMIC_BOOL_LOCK_FREE == 2,
 #endif
 
 /**
- * @brief Decouple one fast producer from one slower storage task.
+ * Let one task submit data while another writes it to storage. submit copies
+ * bytes into the ring buffer. pump calls ByteSink::write to save them. The ring
+ * space is released only after the entire write succeeds, so incoming data
+ * cannot overwrite bytes still in use.
  *
- * Producer: submit() copies bytes and returns immediately; it may run in an ISR
- * (interrupt service routine). Consumer: pump() writes queued bytes to byteSink.
- * The consumer releases buffer space ONLY after write() returns successfully.
- * Thus the producer cannot overwrite memory still being used by the disk driver.
+ * Exactly one task may submit and one may pump. Atomic positions let the two
+ * tasks share progress safely across cores. Stop submissions before start or
+ * finish. Other tasks must read statistics through a safely copied snapshot.
  *
- * Only these two contexts may use the ring. Atomic 32-bit positions publish
- * completed copies across CPU cores; no mutex, allocation, or disk call occurs
- * in submit(). start()/finish() require the producer to be stopped. Other tasks
- * must obtain statistics through a snapshot published by the consumer's owner.
- * Default builds keep the ring inside this object in internal RAM for ISR use.
- * External-buffer builds instead own memory obtained through initializeMemory().
- * Their submit() must run in a TASK, never a cache-disabled interrupt: PSRAM can
- * be inaccessible when flash operations disable the cache. Keep the control
- * object/atomic counters in internal RAM in either case.
+ * The default build keeps the buffer in internal RAM and permits submission from
+ * an interrupt handler. External-buffer builds allocate memory through
+ * initializeMemory. On the P4 this is PSRAM, external RAM that can become
+ * inaccessible during flash operations, so submissions must come from a task
+ * rather than an interrupt. Keep this object and its atomic counters in internal
+ * RAM.
  */
 class BufferedWriter
 {
@@ -64,7 +63,10 @@ public:
     static_assert(_blockBytes && _capacity % _blockBytes == 0, "Blocks must divide the ring");
 #if BUFFERED_WRITER_EXTERNAL
 
-    /** @brief Create an unallocated writer; initializeMemory must precede start. */
+    /* **
+     * BufferedWriter - Create an unallocated writer; initializeMemory must precede
+     * start.
+     */
     BufferedWriter() = default;
     ~BufferedWriter();
     bool initializeMemory(uint8_t* (*allocate)(uint32_t), void (*release)(uint8_t*));
@@ -73,7 +75,9 @@ public:
 #endif
 
     /**
-     * @brief Consumer-owned totals; bytes are payload, independent of record format.
+     * Statistics maintained by the task that writes to storage. Byte counts describe
+     * submitted data, excluding any file headers written separately by the storage
+     * implementation.
      */
     struct Statistics
     {
@@ -95,7 +99,14 @@ public:
         // measured storage calls; neither counter estimates every possible physical loss.
         uint32_t _overflows = 0, _errors = 0;
     };
-    void start(ByteSink& byteSink, uint64_t (*clockUs)());
+    // Stop remains the recording default. DropIncoming is for callers that
+    // explicitly account for missing data and permit a discontinuous stream.
+    enum class OverflowPolicy
+    {
+        stop,
+        dropIncoming
+    };
+    void start(ByteSink& byteSink, uint64_t (*clockUs)(), OverflowPolicy overflowPolicy = OverflowPolicy::stop);
     // Keep submit in internal RAM for platforms that permit interrupt submissions.
     // The definition inherits this attribute. Repeating it there would generate
     // a different ESP-IDF section label and cause a compiler conflict.
@@ -107,6 +118,7 @@ public:
     Statistics getStatistics();
     uint32_t getQueuedBytes() const;
     void measure(uint64_t startedUs, uint32_t kind, bool success);
+
 private:
     // The actual ring memory. alignas(4) puts its start on a four-byte boundary.
     // Callers cannot borrow writable pointers into it and bypass the queue rules.
@@ -130,6 +142,9 @@ private:
     // Both sides can report failure through broken. overflowed specifically
     // remembers running out of ring space, even if a later flush also fails.
     std::atomic<bool> _broken{false}, _overflowed{false};
+
+    // Fixed before either task starts; only read while submissions are active.
+    OverflowPolicy _overflowPolicy = OverflowPolicy::stop;
 
     // Borrowed destination; all fields below are used by the disk task only.
     ByteSink* _byteSink = nullptr;

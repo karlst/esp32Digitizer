@@ -12,8 +12,9 @@
  * Public License in the repository LICENSE file or <https://www.gnu.org/licenses/>.
  */
 
-/** @file AdcReceiver.cpp
- * @brief Receive packed ADC pin states; no decoding, disk access or commands.
+/**
+ * @file AdcReceiver.cpp
+ * Receive packed ADC pin states; no decoding, disk access or commands.
  * Read initialize, start, receiveBlock, then stop. PARLIO (parallel I/O) samples
  * DOUT0 and FSYNC on each rising DCLK edge (low-to-high transition). Four clock
  * positions become one byte; DOUT0 uses bits 0,2,4,6 and FSYNC uses 1,3,5,7.
@@ -30,11 +31,12 @@
 #error "This board requires P4 pre-v3 silicon support and 16 MB flash."
 #endif
 
-/**
- * @brief Core 0 allocates permanent blocks and pointer queues before any capture.
- * Seventeen ready slots hold sixteen blocks plus a null drain marker. GPIO
- * means general-purpose input/output: pins 0,1,2 are inputs without pull resistors.
- * Failed allocation aborts startup; no interrupt ever allocates memory.
+/* **
+ * initialize - Core 0 allocates permanent blocks and pointer queues before any
+ * capture. Seventeen ready slots hold sixteen blocks plus a null drain marker.
+ * GPIO means general-purpose input/output: pins 0,1,2 are inputs without pull
+ * resistors. Failed allocation aborts startup; no interrupt ever allocates
+ * memory.
  */
 void AdcReceiver::initialize()
 {
@@ -49,35 +51,41 @@ void AdcReceiver::initialize()
     _freeBlocks = xQueueCreate(_blockCount, sizeof(CaptureBlock*));
     _readyBlocks = xQueueCreate(_blockCount + 1, sizeof(CaptureBlock*));
     ESP_ERROR_CHECK(_captureBlocks && _freeBlocks && _readyBlocks ? ESP_OK : ESP_ERR_NO_MEM);
-    for (unsigned index = 0; index < _blockCount; ++index)
+    for (unsigned iCaptureBlock = 0; iCaptureBlock < _blockCount; ++iCaptureBlock)
     {
-        CaptureBlock* captureBlock = &_captureBlocks[index];
+        CaptureBlock* captureBlock = &_captureBlocks[iCaptureBlock];
         xQueueSend(_freeBlocks, &captureBlock, 0);
     }
 }
 
-/** @brief The driver calls here in its interrupt; context identifies the registered receiver. */
+/* **
+ * receiveEntry - The driver calls here in its interrupt; context identifies the
+ * registered receiver.
+ */
 bool AdcReceiver::receiveEntry(parlio_rx_unit_handle_t receiver,
     const parlio_rx_event_data_t* event, void* context)
-{ (void)receiver; return static_cast<AdcReceiver*>(context)->receiveBlock(event); }
+{
+    (void)receiver;
+    return static_cast<AdcReceiver*>(context)->receiveBlock(event);
+}
 
-/**
- * @brief The receive driver calls this on Core 0 when a raw DMA chunk is ready.
- * It runs inside the driver's ISR (Interrupt Service Routine), not a normal
- * task. event describes the delivered bytes; receiveEntry has already used the
- * driver context to select this receiver instance.
- * event->data points into RAM that hardware will reuse, so the decoder must
- * receive a private copy rather than this pointer.
- * memcpy is the actual data transfer into our queue-owned storage. For example,
- * block 3 stays unavailable to this ISR while CPU1 reads it, even after DMA has
- * wrapped around its own 32 KiB area. An invalid chunk increments callbackErrors;
- * no free block or a failed queue send increments droppedBlocks. Core 0's main
- * loop sees these counters and stops capture; this callback itself does not.
- * Returning true asks the scheduler to wake a newly runnable higher-priority
- * task. No logging, heap allocation, decoding or waiting occurs in the ISR.
- * The driver supplies event->data and recv_bytes for this completed chunk;
- * they are packed pin states, not decoded sample values. FromISR queue calls
- * are the interrupt-safe versions: they never wait for another task to run.
+/* **
+ * receiveBlock - The receive driver calls this on Core 0 when a raw DMA chunk is
+ * ready. It runs inside the driver's ISR (Interrupt Service Routine), not a
+ * normal task. event describes the delivered bytes; receiveEntry has already
+ * used the driver context to select this receiver instance. event->data points
+ * into RAM that hardware will reuse, so the decoder must receive a private copy
+ * rather than this pointer. memcpy is the actual data transfer into our
+ * queue-owned storage. For example, block 3 stays unavailable to this ISR while
+ * CPU1 reads it, even after DMA has wrapped around its own 32 KiB area. An
+ * invalid chunk increments callbackErrors; no free block or a failed queue send
+ * increments droppedBlocks. Core 0's main loop sees these counters and stops
+ * capture; this callback itself does not. Returning true asks the scheduler to
+ * wake a newly runnable higher-priority task. No logging, heap allocation,
+ * decoding or waiting occurs in the ISR. The driver supplies event->data and
+ * recv_bytes for this completed chunk; they are packed pin states, not decoded
+ * sample values. FromISR queue calls are the interrupt-safe versions: they never
+ * wait for another task to run.
  */
 bool AdcReceiver::receiveBlock(const parlio_rx_event_data_t* event)
 {
@@ -118,7 +126,10 @@ bool AdcReceiver::receiveBlock(const parlio_rx_event_data_t* event)
         captureBlock->_arrivedAt = now;
         memcpy(captureBlock->_data, event->data, captureBlock->_length);
         const int64_t copyUs = esp_timer_get_time() - now;
-        if (copyUs > _maxCopyUs) { _maxCopyUs = copyUs; }
+        if (copyUs > _maxCopyUs)
+        {
+            _maxCopyUs = copyUs;
+        }
 
         // &block lets FreeRTOS copy the pointer value into the queue. It does
         // not copy the pointed-to bytes. CPU1 may start reading after this send.
@@ -130,19 +141,23 @@ bool AdcReceiver::receiveBlock(const parlio_rx_event_data_t* event)
 
         // Count waiting blocks only, excluding a block already held by CPU1.
         const uint32_t queued = uxQueueMessagesWaitingFromISR(_readyBlocks);
-        if (queued > _queueHighWater) { _queueHighWater = queued; }
+        if (queued > _queueHighWater)
+        {
+            _queueHighWater = queued;
+        }
     }
     return awakened == pdTRUE;
 }
 
-/**
- * @brief Core 0 stops receiving and frees this run's hardware receiver and DMA RAM.
- * Used by RecordingApplication::stop() and failed setup. enabled and the non-null handles
- * identify which setup steps succeeded. Disable reception before deleting
- * driver objects or freeing memory, so hardware cannot write into freed RAM.
- * ESP_ERROR_CHECK aborts on a driver cleanup error. This does not stop the
- * ADC itself: Feather controls that. Private raw blocks and the decoder task
- * remain allocated for later runs; SampleDecoder::drain() waits for their current work.
+/* **
+ * stop - Core 0 stops receiving and frees this run's hardware receiver and DMA
+ * RAM. Used by RecordingApplication::stop() and failed setup. enabled and the
+ * non-null handles identify which setup steps succeeded. Disable reception
+ * before deleting driver objects or freeing memory, so hardware cannot write
+ * into freed RAM. ESP_ERROR_CHECK aborts on a driver cleanup error. This does
+ * not stop the ADC itself: Feather controls that. Private raw blocks and the
+ * decoder task remain allocated for later runs; SampleDecoder::drain() waits for
+ * their current work.
  */
 void AdcReceiver::stop()
 {
@@ -165,8 +180,8 @@ void AdcReceiver::stop()
     _dmaBuffer = nullptr;
 }
 
-/**
- * @brief Core 0 starts hardware for an expected external clock in hertz.
+/* **
+ * start - Core 0 starts hardware for an expected external clock in hertz.
  * Success means ready to receive, not that samples arrived. On failure stop
  * releases partial setup; the application must still drain queued decoding.
  */
@@ -202,10 +217,16 @@ esp_err_t AdcReceiver::start(uint32_t clockHz)
     config.clk_in_gpio_num = GPIO_NUM_0;
     config.clk_out_gpio_num = GPIO_NUM_NC;
     config.valid_gpio_num = GPIO_NUM_NC;
-    for (auto& pin : config.data_gpio_nums) { pin = GPIO_NUM_NC; }
+    for (auto& pin : config.data_gpio_nums)
+    {
+        pin = GPIO_NUM_NC;
+    }
     config.data_gpio_nums[0] = GPIO_NUM_2;
     config.data_gpio_nums[1] = GPIO_NUM_1;
-    if (retVal == ESP_OK) { retVal = parlio_new_rx_unit(&config, &_receiver); }
+    if (retVal == ESP_OK)
+    {
+        retVal = parlio_new_rx_unit(&config, &_receiver);
+    }
 
     // A "software delimiter" is the driver's setting for software-controlled
     // receive boundaries, rather than a separate input pin controlling them.
@@ -250,15 +271,25 @@ esp_err_t AdcReceiver::start(uint32_t clockHz)
     {
         retVal = parlio_rx_unit_receive(_receiver, _dmaBuffer, _dmaBytes, &receiveConfig);
     }
-    if (retVal != ESP_OK) { stop(); }
+    if (retVal != ESP_OK)
+    {
+        stop();
+    }
     return retVal;
 }
 
-/** @brief Core 0 can read these atomic fault counters during capture. */
+/* **
+ * getFailed - Core 0 can read these atomic fault counters during capture.
+ */
 bool AdcReceiver::getFailed() const
-{ return _droppedBlocks.load() != 0 || _callbackErrors.load() != 0; }
+{
+    return _droppedBlocks.load() != 0 || _callbackErrors.load() != 0;
+}
 
-/** @brief Core 0 copies measurements only after stop has disabled the interrupt. */
+/* **
+ * getReceiverStats - Core 0 copies measurements only after stop has disabled the
+ * interrupt.
+ */
 ReceiverStats AdcReceiver::getReceiverStats() const
 {
     ReceiverStats receiverStats;
@@ -275,7 +306,10 @@ ReceiverStats AdcReceiver::getReceiverStats() const
     return receiverStats;
 }
 
-/** @brief Core 1 sleeps until a block or null drain marker arrives; caller owns the block. */
+/* **
+ * take - Core 1 sleeps until a block or null drain marker arrives; caller owns
+ * the block.
+ */
 CaptureBlock* AdcReceiver::take()
 {
     CaptureBlock* captureBlock = nullptr;
@@ -283,11 +317,19 @@ CaptureBlock* AdcReceiver::take()
     return captureBlock;
 }
 
-/** @brief Core 1 returns a fully read block, permitting the ISR to overwrite it. */
+/* **
+ * release - Core 1 returns a fully read block, permitting the ISR to overwrite
+ * it.
+ */
 void AdcReceiver::release(CaptureBlock* captureBlock)
-{ xQueueSend(_freeBlocks, &captureBlock, portMAX_DELAY); }
+{
+    xQueueSend(_freeBlocks, &captureBlock, portMAX_DELAY);
+}
 
-/** @brief After stopping hardware, Core 0 queues a marker behind every received block. */
+/* **
+ * markDrain - After stopping hardware, Core 0 queues a marker behind every
+ * received block.
+ */
 void AdcReceiver::markDrain()
 {
     CaptureBlock* captureBlock = nullptr;

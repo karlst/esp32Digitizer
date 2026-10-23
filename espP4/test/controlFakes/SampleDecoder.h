@@ -12,8 +12,9 @@
  * Public License in the repository LICENSE file or <https://www.gnu.org/licenses/>.
  */
 
-/** @file SampleDecoder.h
- * @brief Host replacement for the Core 1 task, with no thread scheduling.
+/**
+ * @file SampleDecoder.h
+ * Host replacement for the Core 1 task, with no thread scheduling.
  */
 #pragma once
 #include "FrameDecoder.h"
@@ -21,7 +22,9 @@
 #include "freertos/task.h"
 #include "esp_timer.h"
 
-/** @brief Record configuration/draining and supply results to the real application. */
+/**
+ * Record configuration/draining and supply results to the real application.
+ */
 class SampleDecoder
 {
 public:
@@ -29,18 +32,44 @@ public:
     bool _drainOk = true;
     uint32_t _clocksPerFrame = 0;
 
-    /** @brief No real task is created. */
-    void initialize() {}
+    /* **
+     * initialize - No real task is created.
+     */
+    void initialize()
+    {
+    }
 
-    /** @brief Save the requested frame length; tests separately arrange decoder results. */
-    void configure(CaptureDestination&, uint32_t clocksPerFrame) { _clocksPerFrame = clocksPerFrame; }
+    /* **
+     * configure - Save the requested frame length; tests separately arrange decoder
+     * results.
+     */
+    void configure(CaptureDestination&, uint32_t clocksPerFrame)
+    {
+        _clocksPerFrame = clocksPerFrame;
+    }
 
-    /** @brief Record draining and return the injected completion outcome. */
-    bool drain() { controlFake::operations += "drain "; return _drainOk; }
+    /* **
+     * drain - Record draining and return the injected completion outcome.
+     */
+    bool drain()
+    {
+        controlFake::operations += "drain ";
+        return _drainOk;
+    }
 
-    /** @brief Return the injected frozen decoder state. */
-    const FrameDecoder& getFrameDecoder() const { return _frameDecoder; }
+    /* **
+     * getFrameDecoder - Return the injected frozen decoder state.
+     */
+    const FrameDecoder& getFrameDecoder() const
+    {
+        return _frameDecoder;
+    }
 
-    /** @brief No host task exists. */
-    TaskHandle_t getTaskHandle() const { return nullptr; }
+    /* **
+     * getTaskHandle - No host task exists.
+     */
+    TaskHandle_t getTaskHandle() const
+    {
+        return nullptr;
+    }
 };

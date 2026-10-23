@@ -12,8 +12,9 @@
  * Public License in the repository LICENSE file or <https://www.gnu.org/licenses/>.
  */
 
-/** @file AdcReceiver.h
- * @brief Raw receive hardware and ownership of the blocks passed to Core 1.
+/**
+ * @file AdcReceiver.h
+ * Raw receive hardware and ownership of the blocks passed to Core 1.
  */
 #pragma once
 #include <atomic>
@@ -24,7 +25,7 @@
 #include "ReceiverStats.h"
 
 /**
- * @brief Copy DMA chunks into private blocks, then queue their addresses.
+ * Copy DMA chunks into private blocks, then queue their addresses.
  * DMA (Direct Memory Access) hardware fills a cyclic 32 KiB buffer. The Core 0
  * ISR (Interrupt Service Routine) copies each completed chunk before hardware
  * reuses it. Sixteen 4 KiB private blocks cushion decoder scheduling delays.
@@ -35,8 +36,9 @@
 class AdcReceiver
 {
 public:
-
-    /** @brief Construction allocates nothing and starts no hardware. */
+    /* **
+     * AdcReceiver - Construction allocates nothing and starts no hardware.
+     */
     AdcReceiver() = default;
     AdcReceiver(const AdcReceiver&) = delete;
     AdcReceiver& operator=(const AdcReceiver&) = delete;
@@ -49,8 +51,15 @@ public:
     void release(CaptureBlock* captureBlock);
     void markDrain();
 
-    /** @brief Number of private data blocks, excluding the drain marker slot. */
-    static constexpr unsigned getBlockCount() { return _blockCount; }
+    /* **
+     * getBlockCount - Number of private data blocks, excluding the drain marker
+     * slot.
+     */
+    static constexpr unsigned getBlockCount()
+    {
+        return _blockCount;
+    }
+
 private:
     static bool receiveEntry(parlio_rx_unit_handle_t receiver,
         const parlio_rx_event_data_t* event, void* context);
@@ -61,7 +70,7 @@ private:
     static constexpr size_t _blockBytes = 4096;
     static constexpr unsigned _blockCount = 16;
     static_assert(std::atomic<uint32_t>::is_always_lock_free,
-                  "ISR counters must not use locks");
+        "ISR counters must not use locks");
     CaptureBlock* _captureBlocks = nullptr;
     QueueHandle_t _freeBlocks = nullptr;
     QueueHandle_t _readyBlocks = nullptr;

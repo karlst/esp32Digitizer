@@ -14,7 +14,7 @@
 
 /**
  * @file profileMath.h
- * @brief Portable interval accounting, independent of ESP-IDF and board hardware.
+ * Portable interval accounting, independent of ESP-IDF and board hardware.
  * Runtime counters measure scheduled execution, not instruction counts. Each
  * core has its own 100% budget: do not divide a core's idle time by TWO cores.
  * Tests exercise unequal intervals and boundary cases without running firmware.
@@ -25,23 +25,23 @@
 namespace profileMath
 {
 
-/**
- * @brief Convert execution microseconds into tenths of a percent of ONE core.
- * Zero duration has no measurable percentage. Clamp minor snapshot/accounting
- * boundary overshoots to 100%; callers separately report those observations.
- * A floating intermediate avoids overflowing a long integer runtime times 1000;
- * returned/displayed values are integer tenths, rounded down.
+/* **
+ * percentTenths - Convert execution microseconds into tenths of a percent of ONE
+ * core. Zero duration has no measurable percentage. Clamp minor
+ * snapshot/accounting boundary overshoots to 100%; callers separately report
+ * those observations. A floating intermediate avoids overflowing a long integer
+ * runtime times 1000; returned/displayed values are integer tenths, rounded
+ * down.
  */
 inline uint32_t percentTenths(uint64_t executedUs, uint64_t elapsedUs)
 {
     uint32_t retVal = 0;
     if (elapsedUs != 0)
     {
-        retVal = executedUs >= elapsedUs ? 1000 :
-            static_cast<uint32_t>((static_cast<long double>(executedUs) * 1000) / elapsedUs);
+        retVal = executedUs >= elapsedUs ? 1000 : static_cast<uint32_t>((static_cast<long double>(executedUs) * 1000) / elapsedUs);
     }
     return retVal;
 }
 
 
-}
+} // namespace profileMath

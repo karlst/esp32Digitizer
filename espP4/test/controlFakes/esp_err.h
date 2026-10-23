@@ -12,11 +12,19 @@
  * Public License in the repository LICENSE file or <https://www.gnu.org/licenses/>.
  */
 
-/** @file esp_err.h
- * @brief Host-only ESP error definitions; aborts become catchable test exceptions.
+/**
+ * @file esp_err.h
+ * Host-only ESP error definitions; aborts become catchable test exceptions.
  */
 #pragma once
 #include <stdexcept>
 using esp_err_t = int;
 constexpr esp_err_t ESP_OK = 0, ESP_FAIL = -1, ESP_ERR_TIMEOUT = 1;
-#define ESP_ERROR_CHECK(value) do { if ((value) != ESP_OK) { throw std::runtime_error("ESP failure"); } } while (false)
+#define ESP_ERROR_CHECK(value)                       \
+    do                                               \
+    {                                                \
+        if ((value) != ESP_OK)                       \
+        {                                            \
+            throw std::runtime_error("ESP failure"); \
+        }                                            \
+    } while (false)

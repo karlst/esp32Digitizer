@@ -12,14 +12,17 @@
  * Public License in the repository LICENSE file or <https://www.gnu.org/licenses/>.
  */
 
-/** @file ControlDestination.h
- * @brief A destination that separates preparation acceptance from readiness.
+/**
+ * @file ControlDestination.h
+ * A destination that separates preparation acceptance from readiness.
  */
 #pragma once
 #include "CaptureDestination.h"
 #include "esp_timer.h"
 
-/** @brief Inject storage state while exercising the real RecordingApplication sequencing. */
+/**
+ * Inject storage state while exercising the real RecordingApplication sequencing.
+ */
 class ControlDestination : public CaptureDestination
 {
 public:
@@ -29,30 +32,68 @@ public:
     uint32_t _samples = 0;
     Ads127Config _adsConfig = adsConfig;
 
-    /** @brief Accept setup without completing it; the test supplies later readiness. */
+    /* **
+     * prepare - Accept setup without completing it; the test supplies later
+     * readiness.
+     */
     bool prepare(uint32_t, const Ads127Config& adsConfigRequested) override
     {
         ++_preparations;
-        if (_acceptPreparation) { _ready = false; _cancelled = false; _failed = false; _adsConfig = adsConfigRequested; }
+        if (_acceptPreparation)
+        {
+            _ready = false;
+            _cancelled = false;
+            _failed = false;
+            _adsConfig = adsConfigRequested;
+        }
         return _acceptPreparation;
     }
 
-    /** @brief Readiness cannot revive a cancelled pending request. */
-    bool getReady() const override { return _ready && !_cancelled; }
+    /* **
+     * getReady - Readiness cannot revive a cancelled pending request.
+     */
+    bool getReady() const override
+    {
+        return _ready && !_cancelled;
+    }
 
-    /** @brief Record cancellation without pretending the disk operation completed. */
-    void cancelPreparation() override { _cancelled = true; }
+    /* **
+     * cancelPreparation - Record cancellation without pretending the disk operation
+     * completed.
+     */
+    void cancelPreparation() override
+    {
+        _cancelled = true;
+    }
 
-    /** @brief Lifecycle tests inject decoder results and submit no actual samples. */
-    bool submit(const uint32_t*, size_t) override { return true; }
+    /* **
+     * submit - Lifecycle tests inject decoder results and submit no actual samples.
+     */
+    bool submit(const uint32_t*, size_t) override
+    {
+        return true;
+    }
 
-    /** @brief Return the injected write failure. */
-    bool getFailed() const override { return _failed; }
+    /* **
+     * getFailed - Return the injected write failure.
+     */
+    bool getFailed() const override
+    {
+        return _failed;
+    }
 
-    /** @brief Return the injected full-RAM condition. */
-    bool getFull() const override { return _full; }
+    /* **
+     * getFull - Return the injected full-RAM condition.
+     */
+    bool getFull() const override
+    {
+        return _full;
+    }
 
-    /** @brief Record completion after receiver stop, drain and controller notification. */
+    /* **
+     * finish - Record completion after receiver stop, drain and controller
+     * notification.
+     */
     void finish(uint32_t, uint32_t, bool clean, uint32_t samples) override
     {
         controlFake::operations += "finish ";

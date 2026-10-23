@@ -12,8 +12,9 @@
  * Public License in the repository LICENSE file or <https://www.gnu.org/licenses/>.
  */
 
-/** @file RecordingController.h
- * @brief Today's console/Feather controller; replace this when the command source changes.
+/**
+ * @file RecordingController.h
+ * Today's console/Feather controller; replace this when the command source changes.
  */
 #pragma once
 #include "RecordingApplication.h"
@@ -24,7 +25,7 @@
 #include "freertos/queue.h"
 
 /**
- * @brief Translate console keys and Feather messages into recording operations.
+ * Translate console keys and Feather messages into recording operations.
  * Startup initializes and polls this on Core 0. The application knows none of
  * this protocol. Required READY3/STOP/error replies remain enabled regardless
  * of optional terminal reporting. All borrowed objects must live until reset.
@@ -43,13 +44,21 @@ public:
     void destinationFull(uint32_t run) override;
     void stopped(const RecordingResult& recordingResult) override;
     void decoderStalled(uint32_t run) override;
+
 private:
     void handleLine(const char* line);
+    void handleClockLine(const char* line);
     void reply(const char* format, ...);
+    void reportLinkStatus();
+    bool _linkDiagnostics = false;
+    uint32_t _linkBytes = 0, _linkLines = 0, _linkErrors = 0, _linkPolls = 0;
+    unsigned _linkHexBytes = 0;
     RecordingApplication& _recordingApplication;
     RecordingReporter& _recordingReporter;
     RecordingConsoleCommands* _recordingConsoleCommands;
     BenchLine _benchLine;
+    BenchLine _consoleLine;
+    bool _collectingClock = false;
     static constexpr uart_port_t _featherPort = UART_NUM_1;
     QueueHandle_t _uartEvents = nullptr;
 };

@@ -12,8 +12,9 @@
  * Public License in the repository LICENSE file or <https://www.gnu.org/licenses/>.
  */
 
-/** @file RecordingState.h
- * @brief Small control-state snapshot safe to request on the Core 0 control task.
+/**
+ * @file RecordingState.h
+ * Small control-state snapshot safe to request on the Core 0 control task.
  */
 #pragma once
 #include <cstdint>
@@ -21,7 +22,7 @@
 #include "esp_err.h"
 
 /**
- * @brief Describe receiver state, not completion of asynchronous disk operations.
+ * Describe receiver state, not completion of asynchronous disk operations.
  * Active means receiving was requested, not proof that data arrived. Run/configuration
  * identify the last accepted recording even after it stops. StartError contains
  * the most recent hardware setup result. Access is restricted to Core 0 control.

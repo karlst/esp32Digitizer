@@ -12,14 +12,15 @@
  * Public License in the repository LICENSE file or <https://www.gnu.org/licenses/>.
  */
 
-/** @file ReceiverStats.h
- * @brief Frozen measurements of raw data received during one recording.
+/**
+ * @file ReceiverStats.h
+ * Frozen measurements of raw data received during one recording.
  */
 #pragma once
 #include <cstdint>
 
 /**
- * @brief Read only after AdcReceiver::stop; these are software observations.
+ * Read only after AdcReceiver::stop; these are software observations.
  * Bytes include rejected chunks. Times are microseconds at callback execution,
  * not ADC sample times. Zero errors does not prove that DMA lost no data.
  */

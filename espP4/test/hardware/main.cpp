@@ -12,8 +12,9 @@
  * Public License in the repository LICENSE file or <https://www.gnu.org/licenses/>.
  */
 
-/** @file main.cpp
- * @brief P4 test startup; reuse the real application with bench-only services.
+/**
+ * @file main.cpp
+ * P4 test startup; reuse the real application with bench-only services.
  * Objects remain alive until reset because tasks and callbacks borrow them.
  */
 #include "RecordingApplication.h"
@@ -24,17 +25,35 @@
 #include "SdCaptureDestination.h"
 #include "RecordingHarness.h"
 #include "test/support/ads127BenchTiming.h"
+
+/* **
+ * getRecordingSessionConfig - Reserve new files; short smoke crosses one
+ * boundary without reusing data.
+ */
+static RecordingSessionConfig getRecordingSessionConfig()
+{
+    RecordingSessionConfig recordingSessionConfig;
+    recordingSessionConfig._preparation = RecordingSessionConfig::Preparation::addFiles;
+    recordingSessionConfig._fullPolicy = RecordingSessionConfig::FullPolicy::stopWhenFull;
+#if CONFIG_P4_HARDWARE_SMOKE
+    // Two extra seconds of capacity cover clock differences and stop latency.
+    // The source still runs for 30 seconds; byte-count rollover occurs near 16 s.
+    recordingSessionConfig._secondsPerFile = 16;
+    recordingSessionConfig._fileCount = 2;
+#else
+    recordingSessionConfig._secondsPerFile = 300;
+    recordingSessionConfig._fileCount = 11;
+#endif
+    return recordingSessionConfig;
+}
+
 static ConsoleRecordingReporter consoleRecordingReporter;
 #if CONFIG_P4_HARDWARE_SMOKE
 #include "SdSmokeSummary.h"
-static constexpr uint64_t reservedBytes = 128ULL * 1024 * 1024;
-static_assert(reservedBytes > 512ULL + 1126400ULL * 3 *
-    ads127BenchTiming::receiverTimeoutMs / 1000,
-    "Reserve must cover the receiver timeout with ten percent sample-rate margin");
 static SdSmokeSummary sdSmokeSummary;
-static SdRecorder sdRecorder(reservedBytes, &sdSmokeSummary, &consoleRecordingReporter);
+static SdRecorder sdRecorder(getRecordingSessionConfig(), &sdSmokeSummary, &consoleRecordingReporter);
 #else
-static SdRecorder sdRecorder(10000000000ULL, nullptr, &consoleRecordingReporter);
+static SdRecorder sdRecorder(getRecordingSessionConfig(), nullptr, &consoleRecordingReporter);
 #endif
 static SdCaptureDestination sdCaptureDestination(sdRecorder);
 static RecordingHarness recordingHarness(sdRecorder);
@@ -44,7 +63,10 @@ static RecordingApplication recordingApplication(adcReceiver, sampleDecoder, sdC
     ads127BenchTiming::receiverTimeoutMs, &recordingHarness);
 static RecordingController recordingController(recordingApplication, consoleRecordingReporter, &recordingHarness);
 
-/** @brief Initialize services once, then run the same command loop as ordinary recording. */
+/* **
+ * app_main - Initialize services once, then run the same command loop as
+ * ordinary recording.
+ */
 extern "C" void app_main()
 {
     ESP_ERROR_CHECK(sdRecorder.initTask() ? ESP_OK : ESP_ERR_NO_MEM);

@@ -12,8 +12,9 @@
  * Public License in the repository LICENSE file or <https://www.gnu.org/licenses/>.
  */
 
-/** @file recordingControlChecks.cpp
- * @brief Check real recording lifecycle with fake hardware, storage and time.
+/**
+ * @file recordingControlChecks.cpp
+ * Check real recording lifecycle with fake hardware, storage and time.
  * This validates sequencing and failure policy, not interrupts, cores or card I/O.
  */
 #include "RecordingApplication.h"
@@ -25,7 +26,10 @@
 #include <cassert>
 #include <cstdio>
 
-/** @brief Complete simulated asynchronous preparation, then confirm receiving started. */
+/* **
+ * startReady - Complete simulated asynchronous preparation, then confirm
+ * receiving started.
+ */
 void startReady(RecordingApplication& recordingApplication, ControlDestination& controlDestination, uint32_t run)
 {
     assert(recordingApplication.start(run, adsConfig) == RecordingApplication::StartResult::preparing);
@@ -34,7 +38,10 @@ void startReady(RecordingApplication& recordingApplication, ControlDestination& 
     assert(recordingApplication.getRecordingState()._active);
 }
 
-/** @brief Exercise controller-independent operations; exit nonzero on any violated expectation. */
+/* **
+ * main - Exercise controller-independent operations; exit nonzero on any
+ * violated expectation.
+ */
 int main()
 {
     AdcReceiver adcReceiver;
@@ -174,15 +181,24 @@ int main()
         const unsigned startsBefore = adcReceiver._starts;
         const unsigned readyBefore = controlEvents._readyCount;
         assert(recordingApplication.start(30 + condition, adsConfig) == StartResult::preparing);
-        if (condition == 0) { controlDestination._failed = true; }
+        if (condition == 0)
+        {
+            controlDestination._failed = true;
+        }
         else if (condition == 1)
         {
             controlFake::nowUs += static_cast<int64_t>(recordingTiming::preparationTimeoutMs) * 1000;
             assert(recordingApplication.start(31, adsConfig) == StartResult::alreadyPreparing);
             controlDestination._ready = true;
         }
-        else if (condition == 2) { recordingApplication.stop(); }
-        else { recordingApplication.commandFailed(); }
+        else if (condition == 2)
+        {
+            recordingApplication.stop();
+        }
+        else
+        {
+            recordingApplication.commandFailed();
+        }
         recordingApplication.poll();
         assert(controlDestination._cancelled && recordingApplication.getIdle());
         const RecordingEvents::StartFailure expected[] = {
@@ -209,8 +225,14 @@ int main()
     sampleDecoder._drainOk = false;
     controlFake::operations.clear();
     bool aborted = false;
-    try { recordingApplication.stop(); }
-    catch (const std::runtime_error&) { aborted = true; }
+    try
+    {
+        recordingApplication.stop();
+    }
+    catch (const std::runtime_error&)
+    {
+        aborted = true;
+    }
     assert(aborted && controlEvents._stalls == 1);
     assert(controlFake::operations == "stop drain ");
     std::puts("PASS: automatic preparation, delayed readiness, cancellation, stop order and failures.");

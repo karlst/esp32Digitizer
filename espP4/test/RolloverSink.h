@@ -12,15 +12,18 @@
  * Public License in the repository LICENSE file or <https://www.gnu.org/licenses/>.
  */
 
-/** @file RolloverSink.h
- * @brief RolloverSink declaration shared by its callers.
+/**
+ * @file RolloverSink.h
+ * RolloverSink declaration shared by its callers.
  */
 #pragma once
 #include "ByteSink.h"
 #include <cassert>
 #include <cstring>
 
-/** @brief Mock destination verifies every block before the caller reuses its source. */
+/**
+ * Mock destination verifies every block before the caller reuses its source.
+ */
 class RolloverSink : public ByteSink
 {
 public:
@@ -28,7 +31,10 @@ public:
     size_t _expectedBytes = 0;
     uint64_t _total = 0;
 
-    /** @brief Compare copied ring data with the requested block and count accepted bytes. */
+    /* **
+     * write - Compare copied ring data with the requested block and count accepted
+     * bytes.
+     */
     size_t write(const uint8_t* data, size_t length) override
     {
         assert(length == _expectedBytes && std::memcmp(data, _expected, length) == 0);
@@ -36,6 +42,12 @@ public:
         return length;
     }
 
-    /** @brief No hardware is present; synchronization succeeds in this boundary test. */
-    bool flush() override { return true; }
+    /* **
+     * flush - No hardware is present; synchronization succeeds in this boundary
+     * test.
+     */
+    bool flush() override
+    {
+        return true;
+    }
 };

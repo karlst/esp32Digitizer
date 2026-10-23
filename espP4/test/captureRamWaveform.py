@@ -25,7 +25,7 @@ import serial
 def savePlot(rows, metadata, destination):
     """Draw each group's lowest, highest and average ADC count in destination HTML.
 
-    rows contains (index, minimum, maximum, mean) from the P4 report; this
+    rows contains (iWaveformBin, minimum, maximum, mean) from the P4 report; this
     function does no further averaging. The horizontal scale assumes 600
     groups of 0.5 ms. Vertical limits follow the measured counts, not volts.
     """
@@ -42,8 +42,8 @@ def savePlot(rows, metadata, destination):
         value = low + tick * (high-low)/5
         elements.append(f'<path d="M100 {y}H1100" stroke="#ddd"/><text x="5" y="{y}">{value:.0f}</text>')
     points = []
-    for index, minimum, maximum, mean in rows:
-        x = 100 + (index + 0.5) / 600 * 1000
+    for iWaveformBin, minimum, maximum, mean in rows:
+        x = 100 + (iWaveformBin + 0.5) / 600 * 1000
         yMin = 440 - (minimum-low)/(high-low)*360
         yMax = 440 - (maximum-low)/(high-low)*360
         yMean = 440 - (mean-low)/(high-low)*360
@@ -97,10 +97,10 @@ def main():
                         metadata = tuple(map(int, match.groups()))
                         rows = []
                     elif line.startswith('WAVE,') and metadata:
-                        _, index, minimum, maximum, mean = line.split(',')
-                        if int(index) != len(rows):
+                        _, iWaveformBin, minimum, maximum, mean = line.split(',')
+                        if int(iWaveformBin) != len(rows):
                             raise ValueError('Missing or reordered waveform rows; raw log retained')
-                        rows.append((int(index), int(minimum), int(maximum), float(mean)))
+                        rows.append((int(iWaveformBin), int(minimum), int(maximum), float(mean)))
                     elif line.startswith('WAVE_END') and metadata:
                         if line != f'WAVE_END run={metadata[0]}' or len(rows) != 600 or metadata[2] != 600:
                             raise ValueError('Incomplete waveform; raw log retained')

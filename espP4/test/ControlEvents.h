@@ -12,14 +12,17 @@
  * Public License in the repository LICENSE file or <https://www.gnu.org/licenses/>.
  */
 
-/** @file ControlEvents.h
- * @brief Controller notifications captured by host sequencing checks.
+/**
+ * @file ControlEvents.h
+ * Controller notifications captured by host sequencing checks.
  */
 #pragma once
 #include "RecordingEvents.h"
 #include "esp_timer.h"
 
-/** @brief Save outcomes without serial communication or terminal reporting. */
+/**
+ * Save outcomes without serial communication or terminal reporting.
+ */
 class ControlEvents : public RecordingEvents
 {
 public:
@@ -29,21 +32,49 @@ public:
     StartFailure _startFailure = StartFailure::preparation;
     Ads127Config _adsConfig = adsConfig;
 
-    /** @brief Count permission to start the source, separate from preparation acceptance. */
+    /* **
+     * ready - Count permission to start the source, separate from preparation
+     * acceptance.
+     */
     void ready(uint32_t, const Ads127Config& adsConfigRequested) override
-    { ++_readyCount; _adsConfig = adsConfigRequested; }
+    {
+        ++_readyCount;
+        _adsConfig = adsConfigRequested;
+    }
 
-    /** @brief Retain the reason a pending request could not start. */
+    /* **
+     * startFailed - Retain the reason a pending request could not start.
+     */
     void startFailed(uint32_t, StartFailure reason, int) override
-    { ++_startFailures; _startFailure = reason; controlFake::operations += "startFailed "; }
+    {
+        ++_startFailures;
+        _startFailure = reason;
+        controlFake::operations += "startFailed ";
+    }
 
-    /** @brief Record a request to stop the source; do not re-enter the application. */
-    void destinationFull(uint32_t) override { ++_fullRequests; }
+    /* **
+     * destinationFull - Record a request to stop the source; do not re-enter the
+     * application.
+     */
+    void destinationFull(uint32_t) override
+    {
+        ++_fullRequests;
+    }
 
-    /** @brief Copy the result to verify it survives later application actions. */
+    /* **
+     * stopped - Copy the result to verify it survives later application actions.
+     */
     void stopped(const RecordingResult& recordingResult) override
-    { controlFake::operations += "event "; _recordingResult = recordingResult; }
+    {
+        controlFake::operations += "event ";
+        _recordingResult = recordingResult;
+    }
 
-    /** @brief Record the fatal drain failure notification. */
-    void decoderStalled(uint32_t) override { ++_stalls; }
+    /* **
+     * decoderStalled - Record the fatal drain failure notification.
+     */
+    void decoderStalled(uint32_t) override
+    {
+        ++_stalls;
+    }
 };

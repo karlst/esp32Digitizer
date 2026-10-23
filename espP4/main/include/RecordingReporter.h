@@ -12,33 +12,67 @@
  * Public License in the repository LICENSE file or <https://www.gnu.org/licenses/>.
  */
 
-/** @file RecordingReporter.h
- * @brief Report recording events without choosing a display or transport.
+/**
+ * @file RecordingReporter.h
+ * Report recording events without choosing a display or transport.
  */
 #pragma once
 #include "RecordingResult.h"
 #include "BufferedWriter.h"
 
 /**
- * @brief Receive status and completed results from the controller and SD task.
+ * Receive status and completed results from the controller and SD task.
  * Calls occur on Core 0, never in the receive interrupt or Core 1 decoder.
  * Different Core 0 tasks can call this interface; an implementation that owns
- * mutable shared state must synchronize it. Borrowed arguments last only until
+ * mutable shared state must synchronize it. Arguments supplied by the caller last only until
  * the call returns: a queued C6 sender must copy them. Required Feather replies
  * remain the controller's responsibility even if reporting is disabled.
  */
 class RecordingReporter
 {
 public:
-
-    /** @brief Permit destruction through the reporting interface. */
+    /* **
+     * ~RecordingReporter - Permit destruction through the reporting interface.
+     */
     virtual ~RecordingReporter() = default;
-    enum class StorageError { close, mount, needsExfat, prepare };
+    enum class StorageError
+    {
+        close,
+        mount,
+        needsExfat,
+        prepare
+    };
     virtual void storagePrepared(bool ready, const char* path) const = 0;
     virtual void storageError(StorageError error, int code = 0) const = 0;
     virtual void storageReserved(uint64_t bytes) const = 0;
     virtual void storageVerifying(uint64_t bytes) const = 0;
     virtual void storageProgress(uint64_t bytes, uint64_t total) const = 0;
+
+    /* **
+     * storageRetention - Final readback coverage; total includes earlier overwritten
+     * payload.
+     */
+    virtual void storageRetention(uint64_t firstByte, uint64_t bytes, uint64_t total) const
+    {
+        (void)firstByte;
+        (void)bytes;
+        (void)total;
+    }
+
+    /* **
+     * storageSession - Completed session counters; no payload is read or retained by
+     * this call.
+     */
+    virtual void storageSession(uint64_t session, uint32_t files, uint32_t rollovers,
+        uint32_t reuses, uint64_t lostBytes) const
+    {
+        (void)session;
+        (void)files;
+        (void)rollovers;
+        (void)reuses;
+        (void)lostBytes;
+    }
+
     virtual void storageFinished(bool ok, const char* path, uint64_t bytes, uint32_t crc,
         const BufferedWriter::Statistics& statistics, double writeMbps) const = 0;
     virtual void startup() const = 0;

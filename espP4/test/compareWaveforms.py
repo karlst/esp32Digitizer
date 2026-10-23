@@ -40,9 +40,9 @@ def parseInput(text):
             fields = line.split(',')
             if len(fields) != (8 if metadata[5] == 'burst' else 4):
                 raise ValueError('Input row does not match declared sampling mode')
-            _, index, timestamp, value = fields[:4]
-            index, timestamp, value = int(index), int(timestamp), float(value)
-            if index != len(rows) or not math.isfinite(value) or not 0 <= value <= 4095 or not 1000000 <= timestamp <= 1310000:
+            _, iRow, timestamp, value = fields[:4]
+            iRow, timestamp, value = int(iRow), int(timestamp), float(value)
+            if iRow != len(rows) or not math.isfinite(value) or not 0 <= value <= 4095 or not 1000000 <= timestamp <= 1310000:
                 raise ValueError('Invalid input row index, time or ADC count')
             if metadata[5] == 'burst':
                 minimum,maximum,reads,duration = map(int, fields[4:])
@@ -73,11 +73,11 @@ def parseOutput(text):
         elif line.startswith('WAVE,'):
             if metadata is None or ended:
                 raise ValueError('Output rows outside report')
-            _, index, minimum, maximum, mean = line.split(',')
-            index, minimum, maximum, mean = int(index), int(minimum), int(maximum), float(mean)
-            if index != len(rows) or not math.isfinite(mean) or not -8388608 <= minimum <= mean <= maximum <= 8388607:
+            _, iRow, minimum, maximum, mean = line.split(',')
+            iRow, minimum, maximum, mean = int(iRow), int(minimum), int(maximum), float(mean)
+            if iRow != len(rows) or not math.isfinite(mean) or not -8388608 <= minimum <= mean <= maximum <= 8388607:
                 raise ValueError('Invalid output row index or sample range')
-            rows.append(((index + 0.5) * 0.5, mean, minimum, maximum))
+            rows.append(((iRow + 0.5) * 0.5, mean, minimum, maximum))
         elif line.startswith('WAVE_END'):
             if metadata is None or line != f'WAVE_END run={metadata[0]}':
                 raise ValueError('Output end run ID mismatch')
@@ -93,9 +93,9 @@ def interpolate(rows, times, at):
     """Linear interpolation between neighboring output-bin means; no extrapolation."""
     if at < times[0] or at > times[-1]:
         raise ValueError('Requested comparison outside the captured window')
-    index = min(len(rows) - 2, max(0, bisect_right(times, at)-1))
-    fraction = (at-times[index])/(times[index+1]-times[index])
-    return rows[index][1] + fraction*(rows[index+1][1]-rows[index][1])
+    iRow = min(len(rows) - 2, max(0, bisect_right(times, at)-1))
+    fraction = (at-times[iRow])/(times[iRow+1]-times[iRow])
+    return rows[iRow][1] + fraction*(rows[iRow+1][1]-rows[iRow][1])
 
 
 def fitScale(pairs):
@@ -221,7 +221,7 @@ def analyze(inputText, outputText, target):
         bursts=[]
         for line in inputText.splitlines():
             if line.startswith('INPUT,'):
-                _,index,at,mean,minimum,maximum,reads,duration=line.split(',')
+                _,iRow,at,mean,minimum,maximum,reads,duration=line.split(',')
                 bursts.append(((int(at)-1000000)/1000,float(mean),int(minimum),int(maximum),int(reads),int(duration)))
         with target.with_name(target.stem+'-input-bursts.csv').open('w',newline='',encoding='utf-8') as output:
             writer=csv.writer(output)

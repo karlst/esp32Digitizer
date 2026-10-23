@@ -75,10 +75,10 @@ def inspectRecording(path):
     stride = max(1, rate // 1000)
     points = []
     minimum, maximum = 0x7fffff, -0x800000
-    for index in range(2 * rate):
-        value = signed24(data, index * 3)
+    for iSample in range(2 * rate):
+        value = signed24(data, iSample * 3)
         minimum, maximum = min(minimum, value), max(maximum, value)
-        if index % stride == 0:
+        if iSample % stride == 0:
             points.append(value)
     mean = sum(points) / len(points)
     rms = math.sqrt(sum((value - mean) ** 2 for value in points) / len(points))
@@ -88,10 +88,10 @@ def inspectRecording(path):
     crossings = []
     pointSeconds = stride / rate
     if maximum - minimum > 100:
-        for index in range(1, len(points)):
-            before, after = points[index - 1], points[index]
+        for iPoint in range(1, len(points)):
+            before, after = points[iPoint - 1], points[iPoint]
             if before < mean <= after:
-                at = (index - 1 + (mean - before) / (after - before)) * pointSeconds
+                at = (iPoint - 1 + (mean - before) / (after - before)) * pointSeconds
                 if not crossings or at - crossings[-1] > 0.05:
                     crossings.append(at)
     frequency = ((len(crossings) - 1) / (crossings[-1] - crossings[0])

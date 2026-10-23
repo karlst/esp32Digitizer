@@ -12,23 +12,34 @@
  * Public License in the repository LICENSE file or <https://www.gnu.org/licenses/>.
  */
 
-/** @file ConsoleRecordingReporter.h
- * @brief Format optional recording diagnostics for the P4 USB terminal.
+/**
+ * @file ConsoleRecordingReporter.h
+ * Format optional recording diagnostics for the P4 USB terminal.
  */
 #pragma once
 #include "RecordingReporter.h"
 
 /**
- * @brief Preserve the current terminal reports behind the reporting interface.
+ * Preserve the current terminal reports behind the reporting interface.
  * Formatting uses values supplied by the caller, never live sample buffers.
  * Disabling output does not disable required Feather control replies.
  */
 class ConsoleRecordingReporter : public RecordingReporter
 {
 public:
+    void storageRetention(uint64_t firstByte, uint64_t bytes, uint64_t total) const override;
+    void storageSession(uint64_t session, uint32_t files, uint32_t rollovers,
+        uint32_t reuses, uint64_t lostBytes) const override;
 
-    /** @brief Choose whether to print diagnostics; construction performs no I/O. */
-    explicit ConsoleRecordingReporter(bool enabled = true) : _enabled(enabled) {}
+    /* **
+     * ConsoleRecordingReporter - Choose whether to print diagnostics; construction
+     * performs no I/O.
+     */
+    explicit ConsoleRecordingReporter(bool enabled = true)
+        : _enabled(enabled)
+    {
+    }
+
     void storagePrepared(bool ready, const char* path) const override;
     void storageError(StorageError error, int code = 0) const override;
     void storageReserved(uint64_t bytes) const override;
@@ -39,6 +50,7 @@ public:
     void startup() const override;
     void message(const char* text) const override;
     void capture(const RecordingResult& recordingResult) const override;
+
 private:
     const bool _enabled;
 };

@@ -12,41 +12,85 @@
  * Public License in the repository LICENSE file or <https://www.gnu.org/licenses/>.
  */
 
-/** @file RamCaptureDestination.h
- * @brief Test-only adapter that summarizes decoded samples without accessing SD.
+/**
+ * @file RamCaptureDestination.h
+ * Test-only adapter that summarizes decoded samples without accessing SD.
  */
 #pragma once
 #include "CaptureDestination.h"
 #include "RamWaveform.h"
 
-/** @brief Own a short waveform summary; Core 0 reads only after decoder drain. */
+/**
+ * Own a short waveform summary; Core 0 reads only after decoder drain.
+ */
 class RamCaptureDestination : public CaptureDestination
 {
 public:
-
-    /** @brief Reset the RAM summary immediately; no disk work or delayed readiness exists. */
+    /* **
+     * prepare - Reset the RAM summary immediately; no disk work or delayed readiness
+     * exists.
+     */
     bool prepare(uint32_t run, const Ads127Config& adsConfigRequested) override
-    { (void)run; _ramWaveform.reset(adsConfigRequested._samplesPerSecond); _ready = true; return true; }
+    {
+        (void)run;
+        _ramWaveform.reset(adsConfigRequested._samplesPerSecond);
+        _ready = true;
+        return true;
+    }
 
-    /** @brief Core 0 reads readiness set by prepare; this flag is not shared with Core 1. */
-    bool getReady() const override { return _ready; }
+    /* **
+     * getReady - Core 0 reads readiness set by prepare; this flag is not shared with
+     * Core 1.
+     */
+    bool getReady() const override
+    {
+        return _ready;
+    }
 
-    /** @brief Cancel before receiving begins; no background work needs draining. */
-    void cancelPreparation() override { _ready = false; }
+    /* **
+     * cancelPreparation - Cancel before receiving begins; no background work needs
+     * draining.
+     */
+    void cancelPreparation() override
+    {
+        _ready = false;
+    }
 
-    /** @brief Consume the batch immediately; no pointer survives this call. */
+    /* **
+     * submit - Consume the batch immediately; no pointer survives this call.
+     */
     bool submit(const uint32_t* words, size_t count) override
-    { _ramWaveform.accept(words, count); return true; }
+    {
+        _ramWaveform.accept(words, count);
+        return true;
+    }
 
-    /** @brief This bounded summary has no asynchronous storage operation to fail. */
-    bool getFailed() const override { return false; }
+    /* **
+     * getFailed - This bounded summary has no asynchronous storage operation to
+     * fail.
+     */
+    bool getFailed() const override
+    {
+        return false;
+    }
 
-    /** @brief Read the summary's atomic completion flag from Core 0. */
-    bool getFull() const override { return _ramWaveform.getComplete(); }
+    /* **
+     * getFull - Read the summary's atomic completion flag from Core 0.
+     */
+    bool getFull() const override
+    {
+        return _ramWaveform.getComplete();
+    }
 
-    /** @brief Export only after all Core 1 decoding has stopped. */
+    /* **
+     * finish - Export only after all Core 1 decoding has stopped.
+     */
     void finish(uint32_t run, uint32_t rate, bool clean, uint32_t samples) override
-    { (void)samples; _ramWaveform.report(run, rate, clean); }
+    {
+        (void)samples;
+        _ramWaveform.report(run, rate, clean);
+    }
+
 private:
     bool _ready = false;
     RamWaveform _ramWaveform;

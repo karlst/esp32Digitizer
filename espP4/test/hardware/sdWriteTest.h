@@ -12,8 +12,9 @@
  * Public License in the repository LICENSE file or <https://www.gnu.org/licenses/>.
  */
 
-/** @file SdWriteTest.h
- * @brief CPU1 synthetic data source for measuring the existing SD writing path.
+/**
+ * @file SdWriteTest.h
+ * CPU1 synthetic data source for measuring the existing SD writing path.
  */
 #pragma once
 #include <atomic>
@@ -22,7 +23,8 @@
 #include "SdRecorder.h"
 #include "SyntheticRecordingLayout.h"
 
-/** @brief One finite, explicitly requested test; no ADC or DMA control calls.
+/**
+ * One finite, explicitly requested test; no ADC or DMA control calls.
  * CPU0 requests preparation. CPU1 waits for readiness, then submits paced batches through the
  * same ring and checksum operation as the decoder. The disk task remains CPU0.
  */
@@ -32,6 +34,7 @@ public:
     bool initialize(SdRecorder& recorder);
     bool start(uint32_t wordsPerSecond);
     void stop();
+
 private:
     SyntheticRecordingLayout _syntheticRecordingLayout;
     static void taskEntry(void* context);
