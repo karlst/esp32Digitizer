@@ -14,7 +14,7 @@
 
 /**
  * @file DacGenerator.cpp
- * @brief Task-timed DAC generation and timestamped ADC loopback snapshots.
+ * Task-timed DAC generation and timestamped ADC loopback snapshots.
  *
  * Browser requests run in Arduino's loop task; waveform updates run in a separate
  * FreeRTOS worker. An ESP timer wakes that worker at nominal 500 us intervals.
@@ -37,13 +37,15 @@
 #include <algorithm>
 #include <vector>
 
-/**
- * @brief Prepare analog hardware, create the sampling worker, then start its clock.
- * @return True when both hardware initialization and periodic timer startup succeed.
+/* **
+ * begin - Prepare analog hardware, create the sampling worker, then start its
+ * clock. Returns: True when both hardware initialization and periodic timer
+ * startup succeed.
  *
- * Called once from webApp::begin(), before requests can access this object. Startup
- * keeps DAC code zero. Resources are created in dependency order: mutex, worker,
- * timer. The timer must not fire until its notification recipient exists.
+ * Called once from webApp::begin(), before requests can access this object.
+ * Startup keeps DAC code zero. Resources are created in dependency order: mutex,
+ * worker, timer. The timer must not fire until its notification recipient
+ * exists.
  */
 bool DacGenerator::begin()
 {
@@ -59,9 +61,9 @@ bool DacGenerator::begin()
     // Select 12-bit readings (0..4095) and input attenuation for the chosen voltage
     // range. Short-circuit evaluation stops configuration at the first driver error.
     const bool analogReady = dac_output_enable(DAC_CHANNEL_1) == ESP_OK &&
-        dac_output_voltage(DAC_CHANNEL_1, 0) == ESP_OK &&
-        adc1_config_width(ADC_WIDTH_BIT_12) == ESP_OK &&
-        adc1_config_channel_atten(ADC1_CHANNEL_6, ADC_ATTEN_DB_12) == ESP_OK;
+                             dac_output_voltage(DAC_CHANNEL_1, 0) == ESP_OK &&
+                             adc1_config_width(ADC_WIDTH_BIT_12) == ESP_OK &&
+                             adc1_config_channel_atten(ADC1_CHANNEL_6, ADC_ATTEN_DB_12) == ESP_OK;
     if (_mutex && analogReady)
     {
         // Build the raw-count-to-millivolt conversion using factory eFuse data when
@@ -120,16 +122,17 @@ bool DacGenerator::begin()
     return retVal;
 }
 
-/**
- * @brief Validate settings and start the DAC in one locked transaction.
- * @param frequency Requested cycles per second.
- * @param amplitude Peak excursion above/below the offset, in volts (not peak-to-peak).
- * @param offset Center voltage of the sine wave.
- * @return False without changing settings when validation or initialization fails.
+/* **
+ * start - Validate settings and start the DAC in one locked transaction.
+ * frequency Requested cycles per second. amplitude Peak excursion above/below
+ * the offset, in volts (not peak-to-peak). offset Center voltage of the sine
+ * wave. Returns: False without changing settings when validation or
+ * initialization fails.
  *
- * The minimum/maximum waveform voltages are offset-amplitude and offset+amplitude.
- * Checking their range keeps the entire waveform within the loopback experiment's
- * limits. This is enforced here even when a caller bypasses browser validation.
+ * The minimum/maximum waveform voltages are offset-amplitude and
+ * offset+amplitude. Checking their range keeps the entire waveform within the
+ * loopback experiment's limits. This is enforced here even when a caller
+ * bypasses browser validation.
  */
 bool DacGenerator::start(float frequency, float amplitude, float offset)
 {
@@ -155,7 +158,7 @@ bool DacGenerator::start(float frequency, float amplitude, float offset)
             _offsetVolts = offset;
             _phaseStartUs = esp_timer_get_time();
             _sampleCount = 0;
-            _writeIndex = 0;
+            _iSampleRecord = 0;
             _lastCaptureUs = _phaseStartUs;
             _enabled = true;
             retVal = true;
@@ -169,14 +172,16 @@ bool DacGenerator::start(float frequency, float amplitude, float offset)
     return retVal;
 }
 
-/**
- * @brief Start or stop output from the web task, synchronizing with the worker.
- * @return Whether the analog service was initialized and can accept the command.
+/* **
+ * setEnabled - Start or stop output from the web task, synchronizing with the
+ * worker. Returns: Whether the analog service was initialized and can accept the
+ * command.
  *
  * Repeated Start or Stop requests do not reset an already matching state. Stop
- * requests code zero before returning; Start allows the next worker tick to write a sine
- * sample. Driver write errors are not checked here, so true confirms software
- * acceptance, not measured voltage. The DAC remains electrically enabled.
+ * requests code zero before returning; Start allows the next worker tick to
+ * write a sine sample. Driver write errors are not checked here, so true
+ * confirms software acceptance, not measured voltage. The DAC remains
+ * electrically enabled.
  */
 bool DacGenerator::setEnabled(bool requested)
 {
@@ -191,7 +196,7 @@ bool DacGenerator::setEnabled(bool requested)
             _enabled = requested;
             _phaseStartUs = esp_timer_get_time();
             _sampleCount = 0;
-            _writeIndex = 0;
+            _iSampleRecord = 0;
             _lastCaptureUs = _phaseStartUs;
             // Request zero while holding the lock, so the worker cannot write
             // a stale nonzero command afterward. This driver result is unchecked.
@@ -206,9 +211,10 @@ bool DacGenerator::setEnabled(bool requested)
     return retVal;
 }
 
-/**
- * @brief Wake the worker from ESP's timer-service task without doing analog work here.
- * @param context The generator pointer supplied as args.arg during begin().
+/* **
+ * timerCallback - Wake the worker from ESP's timer-service task without doing
+ * analog work here. context The generator pointer supplied as args.arg during
+ * begin().
  *
  * A static callback has no implicit this pointer. Cast the saved context back to
  * our instance, then increment the worker's notification count. This is a task
@@ -220,13 +226,15 @@ void DacGenerator::timerCallback(void* context)
     xTaskNotifyGive(dacGenerator->_worker);
 }
 
-/**
- * @brief Worker entry point: sleep until notified, then perform one current update.
- * @param context The generator pointer passed when the FreeRTOS task was created.
+/* **
+ * taskEntry - Worker entry point: sleep until notified, then perform one current
+ * update. context The generator pointer passed when the FreeRTOS task was
+ * created.
  *
- * pdTRUE clears all pending notifications on wake. If several ticks arrived while
- * the worker was delayed, it samples once at the current time instead of emitting
- * a burst of stale DAC values. portMAX_DELAY lets it sleep without busy-waiting.
+ * pdTRUE clears all pending notifications on wake. If several ticks arrived
+ * while the worker was delayed, it samples once at the current time instead of
+ * emitting a burst of stale DAC values. portMAX_DELAY lets it sleep without
+ * busy-waiting.
  */
 void DacGenerator::taskEntry(void* context)
 {
@@ -238,13 +246,15 @@ void DacGenerator::taskEntry(void* context)
     }
 }
 
-/**
- * @brief Acquire one ADC reading and write the next DAC sample from the worker task.
+/* **
+ * sample - Acquire one ADC reading and write the next DAC sample from the worker
+ * task.
  *
- * Order matters: measure A2 while the previous A1 code is still held, record that
- * code with the measurement, then advance A1. Pairing the reading with the next code
- * would give the graph an artificial one-update mismatch. nowUs approximates the
- * start of ADC acquisition; conversion and scheduling are not instantaneous.
+ * Order matters: measure A2 while the previous A1 code is still held, record
+ * that code with the measurement, then advance A1. Pairing the reading with the
+ * next code would give the graph an artificial one-update mismatch. nowUs
+ * approximates the start of ADC acquisition; conversion and scheduling are not
+ * instantaneous.
  */
 void DacGenerator::sample()
 {
@@ -276,9 +286,9 @@ void DacGenerator::sample()
         static_cast<int64_t>(2000000.0f / (_frequencyHz * (_historySize - 1))));
     if (nowUs - _lastCaptureUs >= capturePeriodUs)
     {
-        _sampleRecords[_writeIndex] = {static_cast<uint32_t>(nowUs),
+        _sampleRecords[_iSampleRecord] = {static_cast<uint32_t>(nowUs),
             static_cast<uint16_t>(millivolts), _lastCode};
-        _writeIndex = (_writeIndex + 1) % _historySize;
+        _iSampleRecord = (_iSampleRecord + 1) % _historySize;
         _sampleCount = std::min(_sampleCount + 1, _historySize);
         _lastCaptureUs = nowUs;
     }
@@ -302,9 +312,10 @@ void DacGenerator::sample()
     xSemaphoreGive(_mutex);
 }
 
-/**
- * @brief Return settings and graph samples as JSON for the web task's HTTP response.
- * @return A coherent snapshot, or {"ready":false} after initialization failure.
+/* **
+ * getStateJson - Return settings and graph samples as JSON for the web task's
+ * HTTP response. Returns: A coherent snapshot, or {"ready":false} after
+ * initialization failure.
  *
  * First allocate temporary storage, then lock only long enough to copy shared
  * state. Release the lock before formatting numbers and allocating the JSON
@@ -327,9 +338,9 @@ String DacGenerator::getStateJson()
         const size_t count = _sampleCount;
         // The oldest record is count positions behind the next write slot. Modular
         // indexing unwraps the circular buffer into chronological order for the browser.
-        for (size_t i = 0; i < count; ++i)
+        for (size_t iSampleRecord = 0; iSampleRecord < count; ++iSampleRecord)
         {
-            samples[i] = _sampleRecords[(_writeIndex + _historySize - count + i) % _historySize];
+            samples[iSampleRecord] = _sampleRecords[(_iSampleRecord + _historySize - count + iSampleRecord) % _historySize];
         }
         xSemaphoreGive(_mutex);
 
@@ -348,17 +359,16 @@ String DacGenerator::getStateJson()
         retVal += ",\"maxSignalVolts\":" + String(_maxSignalVolts);
         retVal += ",\"sampleRateHz\":" + String(1000000 / _samplePeriodUs);
         retVal += ",\"missedIntervals\":" + String(missed);
-        retVal += ",\"calibration\":\"" + String(_calibrationSource == ESP_ADC_CAL_VAL_DEFAULT_VREF ?
-            "Nominal reference" : "Factory eFuse") + "\",\"samples\":[";
-        for (size_t i = 0; i < count; ++i)
+        retVal += ",\"calibration\":\"" + String(_calibrationSource == ESP_ADC_CAL_VAL_DEFAULT_VREF ? "Nominal reference" : "Factory eFuse") + "\",\"samples\":[";
+        for (size_t iSampleRecord = 0; iSampleRecord < count; ++iSampleRecord)
         {
-            if (i)
+            if (iSampleRecord)
             {
                 retVal += ',';
             }
-            retVal += '[' + String(static_cast<uint32_t>(samples[i]._timeUs - samples[0]._timeUs) / 1000.0f, 3);
-            retVal += ',' + String(samples[i]._command * _nominalSupplyVolts / 255.0f, 3);
-            retVal += ',' + String(samples[i]._millivolts / 1000.0f, 3) + ']';
+            retVal += '[' + String(static_cast<uint32_t>(samples[iSampleRecord]._timeUs - samples[0]._timeUs) / 1000.0f, 3);
+            retVal += ',' + String(samples[iSampleRecord]._command * _nominalSupplyVolts / 255.0f, 3);
+            retVal += ',' + String(samples[iSampleRecord]._millivolts / 1000.0f, 3) + ']';
         }
         retVal += "]}";
     }

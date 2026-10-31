@@ -14,14 +14,14 @@
 
 /**
  * @file RecordingMonitor.h
- * @brief Keep the last fully validated recording status, owned by Feather's loop.
+ * Keep the last fully validated recording status, owned by Feather's loop.
  */
 #pragma once
 #include <Arduino.h>
 #include "RecordingStatus.h"
 
 /**
- * @brief Format receiver recording telemetry without claiming stale data is current.
+ * Format receiver recording telemetry without claiming stale data is current.
  * receiverMonitor commits this object only after validating the entire UART frame.
  * No other task touches it, so it requires no separate mutex.
  */

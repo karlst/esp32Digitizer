@@ -1,5 +1,8 @@
 # Building the firmware
 
+For the standalone, destructive P4 storage workload, see
+[SD file-ring choke test](SD-CHOKE-TEST.md). It has a separate build and needs no Feather.
+
 ## Which tools build which board?
 
 | Folder | Build system | Application framework |

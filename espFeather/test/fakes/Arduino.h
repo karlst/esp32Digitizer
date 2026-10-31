@@ -14,7 +14,7 @@
 
 /**
  * @file Arduino.h
- * @brief Desktop substitutes for testing the actual Feather status parser and JSON.
+ * Desktop substitutes for testing the actual Feather status parser and JSON.
  * Reuse the local fake clock/serial buffers, then add the small String and HardwareSerial
  * interfaces needed by Feather code. This is not a general Arduino implementation.
  * The test runner's include order selects it only for monitorChecks.exe.
@@ -26,34 +26,39 @@
 #define TX 8
 
 /**
- * @brief Provide the small subset of Arduino String used by ReceiverMonitor.cpp.
+ * Provide the small subset of Arduino String used by ReceiverMonitor.cpp.
  */
 class String : public std::string
 {
 public:
     using std::string::string;
 
-    /**
-     * @brief Accept concatenation results from the desktop standard library.
+    /* **
+     * String - Accept concatenation results from the desktop standard library.
      */
-    String(const std::string& value) : std::string(value) {}
+    String(const std::string& value)
+        : std::string(value)
+    {
+    }
 
     /**
-     * @brief Format integer fields as decimal text, as Arduino String does.
+     * Format integer fields as decimal text, as Arduino String does.
      */
-    template<typename T, typename = std::enable_if_t<std::is_integral_v<T>>>
-    String(T value) : std::string(std::to_string(value)) {}
+    template <typename T, typename = std::enable_if_t<std::is_integral_v<T>>>
+    String(T value)
+        : std::string(std::to_string(value))
+    {
+    }
 };
 
 /**
- * @brief Add Arduino's print API to the shared simulated UART.
+ * Add Arduino's print API to the shared simulated UART.
  */
 class HardwareSerial : public FakeSerial
 {
 public:
-
-    /**
-     * @brief Capture an outgoing command without accessing any physical port.
+    /* **
+     * print - Capture an outgoing command without accessing any physical port.
      */
     size_t print(const String& value)
     {

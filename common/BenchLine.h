@@ -14,25 +14,24 @@
 
 /**
  * @file BenchLine.h
- * @brief Assemble serial commands for Feather and P4, one character at a time.
+ * Assemble serial commands for Feather and P4, one character at a time.
  */
 #pragma once
 #include <cstddef>
 
 /**
- * @brief Collect UART characters until newline; discard oversized lines entirely.
+ * Collect UART characters until newline; discard oversized lines entirely.
  * One control task/loop on each board owns its instance, so no lock is required. A true
  * feed() return exposes one complete null-terminated line until the next feed().
  */
 class BenchLine
 {
 public:
-
-    /**
-     * @brief Add a character; true means a nonempty line ended at newline.
-     * Ignore carriage return. Keep at most 383 characters; a longer line is
-     * discarded through its newline, then collection starts fresh. "Valid"
-     * here means it fits, not that its command syntax or contents are correct.
+    /* **
+     * feed - Add a character; true means a nonempty line ended at newline. Ignore
+     * carriage return. Keep at most 383 characters; a longer line is discarded
+     * through its newline, then collection starts fresh. "Valid" here means it fits,
+     * not that its command syntax or contents are correct.
      */
     bool feed(char value)
     {
@@ -58,8 +57,15 @@ public:
         return retVal;
     }
 
-    /** @brief Return the last complete line; caller must use it before feeding more. */
-    const char* getValue() const { return _text; }
+    /* **
+     * getValue - Return the last complete line; caller must use it before feeding
+     * more.
+     */
+    const char* getValue() const
+    {
+        return _text;
+    }
+
 private:
     char _text[384] = {};
     size_t _length = 0;

@@ -17,9 +17,9 @@
 // and polling timer. receiver failures therefore do not disable local DAC controls.
 // Query suffixes identify asset revisions so browsers fetch changed modules after
 // a web-files upload. The legacy blink module is deliberately not initialized.
-import { appendEvent } from "./eventLog.js";
-import { initializeDacControl } from "./dacControl.js?v=20261020-receiver";
-import { initializeReceiverMonitor } from "./receiverMonitor.js?v=20261020-receiver";
+import {appendEvent} from "./eventLog.js";
+import {initializeDacControl} from "./dacControl.js?v=20261020-receiver";
+import {initializeReceiverMonitor} from "./receiverMonitor.js?v=20261020-receiver";
 
 // Module scripts run after the document has been parsed, so the log is ready.
 appendEvent("Browser initialized.");

@@ -96,7 +96,7 @@ void RecordingHarness::command(RecordingApplication& recordingApplication, char 
 #if CONFIG_P4_HARDWARE_SMOKE
     if (key == 'h')
     {
-        printf("SMOKE_P4 version=5 ready=%u seconds=%lu\n",
+        printf("SMOKE_P4 version=8 ready=%u seconds=%lu\n",
             unsigned(recordingApplication.getIdle() && !recordingApplication.isRecordingDestinationLocked() && !_ramMode),
             static_cast<unsigned long>(_seconds));
     }

@@ -14,7 +14,7 @@
 
 /**
  * @file main.cpp
- * @brief Start the Feather web application for the legacy receiver recorder and local DAC.
+ * Start the Feather web application for the legacy receiver recorder and local DAC.
  * This entry point is not used by the P4 test-control builds: PlatformIO selects
  * their separate setup()/loop() in test/hardware/ads127CaptureControl.cpp.
  * Arduino calls setup() once and then loop() repeatedly. webApp performs the
@@ -28,12 +28,14 @@
 // Keep the application alive for the lifetime of the firmware.
 static WebApp webApp;
 
-/**
- * @brief Open USB debug output, print the firmware version, and start the application.
+/* **
+ * setup - Open USB debug output, print the firmware version, and start the
+ * application.
  *
- * The initial half-second delay allows startup output to settle; there is no loop
- * waiting for a USB terminal to connect. The application therefore also starts when
- * powered from the other board. Service failures are reported by webApp and status.
+ * The initial half-second delay allows startup output to settle; there is no
+ * loop waiting for a USB terminal to connect. The application therefore also
+ * starts when powered from the other board. Service failures are reported by
+ * webApp and status.
  */
 void setup()
 {
@@ -49,8 +51,9 @@ void setup()
     webApp.begin();
 }
 
-/**
- * @brief Let webApp process the next available serial message or browser request.
+/* **
+ * loop - Let webApp process the next available serial message or browser
+ * request.
  *
  * Arduino repeatedly calls this function; it is not a new thread on each call.
  * LED timing checks do not sleep, and the DAC timing task runs separately. This

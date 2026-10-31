@@ -12,8 +12,9 @@
  * Public License in the repository LICENSE file or <https://www.gnu.org/licenses/>.
  */
 
-/** @file benchDacLoopback.cpp
- * @brief Measure the existing bench DAC with Feather's own analog input.
+/**
+ * @file benchDacLoopback.cpp
+ * Measure the existing bench DAC with Feather's own analog input.
  * Wiring (power off): A1/GPIO25 to A2/GPIO34; disconnect TI coax for the first
  * test. No ADS127 SPI or UART commands are issued. setup leaves outputs off.
  * USB g starts the SAME benchDac timer/code path used in the P4 test. loop skips
@@ -35,12 +36,14 @@ static bool ready = false, running = false;
 static int64_t startedAt = 0, nextReadAt = 0;
 static uint32_t missedReadSlots = 0;
 
-/** @brief Stop the timer/DAC before USB output; loop alone owns the sample array.
- * The caller passes clean=true only after the timed window ends. The printed
- * clean flag also requires at least 200 readings and no known DAC error. Missed
- * read slots are reported separately; clean does not require zero misses or
- * mean a faithful sine or correct wiring. Independent ADC readings may include
- * noise/nonlinearity. Print actual timestamps, never pretend sampling was exact.
+/* **
+ * finishMeasurement - Stop the timer/DAC before USB output; loop alone owns the
+ * sample array. The caller passes clean=true only after the timed window ends.
+ * The printed clean flag also requires at least 200 readings and no known DAC
+ * error. Missed read slots are reported separately; clean does not require zero
+ * misses or mean a faithful sine or correct wiring. Independent ADC readings may
+ * include noise/nonlinearity. Print actual timestamps, never pretend sampling
+ * was exact.
  */
 static void finishMeasurement(bool clean)
 {
@@ -48,18 +51,20 @@ static void finishMeasurement(bool clean)
     running = false;
     const bool good = clean && !benchDac.getFailed() && pointCount >= 200;
     Serial.printf("LOOP_BEGIN count=%u clean=%u missedReadSlots=%lu\n", pointCount,
-                  unsigned(good), static_cast<unsigned long>(missedReadSlots));
-    for (unsigned index = 0; index < pointCount; ++index)
+        unsigned(good), static_cast<unsigned long>(missedReadSlots));
+    for (unsigned iLoopbackPoint = 0; iLoopbackPoint < pointCount; ++iLoopbackPoint)
     {
-        Serial.printf("LOOP,%lu,%d\n", static_cast<unsigned long>(loopbackPoints[index]._timeUs), loopbackPoints[index]._raw);
+        Serial.printf("LOOP,%lu,%d\n", static_cast<unsigned long>(loopbackPoints[iLoopbackPoint]._timeUs), loopbackPoints[iLoopbackPoint]._raw);
     }
     Serial.println("LOOP_END");
 }
 
-/** @brief Arduino boot initializes a stopped DAC source and 12-bit A2 ADC.
+/* **
+ * setup - Arduino boot initializes a stopped DAC source and 12-bit A2 ADC.
  * Attenuation extends the ADC's input range for the nominal 0.75..1.75 V signal;
  * values are raw 0..4095 counts, not voltage calibration. Configuration errors
- * refuse g. A2 is ADC1 channel 6 on Feather ESP32 V2, confirmed by board mapping.
+ * refuse g. A2 is ADC1 channel 6 on Feather ESP32 V2, confirmed by board
+ * mapping.
  */
 void setup()
 {
@@ -69,18 +74,20 @@ void setup()
     pinMode(A2, INPUT);
     Serial.begin(115200);
     ready = benchDac.initialize() && adc1_config_width(ADC_WIDTH_BIT_12) == ESP_OK &&
-        adc1_config_channel_atten(ADC1_CHANNEL_6, ADC_ATTEN_DB_12) == ESP_OK;
+            adc1_config_channel_atten(ADC1_CHANNEL_6, ADC_ATTEN_DB_12) == ESP_OK;
     delay(500);
     Serial.println("FEATHER DAC LOOPBACK: A1 -> A2 jumper; TI coax disconnected for first test.");
     Serial.println("Same 10 Hz bench DAC. g=start, s=stop. No ADS127 commands; DAC off at boot.");
     Serial.println(ready ? "LOOP READY" : "LOOP initialization FAILED");
 }
 
-/** @brief Arduino loop samples independently while the timer task updates DAC.
+/* **
+ * loop - Arduino loop samples independently while the timer task updates DAC.
  * Read at most once per nominal 1 ms slot, recording actual conversion midpoint
  * time. Skipped slots are counted instead of replaying stale samples. All memory
  * is global, bounded, and owned here; there is no printing during measurement.
- * Stop after the timed window even without a PC reader. USB s aborts immediately.
+ * Stop after the timed window even without a PC reader. USB s aborts
+ * immediately.
  */
 void loop()
 {
@@ -96,15 +103,27 @@ void loop()
                 nextReadAt = startedAt + 1000000;
                 running = true;
             }
-            else { Serial.println("LOOP DAC start FAILED"); }
+            else
+            {
+                Serial.println("LOOP DAC start FAILED");
+            }
         }
-        else if (command == 's' && running) { finishMeasurement(false); }
+        else if (command == 's' && running)
+        {
+            finishMeasurement(false);
+        }
     }
     if (running)
     {
         const int64_t now = esp_timer_get_time();
-        if (benchDac.getFailed()) { finishMeasurement(false); }
-        else if (now - startedAt >= 1300000) { finishMeasurement(true); }
+        if (benchDac.getFailed())
+        {
+            finishMeasurement(false);
+        }
+        else if (now - startedAt >= 1300000)
+        {
+            finishMeasurement(true);
+        }
         else if (now >= nextReadAt)
         {
             missedReadSlots += static_cast<uint32_t>((now - nextReadAt) / 1000);
@@ -112,7 +131,10 @@ void loop()
             const int64_t before = esp_timer_get_time();
             const int value = adc1_get_raw(ADC1_CHANNEL_6);
             const int64_t after = esp_timer_get_time();
-            if (value < 0 || pointCount >= 320) { finishMeasurement(false); }
+            if (value < 0 || pointCount >= 320)
+            {
+                finishMeasurement(false);
+            }
             else
             {
                 loopbackPoints[pointCount++] = {static_cast<uint32_t>((before + after) / 2 - startedAt - 1000000), value};

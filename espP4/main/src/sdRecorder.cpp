@@ -82,8 +82,10 @@ static uint64_t recordingUtc()
 /* **
  * initTask - Allocate recording buffers and start the disk task on Core 0.
  * Startup calls this once. A task is a software thread scheduled by FreeRTOS.
- * This task has a 16 KB stack for its calls and local variables, separate from
- * the 16 MB ring buffer.
+ * xTaskCreatePinnedToCore starts taskEntry with this object as its argument.
+ * 16384 reserves 16 KiB for calls and local variables, separate from the sample
+ * ring. Priority 4 lets it run before ready tasks with lower priorities; it is
+ * not a core number. The final 0 pins it to Core 0. _diskTask receives its handle.
  *
  * Return true when memory and task creation succeed. The task waits for
  * preparation requests; success here does not mean the SD card is ready.
@@ -385,10 +387,11 @@ void SdRecorder::reportProgress(void* context, const char* text)
  * identifies this recorder; offset is the byte position in the original session,
  * including any earlier data that was overwritten.
  *
- * Require continuous offsets and a matching checksum for each retained file.
- * Forward valid bytes to the optional waveform summary and format checker.
- * Return false at the first mismatch. Yield one scheduler tick after each chunk
- * so command handling remains responsive.
+ * Require consecutive byte positions and compare each file's checksum when
+ * its last byte arrives. Forward each accepted chunk to the optional waveform
+ * summary and format checker; a partial chunk is not yet a verified file.
+ * Return false at the first mismatch. Sleep for one scheduling tick after each
+ * chunk so other tasks can handle commands and the watchdog's idle-task check.
  */
 bool SdRecorder::checkReadback(void* context, const uint8_t* data, uint32_t bytes, uint64_t offset)
 {

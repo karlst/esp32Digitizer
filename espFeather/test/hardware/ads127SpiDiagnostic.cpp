@@ -14,7 +14,7 @@
 
 /**
  * @file ads127SpiDiagnostic.cpp
- * @brief Manual, read-only Feather communication test for the new ADC.
+ * Manual, read-only Feather communication test for the new ADC.
  * Arduino calls setup once and loop repeatedly in its main task. No web server,
  * DAC task, Feather-receiver commands or acquisition code is present in this build.
  * Read setup() for the idle pin states, then runCheck() for the manual test.
@@ -28,10 +28,11 @@
 
 // Global construction only stores references. SPI begins on the first USB 'r'.
 static Ads127L18 ads127L18(SPI, ads127Pins::featherClock, ads127Pins::featherMiso,
-                     ads127Pins::featherMosi, ads127Pins::featherSelect);
+    ads127Pins::featherMosi, ads127Pins::featherSelect);
 
-/**
- * @brief Print instructions without changing GPIOs or communicating with the ADC.
+/* **
+ * printHelp - Print instructions without changing GPIOs or communicating with
+ * the ADC.
  */
 static void printHelp()
 {
@@ -41,11 +42,12 @@ static void printHelp()
     Serial.println("No SPI traffic until r. Power-on default SPI CRC must be disabled. No registers are written.");
 }
 
-/**
- * @brief Read identification and status three times and report raw bytes/results.
- * Register 0 is device ID (0x06 for L18); 1 is silicon revision (not fixed);
- * 2 contains diagnostic flags. A stable ID/revision is evidence of this slow
- * command/reply link only, not proof of analog accuracy or high-speed capture.
+/* **
+ * runCheck - Read identification and status three times and report raw
+ * bytes/results. Register 0 is device ID (0x06 for L18); 1 is silicon revision
+ * (not fixed); 2 contains diagnostic flags. A stable ID/revision is evidence of
+ * this slow command/reply link only, not proof of analog accuracy or high-speed
+ * capture.
  */
 static void runCheck()
 {
@@ -58,7 +60,7 @@ static void runCheck()
     {
         uint8_t device = 0, revision = 0, status = 0;
         const bool transferred = ads127L18.readRegister(0x00, device) &&
-            ads127L18.readRegister(0x01, revision) && ads127L18.readRegister(0x02, status);
+                                 ads127L18.readRegister(0x01, revision) && ads127L18.readRegister(0x02, status);
         if (pass == 0)
         {
             firstRevision = revision;
@@ -66,7 +68,7 @@ static void runCheck()
         identityOk = identityOk && transferred && device == 0x06 && revision == firstRevision;
         combinedStatus |= status;
         Serial.printf("Read %u/3: DEV_ID=0x%02X (L18 expected 0x06), REV_ID=0x%02X, STATUS=0x%02X\n",
-                      pass + 1, device, revision, status);
+            pass + 1, device, revision, status);
 
         // Separate observations without flooding the terminal. delay() yields
         // this task; there is no sample producer or interrupt reader to service.
@@ -78,9 +80,9 @@ static void runCheck()
         Serial.println("IDENTITY MATCH: L18 replied consistently at 100 kHz; inspect status below.");
         Serial.printf("Status across reads: analog-low history=%u, reset history=%u, SPI-CRC error=%u, "
                       "register-CRC error=%u, ADC error=%u, address error=%u, clock-count error=%u\n",
-                      !!(combinedStatus & 0x40), !!(combinedStatus & 0x20), !!(combinedStatus & 0x10),
-                      !!(combinedStatus & 0x08), !!(combinedStatus & 0x04), !!(combinedStatus & 0x02),
-                      !!(combinedStatus & 0x01));
+            !!(combinedStatus & 0x40), !!(combinedStatus & 0x20), !!(combinedStatus & 0x10),
+            !!(combinedStatus & 0x08), !!(combinedStatus & 0x04), !!(combinedStatus & 0x02),
+            !!(combinedStatus & 0x01));
         Serial.println("Analog-low and reset flags both default to 1 at power-on (STATUS 0x60).");
         Serial.println("They are history flags, not a live voltage measurement; this test leaves them uncleared.");
         if (combinedStatus & 0x9f)
@@ -96,8 +98,8 @@ static void runCheck()
     Serial.println("READ CHECK END: no start, reset, configuration writes or DAC output requested.");
 }
 
-/**
- * @brief Disable both DAC outputs and leave SPI pins undriven until requested.
+/* **
+ * setup - Disable both DAC outputs and leave SPI pins undriven until requested.
  * DAC is the Feather's analog voltage generator. Disabling it and selecting
  * ordinary inputs stops this firmware from feeding an unpowered ADC analog pin.
  * This describes application startup, not the ROM bootloader's transient states.
@@ -117,10 +119,10 @@ void setup()
     printHelp();
 }
 
-/**
- * @brief Accept one manual diagnostic command; never run on a timer or at boot.
- * Newlines are ignored so the terminal's line-ending setting does not matter.
- * A finite test returns to this loop; there are no automatic retry attempts.
+/* **
+ * loop - Accept one manual diagnostic command; never run on a timer or at boot.
+ * Newlines are ignored so the terminal's line-ending setting does not matter. A
+ * finite test returns to this loop; there are no automatic retry attempts.
  */
 void loop()
 {

@@ -14,7 +14,7 @@
 
 /**
  * @file RecordingStatus.h
- * @brief Recording values shared by receiver storage and Feather's status receiver.
+ * Recording values shared by receiver storage and Feather's status receiver.
  * UART version 5 adds opening time and space quality to version 4 recording fields.
  * Positions are byte offsets; totals and times belong to the current/last recording.
  */
@@ -23,7 +23,7 @@
 #include <cstddef>
 
 /**
- * @brief One consistent snapshot of the card, file writer and sample ring buffer.
+ * One consistent snapshot of the card, file writer and sample ring buffer.
  * Only receiver measures these values. Feather must never invent zero for unavailable
  * firmware or a disconnected board. bytesWritten counts successful file writes,
  * including headers; samplesWritten counts only complete sample payloads.
@@ -32,8 +32,26 @@ struct RecordingStatus
 {
     // State: idle, preparing, recording, saving, saved, failed, deleting.
     // Card: unknown, ready, missing, unsupported filesystem, I/O failure.
-    enum stateCode : uint32_t { idle, preparing, recording, saving, saved, failed, deleting };
-    enum cardCode : uint32_t { unknown, ready, missing, unsupported, ioFailure };
+    enum stateCode : uint32_t
+    {
+        idle,
+        preparing,
+        recording,
+        saving,
+        saved,
+        failed,
+        deleting
+    };
+
+    enum cardCode : uint32_t
+    {
+        unknown,
+        ready,
+        missing,
+        unsupported,
+        ioFailure
+    };
+
     // Version 5 wire representation: 26 unsigned integers in exactly enum field order.
     // No pointers, filename text, or file handles cross between the boards.
     // state/card are numeric labels, enabled is the current/last Start choice.
@@ -51,51 +69,83 @@ struct RecordingStatus
     // writeErrors counts failed measured operations; deletedFiles counts successful
     // removals in the latest delete request, including progress before any failure.
     uint64_t _values[26] = {};
+
     // Numeric field indexes are shared so the two boards cannot quietly disagree
     // about column order. A fixed session/part pair generates the safe filename.
     enum field : size_t
     {
-        state, card, enabled, session, part, elapsedMs, bytesWritten, samplesWritten,
-        cardBytes, freeBytes, bufferBytes, usedBytes, peakBytes, writePosition,
-        readPosition, bytesPerSecond, latestDelayUs, maxDelayUs, maxDelayAtMs,
-        maxDelayKind, overflows, lostSamples, writeErrors, deletedFiles, fileOpenUs, freeSpaceMode
+        state,
+        card,
+        enabled,
+        session,
+        part,
+        elapsedMs,
+        bytesWritten,
+        samplesWritten,
+        cardBytes,
+        freeBytes,
+        bufferBytes,
+        usedBytes,
+        peakBytes,
+        writePosition,
+        readPosition,
+        bytesPerSecond,
+        latestDelayUs,
+        maxDelayUs,
+        maxDelayAtMs,
+        maxDelayKind,
+        overflows,
+        lostSamples,
+        writeErrors,
+        deletedFiles,
+        fileOpenUs,
+        freeSpaceMode
     };
+
     static constexpr size_t _legacyFieldCount = 24;
     static constexpr size_t _fieldCount = 26;
+
     // 0 unavailable/older firmware, 1 measured, 2 estimated during recording,
     // 3 stale after a failed scan. A stale number is never labeled measured.
-    enum spaceCode : uint32_t { spaceUnknown, spaceMeasured, spaceEstimated, spaceStale };
+    enum spaceCode : uint32_t
+    {
+        spaceUnknown,
+        spaceMeasured,
+        spaceEstimated,
+        spaceStale
+    };
 
-    /**
-     * @brief Return the JSON key for one numeric UART column.
+    /* **
+     * getFieldName - Return the JSON key for one numeric UART column.
      * recordingMonitor uses this to convert a numeric wire column into a browser
-     * JSON property. index must be less than fieldCount; this internal helper does
+     * JSON property. iField must be less than _fieldCount; this internal helper does
      * not check bounds. The returned name points to permanent text, not new memory.
      */
-    static const char* getFieldName(size_t index)
+    static const char* getFieldName(size_t iField)
     {
         static const char* const names[_fieldCount] = {
             "state", "card", "enabled", "session", "part", "elapsedMs", "bytesWritten", "samplesWritten",
             "cardBytes", "freeBytes", "bufferBytes", "usedBytes", "peakBytes", "writePosition",
             "readPosition", "bytesPerSecond", "latestDelayUs", "maxDelayUs", "maxDelayAtMs",
-            "maxDelayKind", "overflows", "lostSamples", "writeErrors", "deletedFiles", "fileOpenUs", "freeSpaceMode"
-        };
-        const char* retVal = names[index];
+            "maxDelayKind", "overflows", "lostSamples", "writeErrors", "deletedFiles", "fileOpenUs", "freeSpaceMode"};
+        const char* retVal = names[iField];
         return retVal;
     }
 
-    /**
-     * @brief Reject impossible combinations before exposing a received snapshot.
+    /* **
+     * valid - Reject impossible combinations before exposing a received snapshot.
      * Counts are unsigned 64-bit; positions and capacity are restricted to 32-bit
-     * aligned byte offsets. Empty buffers use zero positions, never division by zero.
+     * aligned byte offsets. Empty buffers use zero positions, never division by
+     * zero.
      *
-     * Feather calls this on a temporary parsed frame BEFORE accepting its values.
-     * It rejects impossible states and buffer geometry; it does not confirm that the
-     * card is physically present or that receiver's counters are truthful measurements.
-     * The % 4 rules belong to today's four-byte sample format. A future packed format
-     * must deliberately update both boards' validation rather than silently fail.
-     * Full and empty rings may both have equal read/write offsets; usedBytes tells
-     * which one it is. We therefore check position bounds, not require read < write.
+     * Feather calls this on a temporary parsed frame BEFORE accepting its values. It
+     * rejects impossible states and buffer geometry; it does not confirm that the
+     * card is physically present or that receiver's counters are truthful
+     * measurements. The % 4 rules belong to today's four-byte sample format. A
+     * future packed format must deliberately update both boards' validation rather
+     * than silently fail. Full and empty rings may both have equal read/write
+     * offsets; usedBytes tells which one it is. We therefore check position bounds,
+     * not require read < write.
      */
     bool valid() const
     {
@@ -103,13 +153,12 @@ struct RecordingStatus
         // are already unsigned, so validation focuses on limits and relationships.
         const auto* v = _values;
         const bool retVal = v[state] <= deleting && v[card] <= ioFailure && v[enabled] <= 1 &&
-            v[session] <= UINT32_MAX && v[part] <= UINT32_MAX && v[maxDelayKind] <= 2 &&
-            v[freeSpaceMode] <= spaceStale && v[freeBytes] <= v[cardBytes] && v[bufferBytes] <= UINT32_MAX &&
-            v[usedBytes] <= v[peakBytes] && v[peakBytes] <= v[bufferBytes] &&
-            v[bufferBytes] % 4 == 0 && v[usedBytes] % 4 == 0 &&
-            v[writePosition] % 4 == 0 && v[readPosition] % 4 == 0 &&
-            (v[bufferBytes] ? v[writePosition] < v[bufferBytes] && v[readPosition] < v[bufferBytes] :
-                v[writePosition] == 0 && v[readPosition] == 0);
+                            v[session] <= UINT32_MAX && v[part] <= UINT32_MAX && v[maxDelayKind] <= 2 &&
+                            v[freeSpaceMode] <= spaceStale && v[freeBytes] <= v[cardBytes] && v[bufferBytes] <= UINT32_MAX &&
+                            v[usedBytes] <= v[peakBytes] && v[peakBytes] <= v[bufferBytes] &&
+                            v[bufferBytes] % 4 == 0 && v[usedBytes] % 4 == 0 &&
+                            v[writePosition] % 4 == 0 && v[readPosition] % 4 == 0 &&
+                            (v[bufferBytes] ? v[writePosition] < v[bufferBytes] && v[readPosition] < v[bufferBytes] : v[writePosition] == 0 && v[readPosition] == 0);
         return retVal;
     }
 };

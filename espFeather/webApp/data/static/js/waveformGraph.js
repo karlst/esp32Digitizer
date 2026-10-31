@@ -69,7 +69,8 @@ export function drawWaveform(canvas, state)
     {
         const x = left + plotWidth * tick / 4;
         context.fillStyle = "#555";
-        context.textAlign = tick === 0 ? "left" : tick === 4 ? "right" : "center";
+        context.textAlign = tick === 0 ? "left" : tick === 4 ? "right"
+                                                             : "center";
         context.fillText(`${(durationMs * tick / 4).toFixed(durationMs < 100 ? 1 : 0)}`, x, height - 14);
     }
     context.textAlign = "center";
@@ -83,18 +84,17 @@ export function drawWaveform(canvas, state)
     context.clip();
     // Record columns 1 and 2 select commanded and measured voltage respectively.
     // Solid blue and dashed orange distinguish them without changing their data.
-    for (let trace = 1; trace <= 2; trace += 1)
+    for (let iTrace = 1; iTrace <= 2; iTrace += 1)
     {
-        context.strokeStyle = trace === 1 ? "#1859b5" : "#b74e0b";
-        context.setLineDash(trace === 1 ? [] : [5, 3]);
+        context.strokeStyle = iTrace === 1 ? "#1859b5" : "#b74e0b";
+        context.setLineDash(iTrace === 1 ? [] : [ 5, 3 ]);
         context.lineWidth = 1.6;
         context.beginPath();
-        samples.forEach((sample, index) =>
-        {
+        samples.forEach((sample, iSample) => {
             // Both values share the ADC capture timestamp supplied by the firmware.
             const x = left + (sample[0] - startMs) / durationMs * plotWidth;
-            const y = top + (1 - sample[trace] / 3.3) * plotHeight;
-            if (index === 0)
+            const y = top + (1 - sample[iTrace] / 3.3) * plotHeight;
+            if (iSample === 0)
             {
                 context.moveTo(x, y);
             }

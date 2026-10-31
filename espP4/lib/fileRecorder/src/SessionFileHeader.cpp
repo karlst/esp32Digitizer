@@ -2,9 +2,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 /**
  * @file SessionFileHeader.cpp
- * Encode/decode the stable header prefix and session metadata with a checksum.
+ * Write header fields to fixed byte positions and read them back for validation.
+ * encode creates the bytes; decode reads and checks them. The in-memory C++
+ * struct is never written directly, so compiler padding cannot change the file.
  * Bytes 0–50 contain version, length, UTC text and Karl's message. Metadata begins
- * at 64; bytes 508–511 hold CRC32 of bytes 0–507. All integers are little-endian.
+ * at 64; bytes 508–511 hold CRC32, a checksum of bytes 0–507. Integers are
+ * little-endian: the least significant byte is stored first.
  */
 #include "SessionFileHeader.h"
 #include <cstring>

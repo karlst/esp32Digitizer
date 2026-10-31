@@ -14,7 +14,7 @@
 
 /**
  * @file BufferedWriter.h
- * Reusable byte recording with an owned ring buffer and measured disk delays.
+ * Hold submitted bytes in a ring buffer until storage writes finish; measure write delays.
  */
 #pragma once
 #include "ByteSink.h"
@@ -40,8 +40,9 @@ static_assert(ATOMIC_INT_LOCK_FREE == 2 && ATOMIC_BOOL_LOCK_FREE == 2,
  * space is released only after the entire write succeeds, so incoming data
  * cannot overwrite bytes still in use.
  *
- * Exactly one task may submit and one may pump. Atomic positions let the two
- * tasks share progress safely across cores. Stop submissions before start or
+ * A task is a separately scheduled software thread. Exactly one may submit and
+ * one may pump. Atomic read/write positions let them share progress across cores
+ * without seeing half-updated counters. Stop submissions before start or
  * finish. Other tasks must read statistics through a safely copied snapshot.
  *
  * The default build keeps the buffer in internal RAM and permits submission from
@@ -54,8 +55,10 @@ static_assert(ATOMIC_INT_LOCK_FREE == 2 && ATOMIC_BOOL_LOCK_FREE == 2,
 class BufferedWriter
 {
 public:
-    // Configuration is in bytes; power-of-two capacity permits cheap wraparound.
-    // All translation units must use the same build flags (including consumers).
+    // Sizes are bytes. A power-of-two capacity lets the position calculation
+    // wrap from the end of the array back to its start using a bit mask.
+    // Every compiled source using this class must receive the same size flags,
+    // or its view of the object's memory layout would disagree with the writer.
     static constexpr uint32_t _capacity = BUFFERED_WRITER_CAPACITY;
     static constexpr uint32_t _blockBytes = BUFFERED_WRITER_BLOCK_BYTES;
     static_assert(_capacity && !(_capacity & (_capacity - 1)) && _capacity < 0x80000000u,
@@ -99,8 +102,9 @@ public:
         // measured storage calls; neither counter estimates every possible physical loss.
         uint32_t _overflows = 0, _errors = 0;
     };
-    // Stop remains the recording default. DropIncoming is for callers that
-    // explicitly account for missing data and permit a discontinuous stream.
+    // stop is this library's default. FileRecordingBackend explicitly chooses
+    // dropIncoming: reject a batch when full, count the loss, and accept later
+    // batches once writes free space. The recording then contains missing data.
     enum class OverflowPolicy
     {
         stop,
@@ -134,7 +138,8 @@ private:
 
     // Monotonic unsigned counters wrap naturally. Their difference is occupied
     // bytes (at most capacity); masking gives a physical position in the ring.
-    // Producer writes head/peak/rejected; consumer writes tail. Atomic means the
+    // The submitting task writes head/peak/rejected; the disk task writes tail.
+    // These are also called the producer and consumer. Atomic means the
     // other CPU cannot observe half of an update. This does NOT make an entire
     // operation atomic; correctness also depends on exactly one producer/consumer.
     std::atomic<uint32_t> _head{0}, _tail{0}, _peak{0}, _rejected{0};

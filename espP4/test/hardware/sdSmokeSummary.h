@@ -14,11 +14,14 @@
 
 /**
  * @file SdSmokeSummary.h
- * Summarize actual SD readback bytes for selectable-duration hardware tests.
- * The SD writer task owns this object after capture stops. accept() receives
- * only bytes returned by f_read, never the live decoder or its RAM samples.
- * Each bin is a 100-ms arithmetic average; all bytes still undergo the normal
- * recorder checksum check. This class does not decide analog accuracy.
+ * Calculate waveform and noise statistics from samples read back from SD.
+ * SdRecorder's disk task (a separately scheduled thread) calls this object after
+ * recording stops. accept receives bytes returned by f_read, not live samples.
+ * A bin is a 100 ms group of samples. For each bin, save its count, sum, smallest
+ * and largest reading, and information needed to calculate variance. The PC
+ * selects flat high/low sections after locating the voltage transitions.
+ * The recorder separately checks the readback checksums. This class does not
+ * decide whether the measured voltage is accurate or impose a noise limit.
  */
 #pragma once
 #include "RecordingReadback.h"
@@ -26,11 +29,18 @@
 #include <cstdint>
 
 /**
- * Fixed-memory, streaming parser for signed three-byte ADC samples.
- * reset(), accept(), report() are called in that order by sdRecorder::finishFile.
- * A partial sample survives read boundaries: FF FF followed by FF means -1.
+ * Reconstruct signed ADC readings, each stored as three bytes, during readback.
+ * SdRecorder::finishFile calls beginRange, which resets the counters, then calls
+ * accept through its readback callback, and finally report to print the results.
+ * A reading may span two calls: bytes FF FF at the end of one read followed by
+ * FF in the next read form the signed reading -1.
  * At most 801 bins cover the retained 80 seconds plus a partial bin.
- * No allocation or hardware access occurs; the caller owns read-buffer memory.
+ * Save 128 consecutive readings at the center of each of the first 40 bins.
+ * A second 5120-sample window covers five ms one second into retained data.
+ * Extra fixed storage is about 63 KiB, in this test-only object; no ring-buffer
+ * memory is consumed and no sample statistics run during acquisition.
+ * This object neither allocates memory nor accesses hardware. It uses each
+ * supplied read buffer only during accept; SdRecorder may reuse it afterwards.
  */
 class SdSmokeSummary : public RecordingReadback
 {
@@ -40,10 +50,32 @@ public:
     void accept(const uint8_t* data, size_t bytes);
     bool getComplete() const;
     double getMean(unsigned iBin) const;
+    double getSquaredDeviations(unsigned iBin) const;
+    int32_t getMinimum(unsigned iBin) const;
+    int32_t getMaximum(unsigned iBin) const;
+    int32_t getTraceSample(unsigned iBin, unsigned iSample) const;
+    int32_t getWaveformSample(unsigned iSample) const;
     uint64_t getSampleCount() const;
     void report(uint32_t run, bool storageClean) const;
 
 private:
+    // Five milliseconds at the test's 1,024,000 samples/s. Read one second
+    // into retained SD data, after startup; retain consecutive samples, not averages.
+    static constexpr unsigned _waveformSamples = 5120;
+    static constexpr unsigned _reportChunkSamples = 64;
+    int32_t _waveform[_waveformSamples] = {};
+    unsigned _waveformCount = 0;
+
+    // Forty 100 ms bins cover two cycles of the 0.5 Hz test signal, so short
+    // traces can show both levels even when recording begins mid-cycle.
+    // Each trace holds 128 consecutive readings starting at the bin center.
+    static constexpr unsigned _traceBins = 40;
+    static constexpr unsigned _traceSamples = 128;
+    int32_t _traces[_traceBins][_traceSamples] = {};
+    unsigned _traceCounts[_traceBins] = {};
+    int32_t _origins[801] = {}, _minimums[801] = {}, _maximums[801] = {};
+    int64_t _deltaSums[801] = {};
+    double _deltaSquares[801] = {};
     int64_t _sums[801] = {};
     uint32_t _counts[801] = {};
     uint64_t _samples = 0;

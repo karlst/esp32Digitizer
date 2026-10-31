@@ -14,14 +14,14 @@
 
 /**
  * @file Ads127LowRate.h
- * @brief Selectable ADC bench configurations, independent of capture success.
+ * Selectable ADC bench configurations, independent of capture success.
  */
 #pragma once
 #include "Ads127Config.h"
 #include "Ads127L18.h"
 
 /**
- * @brief Configure channel zero's selected bench input and control conversions.
+ * Configure channel zero's selected bench input and control conversions.
  * Called only by the Feather diagnostic's Arduino task. The ADC driver owns
  * SPI transfers; this class owns their sequence and checks configuration readback.
  * No output starts at construction or configuration time. A separate start()
@@ -35,6 +35,7 @@ public:
     bool start();
     bool stop();
     bool reportStatus(const char* phase);
+
 private:
     Ads127L18& _ads127L18;
     bool _configured = false;

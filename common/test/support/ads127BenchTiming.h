@@ -14,7 +14,7 @@
 
 /**
  * @file ads127BenchTiming.h
- * @brief Shared finite-run timing for the ADC controller and P4 receiver.
+ * Shared finite-run timing for the ADC controller and P4 receiver.
  * ADS127_HARDWARE_SMOKE selects 30/35 seconds for the SD smoke test.
  * ADS127_P4_ENDURANCE selects 30 minutes; ADS127_P4_LONG_RUN retains 60 seconds.
  * The historical short diagnostic build retains its five-second run/eight-second
@@ -47,6 +47,6 @@ static_assert(receiverTimeoutMs >= runMs + 3000, "Receiver deadline needs handsh
 // 32-bit to preserve the per-sample decoder cost. Bound these at the receiver
 // deadline with 10% clock margin; future longer runs require another review.
 static_assert(uint64_t{1126400} * receiverTimeoutMs / 1000 < UINT32_MAX,
-              "Extend sample counters before increasing duration");
+    "Extend sample counters before increasing duration");
 static_assert(receiverTimeoutMs < 0x80000000U, "Keep millisecond wrap subtraction bounded");
-}
+} // namespace ads127BenchTiming

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 /**
  * @file FileRecordingBackend.h
- * Reusable session recorder: owned ring, preallocated file pool and readback.
+ * Keep incoming sample bytes in RAM, write preallocated files, and read them back.
  */
 #pragma once
 #include "BufferedWriter.h"
@@ -16,11 +16,13 @@
 
 /**
  * Hold incoming data in a ring buffer and write it to a prepared pool of files.
- * One task submits bytes; a separate disk task calls prepForRecording, pump and finishRecording.
+ * A task is a separately scheduled software thread. One task submits bytes;
+ * another calls prepForRecording, pump and finishRecording to manage the disk.
  * The application creates these tasks, not this class.
  *
- * prepForRecording waits for disk setup and returns true only when ready. copyToRingBuffer copies
- * bytes into RAM without waiting for disk writes. The ring contains sample data
+ * prepForRecording waits for disk setup and returns true only when ready.
+ * copyToRingBuffer copies bytes into RAM without waiting for disk writes.
+ * The ring contains sample data
  * only; this backend writes the file headers separately.
  *
  * Count rejected input and store the final loss total in retained headers after
@@ -98,7 +100,9 @@ private:
     void* _progressContext = nullptr;
 
     /**
-     * Keep the path and current header for one selected recording file.
+     * One Slot object describes one selected recording file: its path, current
+     * header and whether this session has written to it. _slots holds these
+     * objects in writing order; _iSlot is the index of the current file.
      * _writtenThisSession distinguishes files changed by this run from files that
      * must be preserved.
      */

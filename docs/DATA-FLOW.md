@@ -19,9 +19,9 @@ flowchart TD
     Private -->|queue the block address| Ready[readyBlocks queue]
     Ready --> Decode[Core 1: SampleDecoder calls FrameDecoder.feed]
     Decode -->|complete sample batches| Pack[SdRecorder.submitSamples: pack 3 bytes per sample]
-    Pack -->|BufferedWriter.submit copies bytes| Ring[4 MiB PSRAM ring]
-    Ring -->|Core 0: BufferedWriter.pump| Scratch[SdRecorder.write: copy slices to 16 KiB internal RAM]
-    Scratch -->|f_write| SD[SD file]
+    Pack -->|FileRecordingBackend.copyToRingBuffer / BufferedWriter.submit copy bytes| Ring[16 MiB PSRAM ring]
+    Ring -->|Core 0: BufferedWriter.pump| Scratch[FileRecordingBackend.write: copy slices to 16 KiB internal RAM]
+    Scratch -->|f_write| SD[Preallocated SD files with standard headers]
     Decode -->|return block address after reading| Free[freeBlocks queue]
     Free --> Private
     SD -->|f_read after capture| Verify[Checksum and optional readback observer]
@@ -50,11 +50,12 @@ flowchart TD
    to the application's selected destination.
    Ordinary recording uses `SdCaptureDestination` and `SdRecorder::submitSamples`.
 6. `recordingFormat::packSamples` removes the status byte and stores the sample
-   as three little-endian bytes. `BufferedWriter::submit` copies those bytes into
+   as three little-endian bytes. `FileRecordingBackend::copyToRingBuffer` calls
+   `BufferedWriter::submit`, which copies those bytes into
    its owned ring. It never performs disk I/O or waits for a disk write. A full
    ring rejects the batch and records a failure.
-7. The disk task on Core 0 calls `BufferedWriter::pump`. That calls
-   `SdRecorder::write`, which copies slices into internal scratch RAM and calls
+7. The disk task on Core 0 calls `FileRecordingBackend::pump`, then
+   `BufferedWriter::pump`. That calls `FileRecordingBackend::write`, which copies slices into internal scratch RAM and calls
    **`f_write` to write the file**. Ring space is released only after that write
    succeeds. A failed or partial write remains an explicit recording failure.
 
@@ -74,10 +75,13 @@ a null marker behind the queued raw blocks. Core 1 processes those blocks and
 signals completion through a semaphore. Only then may Core 0 inspect decoder
 state and ask the recorder to finish.
 
-The disk task drains pending bytes, truncates the unused reservation, and uses
-**`f_read`** to read the entire stored payload. It compares the readback CRC32
-checksum with the checksum accumulated when samples were accepted. It then
-writes the final header, synchronizes and closes the file.
+The disk task drains pending bytes, finalizes standard headers, and closes the
+files. It retains their preallocated sizes. `FileRecordingBackend::verify` uses
+**`f_read`** to check headers and read valid payloads in saved-stream order.
+`SdRecorder::checkReadback` checks continuity and compares the combined CRC32
+checksum/count with the bytes accepted from the decoder. Any overwritten beginning
+or missing bytes fails this full-stream check. Current ADC startup selects
+add-files/stop-when-full, preserving the whole session rather than reusing it.
 
 - **READY**: receiver setup succeeded; no proof of arriving data.
 - **DONE**: reception stopped; the SD file may still be saving.
@@ -93,8 +97,9 @@ Both startups use `RecordingController` for console/Feather commands and
 the `RecordingReporter` interface, with `ConsoleRecordingReporter` for terminal output. Test startup adds `RecordingHarness`, which owns the SD test generator, optional
 RAM summary and decoder timings; the profiling build also adds `CaptureProfile`.
 The recorder accepts a `RecordingLayout` policy and optional `RecordingReadback`
-observer. The normal layout is the ADC file format; the synthetic test supplies
-its own known-pattern layout. Neither requires a copied recorder implementation.
+observer. The layout supplies sample size and optional payload checks; the backend
+always supplies standard session headers. The synthetic test supplies known-pattern
+payload checks. Neither requires a copied recorder implementation.
 
 For RAM inspection, `RamCaptureDestination` replaces the SD destination before
 capture. It summarizes samples and later prints them; it does not save each sample.

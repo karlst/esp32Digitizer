@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 /**
  * @file RetainedPayloadChecksums.h
- * Expected checksums of accepted bytes surviving circular file reuse.
+ * Check that samples accepted into RAM match the files still present after recording.
  */
 #pragma once
 #include <cstdint>
@@ -10,7 +10,8 @@
 #include <vector>
 
 /**
- * Calculate expected checksums from the data accepted into the ring, then
+ * A checksum is a compact value calculated from a byte sequence. Calculate
+ * expected checksums from the data accepted into the ring, then
  * compare them with data read back from SD. Keep one checksum for each file;
  * reset it whenever that file is reused. This lets verification check the data
  * still retained after circular recording.

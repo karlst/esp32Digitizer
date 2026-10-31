@@ -12,9 +12,11 @@
 
 """Run the opt-in Feather/P4 hardware smoke firmware; preserve logs and report PASS/FAIL.
 
-Karl runs this after uploads, with both boards reset, ADC powered, A1->A2 jumper,
-DAC-to-ADC coax and an SD card installed. This opens COM ports and starts one
-recording; it never builds, uploads, formats, or deletes existing recordings.
+Karl runs this after uploads, with both boards reset, ADC powered and SD installed.
+Ordinary mode uses the Feather DAC and A1->A2 jumper. --external requires the
+dedicated Feather build and a powered external generator connected to CH0.
+This opens COM ports and starts one recording; it never builds, uploads, formats,
+or deletes existing recordings. Generator power/output remain manual.
 """
 import argparse
 import json
@@ -27,21 +29,29 @@ from captureComparison import readPort
 from hardwareSmokeReport import analyze, summary
 
 
-def capture(featherPort, p4Port, output, seconds=30, linkOnly=False):
+def capture(featherPort, p4Port, output, seconds=30, linkOnly=False, scopeLevels=None, frequencyHz=0.5):
     """Identify both idle firmwares, prepare SD, capture once and validate readback.
 
-    Two reader threads drain USB concurrently; this thread alone sends commands
-    and writes logs. Opening ports holds DTR/RTS low rather than deliberately
-    resetting boards. Identity checks happen before SD preparation or ADC start.
-    A failed PC run requests Feather stop; board-local selected-duration and duration-plus-five-second limits remain the
-    fallback if USB is lost. Timeouts are failures, never evidence of safe removal
-    while the card may still be draining. Keep the card installed after an abort.
+    A reader thread for each board collects USB serial output while this thread
+    sends commands and saves logs. DTR/RTS, serial control lines that can reset a
+    board, are held low when opening the ports. Check firmware identity before
+    preparing SD files or starting the ADC.
+
+    On failure, request a stop through the Feather. If USB communication is lost,
+    the Feather's selected run duration and the P4's duration-plus-five-seconds
+    timeout provide fallback stops. A PC timeout does not prove queued SD writes
+    have finished; keep the card installed after an aborted test.
     """
+    if frequencyHz not in (0.5, 1000) or (frequencyHz == 1000 and scopeLevels is None):
+        raise ValueError('1 kHz requires external-generator mode')
     import serial
     if seconds not in (30, 300, 600):
         raise ValueError('Duration must be 30, 300 or 600 seconds')
     if featherPort.upper() == p4Port.upper():
         raise ValueError('Feather and P4 must use different ports')
+    if scopeLevels is not None:
+        from externalGeneratorReport import validateLevels
+        validateLevels(scopeLevels)
     session = output / time.strftime('%Y%m%d-%H%M%S')
     session.mkdir(parents=True, exist_ok=False)
     ports, logs, threads = {}, {}, []
@@ -123,17 +133,20 @@ def capture(featherPort, p4Port, output, seconds=30, linkOnly=False):
                 logs[name].flush()
                 if line.startswith('READER_ERROR'):
                     raise ValueError(name + ' USB connection failed')
+                if 'task_wdt:' in line or 'Task watchdog got triggered' in line:
+                    raise ValueError(name + ' watchdog reported a task running too long; serial report may be interrupted. See its board log.')
                 if any(marker in line for marker in ('Guru Meditation Error', 'ESP-ROM:', 'Rebooting...', 'abort() was called')):
                     raise ValueError(name + ' crashed or rebooted; see its log')
                 if 'ready=0' in line and line.startswith('SMOKE_'):
                     raise ValueError(name + ' is not ready; reset both boards before retrying')
                 if phase == 'identity':
                     expected = 'SMOKE_FEATHER' if name == 'Feather' else 'SMOKE_P4'
-                    version = 4 if name == 'Feather' else 5
-                    if re.fullmatch(expected + rf' version={version} ready=1 seconds=(30|300|600)', line):
+                    version = (6 if scopeLevels is not None else 4) if name == 'Feather' else (8 if frequencyHz == 1000 else (7 if scopeLevels is not None else 5))
+                    compatibleP4 = name == 'P4' and (re.fullmatch(r'SMOKE_P4 version=8 ready=1 seconds=(30|300|600)', line) or (frequencyHz == 0.5 and scopeLevels is None and re.fullmatch(r'SMOKE_P4 version=7 ready=1 seconds=(30|300|600)', line)))
+                    if re.fullmatch(expected + rf' version={version} ready=1 seconds=(30|300|600)', line) or compatibleP4:
                         ready.add(name)
                     elif line.startswith(expected + ' version='):
-                        raise ValueError('Upload current hardware-smoke firmware (Feather version 4, P4 version 5)')
+                        raise ValueError(f'Wrong {name} firmware: expected version {version}; received {line}')
                     if len(ready) == 2:
                         # Arm receive diagnostics first so the probe cannot arrive
                         # before raw-byte reporting starts. No storage is touched.
@@ -223,23 +236,33 @@ def capture(featherPort, p4Port, output, seconds=30, linkOnly=False):
                                'Test already pending/running')
                     if name == 'Feather' and line.startswith(refused):
                         raise ValueError('ADC capture could not start; check the Feather log')
-                    if name == 'Feather' and line.startswith('INPUT_END run='):
+                    if name == 'Feather' and line.startswith('EXTERNAL_END run=' if scopeLevels is not None else 'INPUT_END run='):
                         ended.add(name)
                     if name == 'P4' and line.startswith('SMOKE_SD_END run='):
                         ended.add(name)
                     finished = len(ended) == 2
-        result = analyze('\n'.join(records['Feather']), '\n'.join(records['P4']),
-                         showProgress, session / 'comparison.html')
+        if scopeLevels is None:
+            result = analyze('\n'.join(records['Feather']), '\n'.join(records['P4']),
+                             showProgress, session / 'comparison.html')
+        else:
+            from hardwareSmokeRetainedReport import analyzeRetained
+            result = analyzeRetained('\n'.join(records['Feather']), '\n'.join(records['P4']),
+                                     showProgress, session / 'comparison.html', scopeLevels, frequencyHz)
         (session / 'result.json').write_text(json.dumps(result, indent=2), encoding='utf-8')
         report = summary(result)
         if result['calibration'].startswith('ESTIMATE'):
             report += '\nInput voltage uses nominal calibration; absolute accuracy is limited.'
         (session / 'result.txt').write_text(report + '\n', encoding='utf-8')
         print(summary(result, includeChecks=False))
+        if not result['passed']:
+            raise ValueError('External waveform checks failed; see comparison.html and result.json')
         if result['calibration'].startswith('ESTIMATE'):
             print('Input voltage uses nominal calibration; absolute accuracy is limited.')
     except BaseException as error:
-        (session / 'result.txt').write_text('\n'.join(confirmed + ['FAIL: ' + (str(error) or 'Interrupted')]) + '\n', encoding='utf-8')
+        # Preserve the full measured error report when the waveform failed after
+        # analysis; early failures have only the checks established so far.
+        if not (session / 'result.txt').exists():
+            (session / 'result.txt').write_text('\n'.join(confirmed + ['FAIL: ' + (str(error) or 'Interrupted')]) + '\n', encoding='utf-8')
         raise
     finally:
         feather = ports.get('Feather')
@@ -259,6 +282,8 @@ def capture(featherPort, p4Port, output, seconds=30, linkOnly=False):
         if (session / 'comparison.html').exists():
             print('Plot:', (session / 'comparison.html').resolve())
         print('Logs:', session.resolve())
+        if scopeLevels is not None:
+            print('Rigol output remains under manual control; switch it off before removing ADC power.')
 
 
 def main():
@@ -267,11 +292,31 @@ def main():
     parser.add_argument('--feather', default='COM4')
     parser.add_argument('--p4', default='COM3')
     parser.add_argument('--seconds', type=int, choices=(30, 300, 600), help='Omit to select duration from a menu')
+    parser.add_argument('--external', action='store_true', help='Use external-generator Feather firmware; DAC stays disabled')
+    parser.add_argument('--frequency', type=float, choices=(0.5, 1000), default=0.5, help='External square-wave frequency in Hz')
+    parser.add_argument('--scope-low', type=float, help='Measured scope Vbase in volts')
+    parser.add_argument('--scope-high', type=float, help='Measured scope Vtop in volts')
     parser.add_argument('--link-only', action='store_true', help='Check serial link only; do not start ADC or prepare SD')
     parser.add_argument('--output', type=Path, default=Path('captures/hardware-smoke'))
     args = parser.parse_args()
     result = 0
     try:
+        if args.frequency == 1000 and not args.external:
+            raise ValueError('--frequency 1000 requires --external')
+        scopeLevels = None
+        if args.external:
+            from externalGeneratorReport import validateLevels
+            low = args.scope_low
+            high = args.scope_high
+            if low is None:
+                low = float(input('Scope Vbase (low), volts: '))
+            if high is None:
+                high = float(input('Scope Vtop (high), volts: '))
+            validateLevels((low, high))
+            scopeLevels = (low, high)
+            print('External source: Feather DAC disabled; generator is controlled manually.')
+        elif args.scope_low is not None or args.scope_high is not None:
+            raise ValueError('Scope readings require --external')
         seconds = args.seconds
         if args.link_only and seconds is None:
             seconds = 30  # Unused by the probe; bypass the recording-duration menu.
@@ -281,7 +326,7 @@ def main():
                 seconds = {'1': 30, '2': 300, '3': 600}.get(input('Select [1/2/3]: ').strip())
                 if seconds is None:
                     print('Enter 1, 2 or 3.')
-        capture(args.feather, args.p4, args.output, seconds, args.link_only)
+        capture(args.feather, args.p4, args.output, seconds, args.link_only, scopeLevels, args.frequency)
     except (OSError, ValueError, ImportError, KeyboardInterrupt) as error:
         print('FAIL:', str(error) or 'Interrupted')
         print('Keep the SD card installed if recording/readback was interrupted.')

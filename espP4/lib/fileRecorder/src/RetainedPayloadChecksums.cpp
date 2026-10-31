@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 /**
  * @file RetainedPayloadChecksums.cpp
- * Follow the backend's byte-count boundaries without copying sample data.
+ * Track a checksum for each file using the same byte capacities as the backend.
+ * Read prepare, accept, beginReadback, check and getVerified in that order.
+ * This retains checksums and positions, not another copy of the samples.
  */
 #include "RetainedPayloadChecksums.h"
 #include <algorithm>
@@ -33,8 +35,9 @@ bool RetainedPayloadChecksums::prepare(const std::vector<uint64_t>& capacities, 
 
 /* **
  * accept - Update checksums from the bytes actually accepted into the ring
- * buffer. The sample-submission task calls this after copyToRingBuffer. Split batches at
- * file boundaries and replace a file's old checksum when that file is reused.
+ * buffer. The sample-submission task calls this after copyToRingBuffer, passing
+ * only the accepted prefix. Split the checksum calculation at file boundaries
+ * and replace a file's old checksum when that file is reused.
  * This allocates no memory and writes nothing to disk.
  */
 void RetainedPayloadChecksums::accept(const uint8_t* data, uint32_t bytes)
@@ -91,7 +94,8 @@ uint64_t RetainedPayloadChecksums::beginReadback()
  *
  * Return false for missing, repeated, out-of-order or changed data. Once a check
  * fails, later calls also fail. Only complete file contents can be compared
- * against that file's checksum.
+ * against that file's checksum. A true return for a partial read means no
+ * mismatch has been found yet; getVerified confirms the entire readback.
  */
 bool RetainedPayloadChecksums::check(const uint8_t* data, uint32_t bytes, uint64_t offset)
 {

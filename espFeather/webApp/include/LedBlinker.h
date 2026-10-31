@@ -14,13 +14,13 @@
 
 /**
  * @file LedBlinker.h
- * @brief Nonblocking GPIO 13 LED control.
+ * Nonblocking GPIO 13 LED control.
  */
 #pragma once
 #include <Arduino.h>
 
 /**
- * @brief Store the legacy LED test's requested state and current output level.
+ * Store the legacy LED test's requested state and current output level.
  * No task or timer is created here. webApp calls update() from Arduino loop(),
  * and HTTP callbacks in that same task call setEnabled(). GPIO13 is a Feather
  * pin; it is unrelated to receiver GPIO13 used for digitizer data.
@@ -28,24 +28,23 @@
 class LedBlinker
 {
 public:
-
-    /**
-     * @brief Configure the LED in its stopped, off state.
+    /* **
+     * begin - Configure the LED in its stopped, off state.
      */
     void begin();
 
-    /**
-     * @brief Apply any LED transition due at the current time.
+    /* **
+     * update - Apply any LED transition due at the current time.
      */
     void update();
 
-    /**
-     * @brief Start or stop blinking; repeated commands preserve timing.
+    /* **
+     * setEnabled - Start or stop blinking; repeated commands preserve timing.
      */
     void setEnabled(bool enabled);
 
-    /**
-     * @brief Report commanded blinking, regardless of current LED level.
+    /* **
+     * getEnabled - Report commanded blinking, regardless of current LED level.
      */
     bool getEnabled() const;
 

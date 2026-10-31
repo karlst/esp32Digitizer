@@ -14,7 +14,7 @@
 
 /**
  * @file Ads127L18.h
- * @brief Send settings to the ADS127L18 and read its register values back.
+ * Send settings to the ADS127L18 and read its register values back.
  * SPI is the clocked serial link used for these commands. Registers are
  * numbered bytes inside the ADC containing settings, identification, or status.
  * This is not the sample receiver. The separate receiver uses DCLK/FSYNC/DOUT0;
@@ -24,7 +24,7 @@
 #include <SPI.h>
 
 /**
- * @brief Read/write ADC registers through slow SPI; construction never starts it.
+ * Read/write ADC registers through slow SPI; construction never starts it.
  * The caller owns the SPI controller and calls begin() only after checking power.
  * Use from one task (Arduino loop in the diagnostic), not from an interrupt or
  * concurrent tasks. No lock is needed because that caller is the only bus user.

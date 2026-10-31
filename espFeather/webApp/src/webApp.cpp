@@ -14,7 +14,7 @@
 
 /**
  * @file WebApp.cpp
- * @brief Bring up the Feather services and keep them running from Arduino loop().
+ * Bring up the Feather services and keep them running from Arduino loop().
  *
  * main.cpp owns one webApp. It owns the HTTP server, local DAC generator, legacy
  * LED service, receiver serial monitor, and the controller that connects browser routes
@@ -25,26 +25,31 @@
 #include <WiFi.h>
 #include "WebApp.h"
 
-/**
- * @brief Connect the application objects without starting hardware during construction.
+/* **
+ * WebApp - Connect the application objects without starting hardware during
+ * construction.
  *
- * server(80) listens on the standard HTTP port. monitor(Serial1) uses the physical
- * serial connection to receiver. controller receives references to these existing objects;
- * it does not make copies. Declaration order in WebApp.h creates dependencies first.
+ * server(80) listens on the standard HTTP port. monitor(Serial1) uses the
+ * physical serial connection to receiver. controller receives references to
+ * these existing objects; it does not make copies. Declaration order in WebApp.h
+ * creates dependencies first.
  */
-WebApp::WebApp() : _webServer(80), _receiverMonitor(Serial1), _webController(_webServer, _ledBlinker, _dacGenerator, _receiverMonitor)
+WebApp::WebApp()
+    : _webServer(80), _receiverMonitor(Serial1), _webController(_webServer, _ledBlinker, _dacGenerator, _receiverMonitor)
 {
     // Defer hardware initialization until Arduino calls setup.
 }
 
-/**
- * @brief Start hardware services, mount browser files, create Wi-Fi, and open HTTP.
- * @return True if the filesystem mounted and the access point/web server started.
- * This does not prove DAC initialization succeeded or a receiver is connected.
+/* **
+ * begin - Start hardware services, mount browser files, create Wi-Fi, and open
+ * HTTP. Returns: True if the filesystem mounted and the access point/web server
+ * started. This does not prove DAC initialization succeeded or a receiver is
+ * connected.
  *
- * Called once from Arduino setup(). The Feather creates its own Wi-Fi access point
- * named ESP32-Digitizer; it does not join a home router. The UI remains available
- * if DAC initialization fails so it can show the fault and offer reboot.
+ * Called once from Arduino setup(). The Feather creates its own Wi-Fi access
+ * point named ESP32-Digitizer; it does not join a home router. The UI remains
+ * available if DAC initialization fails so it can show the fault and offer
+ * reboot.
  */
 bool WebApp::begin()
 {
@@ -88,13 +93,15 @@ bool WebApp::begin()
     return retVal;
 }
 
-/**
- * @brief Service serial messages, browser requests, LED timing, and deferred reboot.
+/* **
+ * update - Service serial messages, browser requests, LED timing, and deferred
+ * reboot.
  *
- * main.cpp calls this on every Arduino loop pass. These services share that task,
- * so the monitor and web controller cannot change monitor state simultaneously.
- * The DAC has its own worker and mutex; it does not depend on this loop for ticks.
- * receiver input is drained even if web startup failed. HTTP is served only after success.
+ * main.cpp calls this on every Arduino loop pass. These services share that
+ * task, so the monitor and web controller cannot change monitor state
+ * simultaneously. The DAC has its own worker and mutex; it does not depend on
+ * this loop for ticks. receiver input is drained even if web startup failed.
+ * HTTP is served only after success.
  */
 void WebApp::update()
 {

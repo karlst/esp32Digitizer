@@ -8,12 +8,14 @@ from constantReport import calibrationMapping
 from hardwareSmokePlot import writePlot
 
 
-def analyzeRetained(feather, p4, progress=None, plotPath=None):
+def analyzeRetained(feather, p4, progress=None, plotPath=None, scopeLevels=None, frequencyHz=0.5):
     """Check whole-run counters, exact retained coverage and unadjusted voltage levels.
 
     Earlier overwritten samples have no readback proof. Firmware verifies each
     retained generation against its accepted-source CRC. This reader requires
-    that verdict plus consistent session/range metadata and a matching A2 window.
+    that verdict plus consistent session/range metadata. Normal tests require a
+    matching A2 window. scopeLevels selects external firmware and supplies scope
+    low/high readings in volts instead; no Feather input observations are used.
     """
     from hardwareSmokeReport import single, errorLimitPercent
     checks = []
@@ -24,21 +26,30 @@ def analyzeRetained(feather, p4, progress=None, plotPath=None):
         if progress is not None:
             progress(message)
 
-    if 'SMOKE_FEATHER version=4 ready=1 ' not in feather or 'SMOKE_P4 version=5 ready=1 ' not in p4:
+    if frequencyHz not in (0.5, 1000) or (frequencyHz == 1000 and scopeLevels is None):
+        raise ValueError('Unsupported waveform mode')
+    version = 6 if scopeLevels is not None else 4
+    if f'SMOKE_FEATHER version={version} ready=1 ' not in feather or not any(f'SMOKE_P4 version={v} ready=1 ' in p4 for v in ((8,) if frequencyHz == 1000 else ((7, 8) if scopeLevels is not None else (5, 7, 8)))):
         raise ValueError('Selectable-duration firmware is required on both boards')
     seconds = int(single(r'^TEST OK seconds=(\d+)$', p4, 'P4 duration'))
     if seconds not in (30, 300, 600) or single(r'^TEST OK seconds=(\d+)$', feather, 'Feather duration') != str(seconds):
         raise ValueError('Board durations do not match')
-    if 'DAC MODE: SQUARE codes=110,135 levelSeconds=1' not in feather:
-        raise ValueError('Feather is not using the slow square wave')
-    run, count, clean, missed, gap = map(int, single(
-        r'^INPUT_BEGIN run=(\d+) count=(\d+) clean=(\d+) missed=(\d+) maxGapUs=(\d+) mode=burst$', feather, 'Input report'))
-    inputFirst, inputTotal, inputSeconds = map(int, single(
-        r'^INPUT_RANGE first=(\d+) total=(\d+) seconds=(\d+)$', feather, 'Input coverage'))
-    if (inputSeconds != seconds or inputTotal != seconds * 10 or count != min(800, inputTotal) or
-            inputFirst != inputTotal - count or clean != 1 or missed != 0 or
-            single(r'^INPUT_END run=(\d+)$', feather, 'Input completion') != str(run)):
-        raise ValueError('Feather observations are incomplete or belong to another run')
+    if scopeLevels is not None:
+        run, externalClean = map(int, single(
+            r'^EXTERNAL_END run=(\d+) clean=(\d+)$', feather, 'External-source completion'))
+        if externalClean != 1:
+            raise ValueError('External-source ADC controller reported a fault')
+    else:
+        if 'DAC MODE: SQUARE codes=110,135 levelSeconds=1' not in feather:
+            raise ValueError('Feather is not using the slow square wave')
+        run, count, clean, missed, gap = map(int, single(
+            r'^INPUT_BEGIN run=(\d+) count=(\d+) clean=(\d+) missed=(\d+) maxGapUs=(\d+) mode=burst$', feather, 'Input report'))
+        inputFirst, inputTotal, inputSeconds = map(int, single(
+            r'^INPUT_RANGE first=(\d+) total=(\d+) seconds=(\d+)$', feather, 'Input coverage'))
+        if (inputSeconds != seconds or inputTotal != seconds * 10 or count != min(800, inputTotal) or
+                inputFirst != inputTotal - count or clean != 1 or missed != 0 or
+                single(r'^INPUT_END run=(\d+)$', feather, 'Input completion') != str(run)):
+            raise ValueError('Feather observations are incomplete or belong to another run')
     diskRun, rate, samples, bins, clean = map(int, single(
         r'^SMOKE_SD_BEGIN run=(\d+) rate=(\d+) samples=(\d+) bins=(\d+) clean=(\d+)$', p4, 'SD report'))
     if re.search(rf'^ADC127 RAMFULL {run}$', p4, re.M):
@@ -71,30 +82,32 @@ def analyzeRetained(feather, p4, progress=None, plotPath=None):
         raise ValueError('Receiver reported missing or invalid samples')
     if 'ADC START echo confirmed.' not in feather or 'ADC STOP command echo confirmed' not in feather:
         raise ValueError('ADC start/stop was not confirmed')
-    single(r'^DAC OFF updates=\d+ missedIntervals=0 maxGapUs=\d+ driverFault=0$', feather, 'DAC completion')
+    if scopeLevels is None:
+        single(r'^DAC OFF updates=\d+ missedIntervals=0 maxGapUs=\d+ driverFault=0$', feather, 'DAC completion')
     confirm('Digitizer -> P4 DMA: OK - no reported receive errors')
     confirm('Recording buffer: no overflow')
     confirm(f'SD written: {totalBytes:,} sample bytes; {changes} file changes, {reuses} reuses')
     confirm(f'SD readback: retained-file checksums match ({retainedBytes:,} bytes)')
 
-    converter, calibration = calibrationMapping(feather, run)
-    if converter is None:
-        raise ValueError('Input calibration is missing')
     inputs, outputs = {}, {}
-    rows = [line.split(',') for line in feather.splitlines() if line.startswith('INPUT,')]
-    if len(rows) != count:
-        raise ValueError('Input rows are missing or repeated')
-    for iBin, row in enumerate(rows, inputFirst):
-        if len(row) != 8:
-            raise ValueError('Malformed input row')
-        _, position, timestamp, mean, minimum, maximum, reads, duration = row
-        mean = float(mean)
-        if (int(position) != iBin or not math.isfinite(mean) or
-                not 0 <= int(minimum) <= mean <= int(maximum) <= 4095 or
-                not 2 <= int(reads) <= 4096 or not 1 <= int(duration) <= 20000 or
-                not 0 <= int(timestamp) - (iBin * 100000 + 50000) <= 20000):
-            raise ValueError('Input timing, order or range is invalid')
-        inputs[iBin] = converter(mean)
+    if scopeLevels is None:
+        converter, calibration = calibrationMapping(feather, run)
+        if converter is None:
+            raise ValueError('Input calibration is missing')
+        rows = [line.split(',') for line in feather.splitlines() if line.startswith('INPUT,')]
+        if len(rows) != count:
+            raise ValueError('Input rows are missing or repeated')
+        for iBin, row in enumerate(rows, inputFirst):
+            if len(row) != 8:
+                raise ValueError('Malformed input row')
+            _, position, timestamp, mean, minimum, maximum, reads, duration = row
+            mean = float(mean)
+            if (int(position) != iBin or not math.isfinite(mean) or
+                    not 0 <= int(minimum) <= mean <= int(maximum) <= 4095 or
+                    not 2 <= int(reads) <= 4096 or not 1 <= int(duration) <= 20000 or
+                    not 0 <= int(timestamp) - (iBin * 100000 + 50000) <= 20000):
+                raise ValueError('Input timing, order or range is invalid')
+            inputs[iBin] = converter(mean)
     binSamples = rate // 10
     firstBin, endBin = first // binSamples, (samples + binSamples - 1) // binSamples
     rows = [line.split(',') for line in p4.splitlines() if line.startswith('SMOKE_SD,')]
@@ -109,6 +122,24 @@ def analyzeRetained(feather, p4, progress=None, plotPath=None):
         if int(position) != iBin or int(amount) != expected or not math.isfinite(mean) or not -8388608 < mean < 8388607:
             raise ValueError('Disk bin order, sample count or range is invalid')
         outputs[iBin] = mean * 2500.0 / 8388608
+    if scopeLevels is not None:
+        # Keep all disk/counter checks above shared with the Feather test. Only
+        # the voltage reference and free-running waveform analysis differ.
+        from externalGeneratorReport import analyzeWaveform
+        result = dict(checks=checks, bytesWritten=totalBytes, bytesRetained=retainedBytes,
+                      seconds=samples/rate, requestedSeconds=seconds, samples=samples,
+                      file=saved[0])
+        if frequencyHz == 1000:
+            from fastSquareReport import analyzeFastSquare
+            return analyzeFastSquare(p4, scopeLevels, result, rate, first, plotPath)
+        result = analyzeWaveform(outputs, scopeLevels, result)
+        from sampleNoiseReport import addSampleStatistics
+        addSampleStatistics(p4, result, rate)
+        if plotPath is not None:
+            from externalGeneratorReport import writePlot as writeExternalPlot
+            writeExternalPlot(result, plotPath)
+        return result
+
     # Compare only overlapping retained bins. The first offset is a whole
     # 16-second file boundary; any tiny excess tail has no corresponding A2 bin.
     indices = list(range(firstBin, min(endBin, inputTotal)))

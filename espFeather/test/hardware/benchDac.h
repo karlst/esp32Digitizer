@@ -14,7 +14,7 @@
 
 /**
  * @file BenchDac.h
- * @brief Opt-in Feather DAC source for the external-input P4 recording test.
+ * Opt-in Feather DAC source for the external-input P4 recording test.
  * This is separate from the web application's DAC/ADC loopback service: no
  * Wi-Fi, browser, local analog sampling, or graph allocation is required here.
  */
@@ -25,7 +25,7 @@
 #include <freertos/semphr.h>
 
 /**
- * @brief Prevent timer writes to A1 from overlapping the loop's start/stop calls.
+ * Prevent timer writes to A1 from overlapping the loop's start/stop calls.
  * ESP_TIMER_TASK invokes tick() in a shared task, NOT an interrupt. A mutex
  * prevents stop() from disabling the DAC while a callback writes a new code.
  * No DAC output is enabled by construction or initialize(). Objects live for
@@ -38,6 +38,7 @@ public:
     bool start();
     void stop();
     bool getFailed();
+
 private:
     static void tick(void* context);
     SemaphoreHandle_t _mutex = nullptr;

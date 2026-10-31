@@ -14,7 +14,7 @@
 
 /**
  * @file benchDacWave.h
- * @brief Functional-test sine, square wave, or opt-in constant code, independent of hardware APIs.
+ * Functional-test sine, square wave, or opt-in constant code, independent of hardware APIs.
  * Nominal 10 Hz, 1.25 V offset, 0.5 V peak: 0.75..1.75 V before DAC error and
  * output loading. The Feather's 8-bit DAC and nominal 3.3 V supply are not a
  * calibrated signal source. This is not a precision ADC noise/distortion test.
@@ -29,8 +29,9 @@ namespace benchDacWave
 constexpr uint64_t periodUs = 100000;
 constexpr uint64_t updateUs = 500;
 
-/**
- * @brief Return the selected sine, one-second square-wave level, or fixed code 135.
+/* **
+ * codeAt - Return the selected sine, one-second square-wave level, or fixed code
+ * 135.
  * A delayed update skips ahead rather than slowing the requested waveform.
  * Modulo before floating conversion preserves phase precision at long uptime.
  * elapsedUs is time since start, not a sample index. The return is an 8-bit DAC
@@ -56,4 +57,4 @@ inline uint8_t codeAt(uint64_t elapsedUs)
 #endif
     return retVal;
 }
-}
+} // namespace benchDacWave

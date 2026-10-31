@@ -45,7 +45,7 @@ def analyze(feather, p4, progress=None, plotPath=None):
     fails. plotPath optionally saves one HTML voltage plot before that verdict.
     Each is evidence for that step only, never an early overall PASS.
     """
-    if 'SMOKE_P4 version=5 ' in p4:
+    if any(f'SMOKE_P4 version={version} ' in p4 for version in (5, 7, 8)):
         from hardwareSmokeRetainedReport import analyzeRetained
         return analyzeRetained(feather, p4, progress, plotPath)
     checks = []
@@ -193,6 +193,12 @@ def summary(result, includeChecks=True):
     Saved reports include all confirmations so they stand alone. This function
     is called only after analyze succeeds; failures retain partial checks instead.
     """
+    if result.get('fastSquare'):
+        from fastSquareReport import summarize
+        return summarize(result, includeChecks)
+    if result.get('external'):
+        from externalGeneratorReport import summarize
+        return summarize(result, includeChecks)
     checks = ''.join(message + '\n' for message in result['checks']) if includeChecks else ''
     return (f"Hardware smoke test: {result.get('requestedSeconds', 30)} seconds\n"
             f"Recorded: {result['seconds']:.3f} seconds\n"

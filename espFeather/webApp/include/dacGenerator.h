@@ -14,7 +14,7 @@
 
 /**
  * @file DacGenerator.h
- * @brief Timed sine output on A1 and ADC1 loopback measurement on A2.
+ * Timed sine output on A1 and ADC1 loopback measurement on A2.
  */
 #pragma once
 #include <Arduino.h>
@@ -23,7 +23,7 @@
 #include <freertos/semphr.h>
 
 /**
- * @brief Generate a sine wave independently of browser traffic and measure its loopback.
+ * Generate a sine wave independently of browser traffic and measure its loopback.
  *
  * Three execution contexts cooperate:
  * - Arduino's loop task handles HTTP and calls start(), setEnabled(), getStateJson().
@@ -49,45 +49,48 @@ public:
     // Task scheduling introduces jitter; this is not a hardware-clocked DAC stream.
     static constexpr uint32_t _samplePeriodUs = 500;
 
-    /**
-     * @brief Initialize DAC/ADC and start sampling with waveform output disabled.
+    /* **
+     * begin - Initialize DAC/ADC and start sampling with waveform output disabled.
      */
     bool begin();
 
-    /**
-     * @brief Validate settings and atomically start output; running settings cannot change.
+    /* **
+     * start - Validate settings and atomically start output; running settings cannot
+     * change.
      */
     bool start(float frequency, float amplitude, float offset);
 
-    /**
-     * @brief Enable or disable the waveform; disabled output is DAC code zero.
+    /* **
+     * setEnabled - Enable or disable the waveform; disabled output is DAC code zero.
      */
     bool setEnabled(bool enabled);
 
-    /**
-     * @brief Serialize a coherent snapshot of settings and measured graph samples.
+    /* **
+     * getStateJson - Serialize a coherent snapshot of settings and measured graph
+     * samples.
      */
     String getStateJson();
 
 private:
-
-    /**
-     * @brief Wake the worker without doing analog conversions in the timer callback.
+    /* **
+     * timerCallback - Wake the worker without doing analog conversions in the timer
+     * callback.
      */
     static void timerCallback(void* context);
 
-    /**
-     * @brief Run analog sampling independently of HTTP handling.
+    /* **
+     * taskEntry - Run analog sampling independently of HTTP handling.
      */
     static void taskEntry(void* context);
 
-    /**
-     * @brief Measure the previous output, then write the next time-based sine sample.
+    /* **
+     * sample - Measure the previous output, then write the next time-based sine
+     * sample.
      */
     void sample();
 
     /**
-     * @brief Pair an ADC reading with the DAC code held during its acquisition.
+     * Pair an ADC reading with the DAC code held during its acquisition.
      * timeUs stores the low 32 bits of microseconds since boot; snapshots subtract
      * timestamps with unsigned arithmetic, so a wrap within the short window is safe.
      */
@@ -97,12 +100,13 @@ private:
         uint16_t _millivolts;
         uint8_t _command;
     };
+
     static constexpr size_t _historySize = 256;
-    // Bounded circular buffer: writeIndex is the next slot to replace; sampleCount
+    // Bounded circular buffer: _iSampleRecord is the next slot to replace; sampleCount
     // grows to historySize and then stays there. All three are protected by mutex.
     SampleRecord _sampleRecords[_historySize] = {};
     size_t _sampleCount = 0;
-    size_t _writeIndex = 0;
+    size_t _iSampleRecord = 0;
     float _frequencyHz = 10.0f;
     float _amplitudeVolts = 0.5f;
     float _offsetVolts = 1.5f;

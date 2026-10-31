@@ -12,8 +12,9 @@
  * Public License in the repository LICENSE file or <https://www.gnu.org/licenses/>.
  */
 
-/** @file InputSnapshot.h
- * @brief Independent A2 observations during P4 RAM or SD smoke experiments.
+/**
+ * @file InputSnapshot.h
+ * Independent A2 observations during P4 RAM or SD smoke experiments.
  * Arduino loop owns all fields; the DAC timer never accesses this object.
  * The A1->A2 jumper measures the physical voltage, not the requested DAC code.
  */
@@ -21,7 +22,8 @@
 #if ADS127_COMPARE_INPUT
 #include <Arduino.h>
 
-/** @brief Fixed-size timestamped input record, printed only after ADC/DAC stop.
+/**
+ * Fixed-size timestamped input record, printed only after ADC/DAC stop.
  * A2 is Feather GPIO34 / ADC1 channel 6. Counts are uncalibrated 12-bit values.
  * This sensor limits comparison accuracy; it is not a reference-grade ADC.
  */
@@ -29,16 +31,26 @@ class InputSnapshot
 {
 public:
     bool initialize();
+
+    /* **
+     * setDuration - Set the smoke observation deadline while idle; caller validates
+     * allowed durations.
+     */
+    void setDuration(unsigned seconds)
+    {
+        _seconds = seconds;
+    }
+
     void reset();
     void begin();
     void poll();
     bool getSampling() const;
     bool getFailed() const;
     void report(unsigned long run, bool hardwareClean);
-private:
 
+private:
     /**
-     * @brief Measurements taken together during one scheduled A2 read interval.
+     * Measurements taken together during one scheduled A2 read interval.
      * timeUs is the midpoint, in microseconds since begin() after the START echo;
      * durationUs is the time spent reading. sum/reads gives the average raw ADC
      * count; minimum and maximum preserve variation that the average would hide.
@@ -52,7 +64,15 @@ private:
         int _minimum;
         int _maximum;
     };
-    Point _points[320] = {};
+#if ADS127_HARDWARE_SMOKE
+    static constexpr unsigned _pointCapacity = 800;
+#else
+    static constexpr unsigned _pointCapacity = 320;
+#endif
+    // Count is the whole-run count; index modulo capacity retains the latest
+    // 80 seconds in smoke mode without growing memory for a ten-minute run.
+    Point _points[_pointCapacity] = {};
+    unsigned _seconds = 30;
     unsigned _count = 0;
     uint32_t _missed = 0, _maxGapUs = 0;
     int64_t _origin = 0, _nextRead = 0, _lastRead = 0;

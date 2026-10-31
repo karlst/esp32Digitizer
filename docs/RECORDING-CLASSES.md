@@ -12,7 +12,7 @@ does not start a recording.
 | `SampleDecoder` | Take ready blocks, decode their contents, submit samples, release blocks | Core 1 decoder task |
 | `FrameDecoder` | Reconstruct sample words and check framing/status | Called by `SampleDecoder` on Core 1 |
 | `SdCaptureDestination` | Adapt sample submission and recording operations to `SdRecorder` | Control on Core 0; submission on Core 1 |
-| `SdRecorder` | Own card/file operations and the buffered writer | Disk operations on Core 0 SD task; submission on Core 1 |
+| `SdRecorder` | Schedule backend operations, pack ADC samples and verify the combined stream | Disk operations on Core 0 SD task; submission on Core 1 |
 | `BufferedWriter` | Hold queued bytes until their storage write completes | Submission on Core 1; draining on Core 0 |
 | `RecordingReporter` | Interface receiving status and result events | Core 0 control or SD task |
 | `ConsoleRecordingReporter` | Format those events for the USB terminal | Core 0 control or SD task |
@@ -33,7 +33,7 @@ flowchart TD
     Reporter --> Console[ConsoleRecordingReporter]
     Receiver -->|ready block addresses| Decoder
     Decoder -->|sample batches| Destination
-    Destination --> SD[SdRecorder + BufferedWriter]
+    Destination --> SD[SdRecorder + FileRecordingBackend + BufferedWriter]
     SD --> Reporter
 ```
 
@@ -90,9 +90,10 @@ Old ARM2/READY2 requests are not accepted as new requests. Rebuild and upload
 both boards together. Neither board starts sampling merely because it boots.
 
 `SdRecorder` remains independent of ADC register settings. Its adapter passes
-only run ID and samples/second. The former stage field at SD header offset 20
-is reserved and written as zero; the payload and all other offsets are unchanged.
-Readers ignore that field, including nonzero values in historical recordings.
+only run ID and samples/second. The file backend now supplies standard session
+headers; old `P4ADC03` offsets apply only to historical single-file recordings.
+Current headers contain a persistent disk session ID, independent of Feather's
+run ID. See the storage-test header specification for current offsets.
 
 `RecordingReporter` is now an interface. `ConsoleRecordingReporter` contains
 the existing terminal formatting and `printf` calls. Startup supplies the concrete

@@ -14,7 +14,7 @@
 
 /**
  * @file Ads127LowRate.cpp
- * @brief Set a selected 16-1024 ksample/s bench rate, channel 0, status+sample output.
+ * Set a selected 16-1024 ksample/s bench rate, channel 0, status+sample output.
  * Read configure() for the complete register plan. Each successful write is
  * echoed by the ADC then independently read back. TI ADS127L1x Rev B register
  * sections 8.7-8.18 define these fields. Clock math assumes the EVM's documented
@@ -24,30 +24,35 @@
 #include <Arduino.h>
 #include "Ads127Config.h"
 
-/** @brief Remember the SPI driver without touching hardware. */
-Ads127LowRate::Ads127LowRate(Ads127L18& ads127L18) : _ads127L18(ads127L18)
+/* **
+ * Ads127LowRate - Remember the SPI driver without using the hardware.
+ */
+Ads127LowRate::Ads127LowRate(Ads127L18& ads127L18)
+    : _ads127L18(ads127L18)
 {
 }
 
-/**
- * @brief Write and verify a persistent setting, printing the exact failure.
- * readback starts at 0xff so a failed transfer cannot masquerade as a zero match.
+/* **
+ * setAndCheck - Write and verify a persistent setting, printing the exact
+ * failure. readback starts at 0xff so a failed transfer cannot masquerade as a
+ * zero match.
  */
 bool Ads127LowRate::setAndCheck(uint8_t address, uint8_t value)
 {
     uint8_t readback = 0xff;
     const bool retVal = _ads127L18.writeRegister(address, value) &&
-        _ads127L18.readRegister(address, readback) && readback == value;
+                        _ads127L18.readRegister(address, readback) && readback == value;
     Serial.printf("ADC register 0x%02X: wanted 0x%02X, read 0x%02X, %s\n",
-                  address, value, readback, retVal ? "OK" : "FAILED");
+        address, value, readback, retVal ? "OK" : "FAILED");
     return retVal;
 }
 
-/**
- * @brief Read SPI STATUS and explain each bit on Feather USB without clearing it.
- * phase labels when this snapshot was taken. Bits 6/5 retain low-voltage/reset
- * history, including normal power-up; bits 4..0 describe other ADC/SPI faults.
- * A completed SPI read is not independent proof that the physical link is sound.
+/* **
+ * readStatus - Read SPI STATUS and explain each bit on Feather USB without
+ * clearing it. phase labels when this snapshot was taken. Bits 6/5 retain
+ * low-voltage/reset history, including normal power-up; bits 4..0 describe other
+ * ADC/SPI faults. A completed SPI read is not independent proof that the
+ * physical link is sound.
  */
 bool Ads127LowRate::readStatus(const char* phase, uint8_t& status)
 {
@@ -66,10 +71,11 @@ bool Ads127LowRate::readStatus(const char* phase, uint8_t& status)
     return retVal;
 }
 
-/**
- * @brief Print a status snapshot; return true only when no defined flag is set.
- * Called after Stop by the bench controller to look for faults during the run.
- * This never clears evidence. A fault also prevents start() until reconfiguration.
+/* **
+ * reportStatus - Print a status snapshot; return true only when no defined flag
+ * is set. Called after Stop by the bench controller to look for faults during
+ * the run. This never clears evidence. A fault also prevents start() until
+ * reconfiguration.
  */
 bool Ads127LowRate::reportStatus(const char* phase)
 {
@@ -82,13 +88,14 @@ bool Ads127LowRate::reportStatus(const char* phase)
     return retVal;
 }
 
-/**
- * @brief Record then acknowledge only the two startup-history flags while stopped.
- * TI sections 7.4.9.1/8.3: writing ONE clears a STATUS flag; zero leaves it alone.
- * Thus 0x60 acknowledges bits 6/5, never the other fault bits. Ordinary register
- * equality readback is inappropriate: successful clearing reads zero, not 0x60.
- * Refuse setup on other faults, a rejected write, or any flag remaining afterward.
- * A later status/header check is still needed: this is only a pre-run snapshot.
+/* **
+ * clearStartupFlags - Record then acknowledge only the two startup-history flags
+ * while stopped. TI sections 7.4.9.1/8.3: writing ONE clears a STATUS flag; zero
+ * leaves it alone. Thus 0x60 acknowledges bits 6/5, never the other fault bits.
+ * Ordinary register equality readback is inappropriate: successful clearing
+ * reads zero, not 0x60. Refuse setup on other faults, a rejected write, or any
+ * flag remaining afterward. A later status/header check is still needed: this is
+ * only a pre-run snapshot.
  */
 bool Ads127LowRate::clearStartupFlags()
 {
@@ -109,17 +116,17 @@ bool Ads127LowRate::clearStartupFlags()
     return retVal;
 }
 
-/**
- * @brief Identify and stop the ADC, then apply the supplied ADC configuration.
- * The default is adsConfig (1,024,000 samples/s); unsupported settings are refused.
- * externalInput=false retains the internal-short baseline. True selects the
- * physical AIN0P/AIN0N inputs, driven through the EVM's analog front end. This
- * selects CH0_CFG1's external input and enables the ADC's midpoint-voltage
- * output for the EVM input amplifiers. Sample rate and serial format are unchanged.
- * Returning true means settings read back correctly, not that DMA receives data.
- * On failure make a best-effort stop and refuse start(). No reset is issued, so
- * startup flags are logged before clearing; other fault flags are never cleared.
- * A power cycle restores defaults.
+/* **
+ * configure - Identify and stop the ADC, then apply the supplied ADC
+ * configuration. The default is adsConfig (1,024,000 samples/s); unsupported
+ * settings are refused. externalInput=false retains the internal-short baseline.
+ * True selects the physical AIN0P/AIN0N inputs, driven through the EVM's analog
+ * front end. This selects CH0_CFG1's external input and enables the ADC's
+ * midpoint-voltage output for the EVM input amplifiers. Sample rate and serial
+ * format are unchanged. Returning true means settings read back correctly, not
+ * that DMA receives data. On failure make a best-effort stop and refuse start().
+ * No reset is issued, so startup flags are logged before clearing; other fault
+ * flags are never cleared. A power cycle restores defaults.
  */
 bool Ads127LowRate::configure(const Ads127Config& adsConfigRequested, bool externalInput)
 {
@@ -143,7 +150,7 @@ bool Ads127LowRate::configure(const Ads127Config& adsConfigRequested, bool exter
     // Register readback alone cannot establish that received bits are correct.
     if (retVal)
     {
-        retVal = setAndCheck(0x09, 0x06) &&  // Max speed; software start/stop; no averaging.
+        retVal = setAndCheck(0x09, 0x06) && // Max speed; software start/stop; no averaging.
                  // GEN_CFG1 bit 2 enables VCM: an analog output at the midpoint
                  // of the ADC supply rails. The TI board connects this output to
                  // the input amplifiers to establish their output center voltage.
@@ -152,11 +159,11 @@ bool Ads127LowRate::configure(const Ads127Config& adsConfigRequested, bool exter
                  // Readback confirms the setting, not the actual analog voltage
                  // or that this change fixes the distorted recorded waveform.
                  setAndCheck(0x08, externalInput ? 0x04 : 0x00) &&
-                 setAndCheck(0x0a, 0x00) &&  // 24 bits; full drive; SPI CRC remains off.
-                 setAndCheck(0x0d, 0x08) &&  // CLK_SEL bit 3 selects external EVM clock; divider 1.
+                 setAndCheck(0x0a, 0x00) && // 24 bits; full drive; SPI CRC remains off.
+                 setAndCheck(0x0d, 0x08) && // CLK_SEL bit 3 selects external EVM clock; divider 1.
                  setAndCheck(0x0c, adsConfigRequested._clockDividerCode) && // DCLK /8, /4, /2 or /1; default bit delay.
-                 setAndCheck(0x0b, 0x70) &&  // Eight lanes; status header; no data CRC.
-                 setAndCheck(0x10, 0x00) &&  // No GPIO override of sample outputs.
+                 setAndCheck(0x0b, 0x70) && // Eight lanes; status header; no data CRC.
+                 setAndCheck(0x10, 0x00) && // No GPIO override of sample outputs.
                  // TI Rev B table 8-20: MUX[6:4]=010 shorts internally; 000
                  // uses normal external polarity. Range and buffer bits stay 0.
                  setAndCheck(0x11, externalInput ? 0x00 : 0x20);
@@ -168,7 +175,7 @@ bool Ads127LowRate::configure(const Ads127Config& adsConfigRequested, bool exter
     for (uint8_t channel = 0; channel < 8 && retVal; ++channel)
     {
         retVal = setAndCheck(static_cast<uint8_t>(0x12 + channel * 8),
-                            adsConfigRequested._filterCode | (channel == 0 ? 0 : 0x20));
+            adsConfigRequested._filterCode | (channel == 0 ? 0 : 0x20));
     }
     if (retVal)
     {
@@ -186,11 +193,12 @@ bool Ads127LowRate::configure(const Ads127Config& adsConfigRequested, bool exter
     return retVal;
 }
 
-/**
- * @brief Request conversions after successful configure(); return whether the echo matches.
- * The caller must establish receiver readiness first. This function checks
- * configured but has no access to the receiver's READY message.
- * CONTROL bit 1 self-clears. Its write echo is not proof of clock/sample delivery.
+/* **
+ * start - Request conversions after successful configure(); return whether the
+ * echo matches. The caller must establish receiver readiness first. This
+ * function checks configured but has no access to the receiver's READY message.
+ * CONTROL bit 1 self-clears. Its write echo is not proof of clock/sample
+ * delivery.
  */
 bool Ads127LowRate::start()
 {
@@ -198,9 +206,10 @@ bool Ads127LowRate::start()
     return retVal;
 }
 
-/**
- * @brief Request stop using CONTROL bit 0; safe to request even when already idle.
- * A true echo confirms acceptance; an in-progress conversion can finish afterward.
+/* **
+ * stop - Request stop using CONTROL bit 0; safe to request even when already
+ * idle. A true echo confirms acceptance; an in-progress conversion can finish
+ * afterward.
  */
 bool Ads127LowRate::stop()
 {

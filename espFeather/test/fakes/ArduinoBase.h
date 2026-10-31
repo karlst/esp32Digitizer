@@ -14,7 +14,7 @@
 
 /**
  * @file ArduinoBase.h
- * @brief Desktop-only hardware substitutes; never part of a firmware build.
+ * Desktop-only hardware substitutes; never part of a firmware build.
  * The native test runner places this directory ahead of real Arduino headers.
  * Time advances only when a fake delay or a test changes it. Serial bytes live
  * in memory queues, and GPIO levels are test variables. There is no physical
@@ -49,19 +49,31 @@ inline uint32_t testReadyRiseAt = UINT32_MAX;
 // Optional hardware simulation tick; ordinary tests leave time under manual control.
 inline void (*testClockHook)() = nullptr;
 
-/**
- * @brief Return the test-controlled millisecond counter without advancing it.
+/* **
+ * millis - Return the test-controlled millisecond counter without advancing it.
  */
-inline uint32_t millis() { return testMs; }
+inline uint32_t millis()
+{
+    return testMs;
+}
 
-/**
- * @brief Run the optional hardware-simulation hook, then return test microseconds.
+/* **
+ * micros - Run the optional hardware-simulation hook, then return test
+ * microseconds.
  */
-inline uint32_t micros() { if (testClockHook) { testClockHook(); } return testUs; }
+inline uint32_t micros()
+{
+    if (testClockHook)
+    {
+        testClockHook();
+    }
+    return testUs;
+}
 
-/**
- * @brief Return testReady for every pin; GPIO9 may also trigger a scheduled rise.
- * This is a DRDY-focused substitute, not an independent value for every GPIO.
+/* **
+ * digitalRead - Return testReady for every pin; GPIO9 may also trigger a
+ * scheduled rise. This is a DRDY-focused substitute, not an independent value
+ * for every GPIO.
  */
 inline int digitalRead(int pin)
 {
@@ -73,38 +85,58 @@ inline int digitalRead(int pin)
     return testReady;
 }
 
-/**
- * @brief Model the native UART pin being returned to ordinary GPIO mode.
+/* **
+ * pinMode - Model the native UART pin being returned to ordinary GPIO mode.
  */
-inline void pinMode(int pin, int) { if (pin == 18) { testUartRxMapped = false; } }
+inline void pinMode(int pin, int)
+{
+    if (pin == 18)
+    {
+        testUartRxMapped = false;
+    }
+}
 
-/**
- * @brief Save any digitalWrite value as testChipSelect; the pin argument is ignored.
+/* **
+ * digitalWrite - Save any digitalWrite value as testChipSelect; the pin argument
+ * is ignored.
  */
-inline void digitalWrite(int, int value) { testChipSelect = value; }
+inline void digitalWrite(int, int value)
+{
+    testChipSelect = value;
+}
 
-/**
- * @brief Advance only testUs by duration microseconds; do not sleep the PC thread.
+/* **
+ * delayMicroseconds - Advance only testUs by duration microseconds; do not sleep
+ * the PC thread.
  */
-inline void delayMicroseconds(uint32_t duration) { testUs += duration; }
+inline void delayMicroseconds(uint32_t duration)
+{
+    testUs += duration;
+}
 
-/**
- * @brief Advance only testMs by duration milliseconds; testUs is a separate clock.
+/* **
+ * delay - Advance only testMs by duration milliseconds; testUs is a separate
+ * clock.
  */
-inline void delay(uint32_t duration) { testMs += duration; }
+inline void delay(uint32_t duration)
+{
+    testMs += duration;
+}
 
-/**
- * @brief Interrupt registration is driven manually by the tests.
+/* **
+ * attachInterruptArg - Interrupt registration is driven manually by the tests.
  */
-inline void attachInterruptArg(int, void (*)(void*), void*, int) {}
+inline void attachInterruptArg(int, void (*)(void*), void*, int)
+{
+}
 
-/**
- * @brief Interrupt removal is tracked by firmware state in these tests.
+/* **
+ * detachInterrupt - Interrupt removal is tracked by firmware state in these
+ * tests.
  */
-inline void detachInterrupt(int) {}
-
-
-
+inline void detachInterrupt(int)
+{
+}
 
 extern FakeSerial Serial;
 extern FakeSerial Serial1;

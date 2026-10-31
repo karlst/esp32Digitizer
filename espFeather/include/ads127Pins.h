@@ -14,7 +14,7 @@
 
 /**
  * @file ads127Pins.h
- * @brief GPIO assignments for the ADS127L18 wiring agreed on October 10, 2026.
+ * GPIO assignments for the ADS127L18 wiring agreed on October 10, 2026.
  * Numbers are ESP32 GPIO numbers, not physical connector positions. Feather
  * means the ESP32 V2 board. All digital
  * signals pass through the SN74AXC8T245 translator, A=3.3 V and B=1.8 V.
@@ -26,10 +26,10 @@
 namespace ads127Pins
 {
 
-    // Feather commands travel A->B; the reply travels B->A on channel 8.
-    constexpr int featherClock = 5;      // SCK -> A2/B2 -> ADC SCLK.
-    constexpr int featherMosi = 19;      // MO  -> A3/B3 -> ADC SDI.
-    constexpr int featherSelect = 33;    // GPIO33 -> A4/B4 -> ADC CS.
-    constexpr int featherMiso = 21;      // MI <- A8/B8 <- ADC SDO.
+// Feather commands travel A->B; the reply travels B->A on channel 8.
+constexpr int featherClock = 5; // SCK -> A2/B2 -> ADC SCLK.
+constexpr int featherMosi = 19; // MO  -> A3/B3 -> ADC SDI.
+constexpr int featherSelect = 33; // GPIO33 -> A4/B4 -> ADC CS.
+constexpr int featherMiso = 21; // MI <- A8/B8 <- ADC SDO.
 
-}
+} // namespace ads127Pins

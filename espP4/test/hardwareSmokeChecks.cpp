@@ -25,6 +25,37 @@
 #include "test/support/ads127BenchTiming.h"
 #include <cassert>
 #include <cstdio>
+#include <cmath>
+
+/* **
+ * checkSampleSpread - Alternating codes around a large DC level must retain
+ * their small spread across split byte reads. Constant bins must have zero
+ * spread. These are arithmetic checks, not claims about ADC hardware noise.
+ */
+static void checkSampleSpread()
+{
+    SdSmokeSummary sdSmokeSummary;
+    sdSmokeSummary.reset(100); // Ten samples per 100-ms bin.
+    uint8_t bytes[30] = {};
+    for (unsigned iSample = 0; iSample < 10; ++iSample)
+    {
+        const uint32_t code = 6000000 + (iSample % 2 == 0 ? -2 : 2);
+        for (unsigned iByte = 0; iByte < 3; ++iByte)
+        {
+            bytes[iSample * 3 + iByte] = static_cast<uint8_t>(code >> (iByte * 8));
+        }
+    }
+    sdSmokeSummary.accept(bytes, 7);
+    sdSmokeSummary.accept(bytes + 7, sizeof(bytes) - 7);
+    assert(sdSmokeSummary.getMean(0) == 6000000);
+    assert(std::abs(sdSmokeSummary.getSquaredDeviations(0) - 40) < 1e-9);
+    assert(sdSmokeSummary.getMinimum(0) == 5999998);
+    assert(sdSmokeSummary.getMaximum(0) == 6000002);
+    assert(sdSmokeSummary.getTraceSample(0, 0) == 6000002);
+    sdSmokeSummary.reset(100);
+    assert(sdSmokeSummary.getSquaredDeviations(0) == 0);
+    assert(sdSmokeSummary.getTraceSample(0, 0) == 0);
+}
 
 /* **
  * checkRecordingLayouts - Verify that selecting a file policy preserves count
@@ -77,6 +108,7 @@ static void checkRecordingLayouts()
 int main()
 {
     checkRecordingLayouts();
+    checkSampleSpread();
     assert(ads127BenchTiming::runMs == 30000);
     assert(ads127BenchTiming::receiverTimeoutMs == 35000);
     assert(benchDacWave::codeAt(0) == 110);
@@ -123,7 +155,14 @@ int main()
     for (unsigned iByte = 0; iByte < 300; ++iByte)
     {
         assert(sdSmokeSummary.getMean(iByte) == (iByte / 10 % 2 == 0 ? 1000000 : 2000000));
+        assert(sdSmokeSummary.getSquaredDeviations(iByte) == 0);
+        assert(sdSmokeSummary.getMinimum(iByte) == sdSmokeSummary.getMaximum(iByte));
     }
+    assert(sdSmokeSummary.getTraceSample(0, 127) == 1000000);
+    assert(sdSmokeSummary.getTraceSample(10, 127) == 2000000);
+    assert(sdSmokeSummary.getWaveformSample(0) == 2000000);
+    assert(sdSmokeSummary.getWaveformSample(5119) == 2000000);
+    assert(sdSmokeSummary.getWaveformSample(5120) == 0);
     sdSmokeSummary.accept(block, 1);
     assert(!sdSmokeSummary.getComplete());
 
@@ -141,6 +180,7 @@ int main()
     assert(!sdSmokeSummary.getComplete());
     sdSmokeSummary.reset(1024000);
     assert(sdSmokeSummary.getSampleCount() == 0 && !sdSmokeSummary.getComplete());
+    assert(sdSmokeSummary.getWaveformSample(0) == 0);
     std::puts("PASS: SD byte boundaries, signed samples, duration, square-wave timing and incomplete-file rejection");
     return 0;
 }

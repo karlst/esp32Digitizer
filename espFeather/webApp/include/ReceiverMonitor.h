@@ -14,14 +14,14 @@
 
 /**
  * @file ReceiverMonitor.h
- * @brief Receive bounded receiver status messages without disturbing DAC sampling.
+ * Receive bounded receiver status messages without disturbing DAC sampling.
  */
 #pragma once
 #include <Arduino.h>
 #include "RecordingMonitor.h"
 
 /**
- * @brief Own the UART receive buffer and last validated receiver acquisition status.
+ * Own the UART receive buffer and last validated receiver acquisition status.
  *
  * begin(), update(), and getStateJson() run only in Arduino's loop task. Unlike the
  * DAC generator, this class has no worker accessing its state and needs no mutex.
@@ -32,47 +32,50 @@
 class ReceiverMonitor
 {
 public:
-
-    /**
-     * @brief Retain the dedicated serial port; USB debugging uses a different UART.
+    /* **
+     * ReceiverMonitor - Retain the dedicated serial port; USB debugging uses a
+     * different UART.
      */
     explicit ReceiverMonitor(HardwareSerial& hardwareSerial);
 
-    /**
-     * @brief Configure Feather RX/TX header pins for 115200-baud 3.3 V UART.
+    /* **
+     * begin - Configure Feather RX/TX header pins for 115200-baud 3.3 V UART.
      */
     void begin();
 
-    /**
-     * @brief Drain available bytes, assemble lines, and accept complete valid frames.
+    /* **
+     * update - Drain available bytes, assemble lines, and accept complete valid
+     * frames.
      */
     void update();
 
-    /**
-     * @brief Return current connection/data freshness, hiding stale measurements.
+    /* **
+     * getStateJson - Return current connection/data freshness, hiding stale
+     * measurements.
      */
     String getStateJson() const;
 
-    /**
-     * @brief Send one command; its eventual result is reported by getStateJson().
-     * record applies only to Start and requires recording-capable receiver firmware.
+    /* **
+     * sendCommand - Send one command; its eventual result is reported by
+     * getStateJson(). record applies only to Start and requires recording-capable
+     * receiver firmware.
      */
     bool sendCommand(const char* action, uint32_t rate, bool record = false);
 
-    /**
-     * @brief Accept only the supported rates exposed by the initial UI.
+    /* **
+     * validRate - Accept only the supported rates exposed by the initial UI.
      */
     static bool validRate(uint32_t rate);
 
 private:
-
-    /**
-     * @brief Parse an entire line before replacing the last accepted snapshot.
+    /* **
+     * acceptLine - Parse an entire line before replacing the last accepted snapshot.
      */
     bool acceptLine(uint32_t nowMs);
 
-    /**
-     * @brief Parse one unsigned decimal field with explicit overflow detection.
+    /* **
+     * readUnsigned - Parse one unsigned decimal field with explicit overflow
+     * detection.
      */
     static bool readUnsigned(const char* text, uint64_t maximum, uint64_t& value);
 

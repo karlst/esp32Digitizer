@@ -1,0 +1,119 @@
+External generator test
+=======================
+
+The Feather still configures, starts and stops ADS127. Its DAC is explicitly
+disabled and A2 is not measured. P4 version 8 adds a five-ms waveform window for
+1 kHz tests and retains version 7's individual-sample statistics for slow tests.
+Rebuild and upload P4 for the 1 kHz option; Feather version 6 remains unchanged.
+The external Feather build identifies as version 6. The PC runner rejects the
+ordinary version-4 DAC build when external mode is requested, and vice versa.
+
+Run PC checks first, from the repository root:
+    .\test\runSmokeChecks.ps1
+
+Build Feather, from the repository root:
+    & "$env:USERPROFILE\.platformio\penv\Scripts\platformio.exe" run --project-dir .\espFeather -e ads127-external-smoke
+
+After the build succeeds, upload:
+    & "$env:USERPROFILE\.platformio\penv\Scripts\platformio.exe" run --project-dir .\espFeather -e ads127-external-smoke -t upload --upload-port COM4
+
+P4 build/upload commands remain in HARDWARE-SMOKE.md. It needs the new smoke image,
+not the choke image. The Feather external firmware remains version 6 and does
+not need another upload if already installed.
+
+With generator output off, disconnect Feather A1 from CH0. Generator signal goes
+to CH0P, return to analog ground, and CH0N to that same ground. The 10X scope probe
+observes CH0P relative to ground. Power the ADC before enabling the generator.
+Use a 0.5 Hz, 50% square wave, nominally 1.355 to 1.855 V. Measure scope Vbase and
+Vtop with the powered ADC connected. These readings, not requested settings,
+are the reference values. Keep the generator running throughout the capture.
+
+Close serial monitors and reset both boards. From the repository root:
+    .\test\runHardwareSmoke.ps1 -External -Seconds 30
+
+The runner asks for low/high scope readings in volts. It never silently reuses
+old readings. Other supported durations remain 300 and 600 seconds. The existing
+SD preparation adds a file pool while preserving old recordings.
+
+The runner does not control Rigol output. Switch it off before removing ADC power.
+
+Results
+-------
+comparison.html plots the retained ADC waveform (100 ms averages read from SD)
+and two horizontal scope-reference lines. A waveform failure still saves a plot.
+result.txt and result.json include signed ADC-minus-scope error at each level,
+signal swing, worst plateau error and variation of settled 100 ms averages.
+In addition, sampleStatistics reports individual-sample population variance
+(uV squared), standard deviation (uV), minimum/maximum voltage and peak-to-peak
+spread. These use every sample in the selected settled bins, including drift
+between bins. They measure generator-plus-acquisition fluctuation, not ADC noise
+in isolation. No pass/fail noise threshold has been invented.
+
+The HTML includes a 128-consecutive-sample graph for each level, taken from a
+settled bin center within the first four retained seconds. Each graph subtracts
+its own trace mean to make small fluctuations visible. At 1,024,000 samples/s,
+first to last sample spans about 124 us. Both panels use the same scale. These
+short examples do not necessarily include the extrema from the whole recording.
+
+The P4 adds about 43 KiB of fixed test-only memory and readback arithmetic, with
+no acquisition-path changes. Additional serial reports occur after capture.
+
+The generator is independent of recording start. Analysis finds the actual
+transitions and excludes two bins at each end of a plateau. It does not assume
+the initial state is low and does not fit away gain or offset errors.
+
+PASS requires the existing recording, receive, duration and checksum checks,
+one-second levels, and worst plateau error <=10% of the measured scope swing.
+This is the existing functional smoke-test tolerance, not an ADC specification.
+Only retained file generations are readback-verified during longer circular runs.
+
+Scope references are manually entered, not a simultaneous waveform capture.
+ADS127 voltage conversion assumes 2.5 V reference and unity gain. Differences
+include scope/probe accuracy and ADC reference/input-path error. This is not
+a precision calibration.
+
+PC checks
+---------
+externalGeneratorChecks.py is included in runSmokeChecks.ps1. It covers initial
+phase, retained windows, voltage offset, stuck signals, mixed edge bins, wrong
+firmware identity, missing/duplicate rows and recording error counters.
+These checks and firmware builds must be run by Karl; they were not run during
+implementation. Python syntax was inspected without executing the tests.
+
+1 kHz option
+------------
+After uploading the new P4 smoke firmware, switch Rigol output OFF while changing
+frequency to 1 kHz. Keep the same amplitude and offset and 50% duty cycle. With
+the ADC powered, enable output and remeasure Vbase/Vtop at the connected input.
+Adjust scope horizontal scale to see several cycles (for example, 500 us/div).
+
+From the repository root:
+    .\test\runHardwareSmoke.ps1 -External -Seconds 30 -Frequency 1000
+
+The familiar 30-second recording is retained. During readback, the P4 saves
+5120 consecutive samples starting one second into the retained SD data. At
+1,024,000 samples/s that is five milliseconds, about five full cycles. Longer
+runs use the same window relative to the oldest retained file, not capture start.
+It adds 20 KiB of fixed test-only storage, with no acquisition-path changes.
+
+The HTML shows the five-ms window plus enlarged rising and falling edges.
+Results include frequency, central-plateau levels and sample standard deviations,
+overshoot/undershoot, and apparent settling. The central half of complete
+high/low intervals supplies settled measurements. Unlike the slow test, these
+statistics describe only the short waveform window, not the whole recording.
+
+Edge detection uses 25%/75% of the entered scope swing to avoid chatter. Settling
+is timed after detection, relative to the ADC's measured plateau voltage, within
++/-2% of its measured swing. The last 10% of each interval is excluded to avoid
+the following edge. Noise/spikes affect this number; it is not a specification
+of the ADC or a measurement of generator-to-ADC delay. No scope time trace is
+imported. Generator, wiring, board input circuitry and filtering all contribute.
+
+PASS retains all recording-integrity checks and requires frequency within 5%
+of 1 kHz, half-cycle widths within 10% of 500 us, and settled level errors within
+10% of entered scope swing. These deliberately broad limits are functional
+checks. Overshoot and settling are reported without inventing acceptance limits.
+
+Omit -Frequency 1000 to retain the original 0.5 Hz analysis. The PC suite includes
+fastSquareChecks.py for phase, wrong frequency, stuck signal, offsets, overshoot,
+incomplete chunks and graph retention on a failed waveform.

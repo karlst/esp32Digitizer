@@ -28,8 +28,8 @@
 function byteSize(value)
 {
     const bytes = BigInt(value);
-    const units = [[1073741824n, "GiB"], [1048576n, "MiB"], [1024n, "KiB"]];
-    const unit = units.find(([size]) => bytes >= size);
+    const units = [ [ 1073741824n, "GiB" ], [ 1048576n, "MiB" ], [ 1024n, "KiB" ] ];
+    const unit = units.find(([ size ]) => bytes >= size);
     return unit ? `${bytes / unit[0]}.${(bytes % unit[0]) * 10n / unit[0]} ${unit[1]}` : `${bytes} B`;
 }
 
@@ -89,15 +89,21 @@ export function createRecordingPanel()
         get("rec-chart-scale").textContent = `· delay scale 0–${maxDelay.toFixed(1)} ms`;
         ctx.strokeStyle = "#d6dde5";
         ctx.strokeRect(0.5, 0.5, width - 1, 79);
-        for (const [key, color, scale] of [["fill", "#1859b5", 100], ["delay", "#b74e0b", maxDelay]])
+        for (const [key, color, scale] of [[ "fill", "#1859b5", 100 ], [ "delay", "#b74e0b", maxDelay ]])
         {
             ctx.beginPath();
             ctx.strokeStyle = color;
-            history.forEach((point, index) =>
-            {
+            history.forEach((point, iPoint) => {
                 const x = width - (history[history.length - 1].time - point.time) / 120000 * width;
                 const y = 78 - point[key] / scale * 76;
-                if (index) { ctx.lineTo(x, y); } else { ctx.moveTo(x, y); }
+                if (iPoint)
+                {
+                    ctx.lineTo(x, y);
+                }
+                else
+                {
+                    ctx.moveTo(x, y);
+                }
             });
             ctx.stroke();
         }
@@ -126,15 +132,17 @@ export function createRecordingPanel()
      * On valid status, replace labels and geometry, add a changed observation to the
      * chart, then redraw. A displayed Saved state is receiver's report, not a browser guess.
      */
-    return function render(state)
-    {
+    return function render(state) {
         const rec = state?.connected ? state.recording : null;
         const message = get("recording-message");
-        const ids = ["state", "file", "card", "bytes", "samples", "rate", "delay", "max-delay", "open-time", "buffer", "pointers", "errors"];
+        const ids = [ "state", "file", "card", "bytes", "samples", "rate", "delay", "max-delay", "open-time", "buffer", "pointers", "errors" ];
         if (!rec)
         {
             message.textContent = state?.connected ? "Recording unavailable — receiver update required." : "Recording state unknown — disconnected.";
-            for (const id of ids) { get(`rec-${id}`).textContent = "—"; }
+            for (const id of ids)
+            {
+                get(`rec-${id}`).textContent = "—";
+            }
             get("rec-fill").style.width = "0%";
             get("rec-wrap").style.width = "0%";
             get("rec-meter").removeAttribute("aria-valuenow");
@@ -150,27 +158,28 @@ export function createRecordingPanel()
             {
                 throw new Error("Invalid recording status");
             }
-            const labels = ["Idle", "Preparing…", "Recording", "Saving…", "Saved", "Incomplete — error", "Deleting…"];
-            const cardLabels = ["Unknown", "Ready", "No card", "Unsupported filesystem", "Card I/O error"];
-            const active = [1, 2, 3, 6].includes(Number(rec.state));
-            message.textContent = rec.state === "6" ? `Deleting recordings — ${rec.deletedFiles} files removed.` :
-                state.acquisitionRunning && rec.enabled === "0" ? "Not recording. Showing last recording, if any." :
-                rec.state === "5" ? "Recording incomplete. Check the error counters." :
-                active ? "Current recording" : rec.session !== "0" ? "Last recording" : "Ready for the first recording.";
+            const labels = [ "Idle", "Preparing…", "Recording", "Saving…", "Saved", "Incomplete — error", "Deleting…" ];
+            const cardLabels = [ "Unknown", "Ready", "No card", "Unsupported filesystem", "Card I/O error" ];
+            const active = [ 1, 2, 3, 6 ].includes(Number(rec.state));
+            message.textContent = rec.state === "6" ? `Deleting recordings — ${rec.deletedFiles} files removed.` : state.acquisitionRunning && rec.enabled === "0" ? "Not recording. Showing last recording, if any."
+                                                                                                               : rec.state === "5"                                 ? "Recording incomplete. Check the error counters."
+                                                                                                               : active                                            ? "Current recording"
+                                                                                                               : rec.session !== "0"                               ? "Last recording"
+                                                                                                                                                                   : "Ready for the first recording.";
             get("rec-state").textContent = `${labels[Number(rec.state)]} / ${elapsed(rec.elapsedMs)}`;
             get("rec-file").textContent = rec.session === "0" ? "—" : `recording_${rec.session.padStart(6, "0")}_${rec.part.padStart(3, "0")}.bin`;
             // Calculate a bounded percentage AFTER exact integer arithmetic. Converting
             // that small scaled result to Number is safe for chart/display purposes.
             const cardPercent = BigInt(rec.cardBytes) ? Number((BigInt(rec.cardBytes) - BigInt(rec.freeBytes)) * 1000n / BigInt(rec.cardBytes)) / 10 : 0;
             // Label estimates and stale scans explicitly; old firmware is unknown.
-            const spaceLabel = ["last reported free", "measured free", "estimated free", "stale free"][Number(rec.freeSpaceMode || 0)];
+            const spaceLabel = [ "last reported free", "measured free", "estimated free", "stale free" ][Number(rec.freeSpaceMode || 0)];
             get("rec-card").textContent = `${cardLabels[Number(rec.card)]} · ${cardPercent}% used · ${byteSize(rec.freeBytes)} ${spaceLabel}`;
             get("rec-open-time").textContent = Number(rec.fileOpenUs || 0) ? `${(Number(rec.fileOpenUs) / 1000).toFixed(3)} ms` : "—";
             get("rec-bytes").textContent = `${BigInt(rec.bytesWritten).toLocaleString("en-US")} bytes (${byteSize(rec.bytesWritten)})`;
             get("rec-samples").textContent = BigInt(rec.samplesWritten).toLocaleString("en-US");
             get("rec-rate").textContent = `${byteSize(rec.bytesPerSecond)}/s`;
             get("rec-delay").textContent = `${(Number(rec.latestDelayUs) / 1000).toFixed(3)} ms`;
-            const kind = ["none", "write", "flush"][Number(rec.maxDelayKind)];
+            const kind = [ "none", "write", "flush" ][Number(rec.maxDelayKind)];
             get("rec-max-delay").textContent = `${(Number(rec.maxDelayUs) / 1000).toFixed(3)} ms · ${kind} · at ${elapsed(rec.maxDelayAtMs)}`;
             // These values were restricted to 32-bit positions by Feather validation,
             // so Number can represent them exactly. They index the ring, not a disk file.
@@ -189,19 +198,23 @@ export function createRecordingPanel()
             get("rec-meter").setAttribute("aria-valuenow", fill.toFixed(1));
             get("rec-buffer").textContent = `Waiting: ${byteSize(rec.usedBytes)} / ${byteSize(rec.bufferBytes)} · ${fill.toFixed(1)}% · Peak: ${peak.toFixed(1)}%`;
             get("rec-pointers").textContent = `Write: ${rec.writePosition} B · Read: ${rec.readPosition} B (wrap at ${rec.bufferBytes} B)`;
-            for (const [id, position] of [["rec-write-marker", rec.writePosition], ["rec-read-marker", rec.readPosition]])
+            for (const [id, position] of [[ "rec-write-marker", rec.writePosition ], [ "rec-read-marker", rec.readPosition ]])
             {
                 get(id).hidden = !capacity;
                 get(id).style.left = `${capacity ? Number(position) * 100 / capacity : 0}%`;
             }
             get("rec-errors").textContent = `Overflows: ${rec.overflows} · Samples lost: ${rec.lostSamples} · Write errors: ${rec.writeErrors}`;
-            get("rec-errors").classList.toggle("has-errors", [rec.overflows, rec.lostSamples, rec.writeErrors].some((v) => BigInt(v) > 0n));
+            get("rec-errors").classList.toggle("has-errors", [ rec.overflows, rec.lostSamples, rec.writeErrors ].some((v) => BigInt(v) > 0n));
             // Sample only changed telemetry, not duplicate HTTP polls. Reset for
             // a new session; keep the last chart after Stop. Store fullness with
             // each point for comparison, even though its main display is above.
             if (session !== rec.session)
             {
-                history.length = 0; maxima.length = 0; lastKey = null; previousMaxDelay = 0; session = rec.session;
+                history.length = 0;
+                maxima.length = 0;
+                lastKey = null;
+                previousMaxDelay = 0;
+                session = rec.session;
             }
             // HTTP may poll the same UART report more than once. This key avoids
             // drawing duplicate points just because the browser polled again.
@@ -214,14 +227,20 @@ export function createRecordingPanel()
                 const maximum = Number(rec.maxDelayUs);
                 if (maximum > previousMaxDelay)
                 {
-                    maxima.push({ time: Number(rec.maxDelayAtMs), delay: maximum / 1000 });
+                    maxima.push({time : Number(rec.maxDelayAtMs), delay : maximum / 1000});
                 }
-                history.push({ time, fill, delay: Number(rec.latestDelayUs) / 1000, cardPercent });
+                history.push({time, fill, delay : Number(rec.latestDelayUs) / 1000, cardPercent});
                 previousMaxDelay = maximum;
                 // Discard old observations to bound browser memory. The chart cannot recover
                 // all short stalls between reports; receiver separately preserves peak/max values.
-                while (history.length > 240 || (history.length && time - history[0].time > 120000)) { history.shift(); }
-                while (maxima.length > 240 || (maxima.length && time - maxima[0].time > 120000)) { maxima.shift(); }
+                while (history.length > 240 || (history.length && time - history[0].time > 120000))
+                {
+                    history.shift();
+                }
+                while (maxima.length > 240 || (maxima.length && time - maxima[0].time > 120000))
+                {
+                    maxima.shift();
+                }
                 lastKey = key;
             }
             canvas.hidden = false;

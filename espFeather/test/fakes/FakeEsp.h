@@ -12,20 +12,24 @@
  * Public License in the repository LICENSE file or <https://www.gnu.org/licenses/>.
  */
 
-/** @file FakeEsp.h
- * @brief FakeEsp declaration shared by its callers.
+/**
+ * @file FakeEsp.h
+ * FakeEsp declaration shared by its callers.
  */
 #pragma once
 
 /**
- * @brief Observe reboot without restarting the test process.
+ * Observe reboot without restarting the test process.
  */
 struct FakeEsp
 {
     int _restarts = 0;
 
-    /**
-     * @brief Record a restart request.
+    /* **
+     * restart - Record a restart request.
      */
-    void restart() { ++_restarts; }
+    void restart()
+    {
+        ++_restarts;
+    }
 };

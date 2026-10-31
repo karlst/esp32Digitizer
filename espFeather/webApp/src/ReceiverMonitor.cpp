@@ -14,7 +14,7 @@
 
 /**
  * @file ReceiverMonitor.cpp
- * @brief Feather-side serial receiver and command tracker for the receiver board.
+ * Feather-side serial receiver and command tracker for the receiver board.
  *
  * webApp calls begin() once and update() on each Arduino loop pass. update()
  * assembles serial lines; acceptLine() validates every field before storing it.
@@ -31,20 +31,23 @@
 #include <cstdio>
 #include <esp_system.h>
 
-/**
- * @brief Keep a reference to the dedicated inter-board serial port.
- * @param serialPort Serial1 owned by the runtime; USB diagnostics use Serial instead.
+/* **
+ * ReceiverMonitor - Keep a reference to the dedicated inter-board serial port.
+ * serialPort Serial1 owned by the runtime; USB diagnostics use Serial instead.
  *
- * The constructor can run before Arduino startup, so hardware work waits for begin().
- * This object is used only by the loop task, not the DAC worker or an interrupt.
+ * The constructor can run before Arduino startup, so hardware work waits for
+ * begin(). This object is used only by the loop task, not the DAC worker or an
+ * interrupt.
  */
-ReceiverMonitor::ReceiverMonitor(HardwareSerial& hardwareSerial) : _hardwareSerial(hardwareSerial)
+ReceiverMonitor::ReceiverMonitor(HardwareSerial& hardwareSerial)
+    : _hardwareSerial(hardwareSerial)
 {
     // Configuration waits until Arduino setup so its runtime is initialized.
 }
 
-/**
- * @brief Start the header UART independently of USB programming and debug output.
+/* **
+ * begin - Start the header UART independently of USB programming and debug
+ * output.
  *
  * The Feather V2 board definition maps RX to GPIO7 and TX to GPIO8. Named pins
  * deliberately avoid the original Feather's incompatible GPIO16/17 assignments.
@@ -66,20 +69,20 @@ void ReceiverMonitor::begin()
     Serial.println("receiver monitor: 115200 baud, Feather RX=GPIO7, TX=GPIO8; waiting for receiver.");
 }
 
-/**
- * @brief Parse strict unsigned decimal text without accepting signs or wraparound.
- * @param maximum Largest permitted field value.
- * @param value Written only when the entire field is valid.
- * @return True for a nonempty sequence of digits within range.
+/* **
+ * readUnsigned - Parse strict unsigned decimal text without accepting signs or
+ * wraparound. maximum Largest permitted field value. value Written only when the
+ * entire field is valid. Returns: True for a nonempty sequence of digits within
+ * range.
  */
 bool ReceiverMonitor::readUnsigned(const char* text, uint64_t maximum, uint64_t& value)
 {
     bool retVal = *text != '\0';
     uint64_t parsed = 0;
     // Check before multiplication; even a long string cannot overflow the accumulator.
-    for (size_t index = 0; text[index] != '\0' && retVal; ++index)
+    for (size_t iCharacter = 0; text[iCharacter] != '\0' && retVal; ++iCharacter)
     {
-        const char digit = text[index];
+        const char digit = text[iCharacter];
         if (digit < '0' || digit > '9' || static_cast<uint64_t>(digit - '0') > maximum ||
             parsed > (maximum - (digit - '0')) / 10)
         {
@@ -101,20 +104,23 @@ bool ReceiverMonitor::readUnsigned(const char* text, uint64_t maximum, uint64_t&
     return retVal;
 }
 
-/**
- * @brief Validate a complete receiver status report before replacing the displayed state.
+/* **
+ * acceptLine - Validate a complete receiver status report before replacing the
+ * displayed state.
  *
  * Version 5 adds initial file-opening time and free-space measurement quality.
- * Version 4 has the original 24 recording fields; missing additions stay unknown.
- * Version 4 adds those fields to version 3's nineteen acquisition fields.
- * The whole report must validate before any part becomes visible. Older version-2
- * reports have thirteen fields and remain usable while boards are updated;
- * their missing diagnostics are reported as unknown, not as zero.
- * @param nowMs Feather receipt time; receiver uptime is never compared to the Feather clock.
- * @return True only after a whole frame has passed validation and been committed.
+ * Version 4 has the original 24 recording fields; missing additions stay
+ * unknown. Version 4 adds those fields to version 3's nineteen acquisition
+ * fields. The whole report must validate before any part becomes visible. Older
+ * version-2 reports have thirteen fields and remain usable while boards are
+ * updated; their missing diagnostics are reported as unknown, not as zero. nowMs
+ * Feather receipt time; receiver uptime is never compared to the Feather clock.
+ * Returns: True only after a whole frame has passed validation and been
+ * committed.
  *
- * Malformed/unsupported traffic cannot refresh 'connected'. Keeping temporary values
- * until all checks pass prevents a partial line from corrupting the displayed state.
+ * Malformed/unsupported traffic cannot refresh 'connected'. Keeping temporary
+ * values until all checks pass prevents a partial line from corrupting the
+ * displayed state.
  */
 bool ReceiverMonitor::acceptLine(uint32_t nowMs)
 {
@@ -122,14 +128,14 @@ bool ReceiverMonitor::acceptLine(uint32_t nowMs)
     size_t fieldCount = 1;
     bool retVal = true;
     // Split in place, preserving empty fields so missing values are rejected.
-    for (size_t index = 0; index < _lineLength; ++index)
+    for (size_t iCharacter = 0; iCharacter < _lineLength; ++iCharacter)
     {
-        if (_line[index] == ',')
+        if (_line[iCharacter] == ',')
         {
-            _line[index] = '\0';
+            _line[iCharacter] = '\0';
             if (fieldCount < 45)
             {
-                fields[fieldCount++] = &_line[index + 1];
+                fields[fieldCount++] = &_line[iCharacter + 1];
             }
             else
             {
@@ -141,7 +147,7 @@ bool ReceiverMonitor::acceptLine(uint32_t nowMs)
     const bool hasRecording = hasSpaceDetails || (fieldCount == 43 && strcmp(fields[1], "4") == 0);
     const bool hasDiagnostics = hasRecording || (fieldCount == 19 && strcmp(fields[1], "3") == 0);
     retVal = retVal && strcmp(fields[0], "RECEIVER") == 0 &&
-        (hasDiagnostics || (fieldCount == 13 && strcmp(fields[1], "2") == 0));
+             (hasDiagnostics || (fieldCount == 13 && strcmp(fields[1], "2") == 0));
     uint64_t parsed[17] = {};
     RecordingStatus recordingStatusNext;
     // Validate recording fields into temporary storage. A corrupt extended field
@@ -149,9 +155,9 @@ bool ReceiverMonitor::acceptLine(uint32_t nowMs)
     if (hasRecording)
     {
         const size_t columns = hasSpaceDetails ? RecordingStatus::_fieldCount : RecordingStatus::_legacyFieldCount;
-        for (size_t index = 0; index < columns && retVal; ++index)
+        for (size_t iField = 0; iField < columns && retVal; ++iField)
         {
-            retVal = readUnsigned(fields[19 + index], UINT64_MAX, recordingStatusNext._values[index]);
+            retVal = readUnsigned(fields[19 + iField], UINT64_MAX, recordingStatusNext._values[iField]);
         }
         retVal = retVal && recordingStatusNext.valid();
     }
@@ -162,26 +168,26 @@ bool ReceiverMonitor::acceptLine(uint32_t nowMs)
         negative = fields[6][0] == '-';
         const char* rawDigits = fields[6] + (negative ? 1 : 0);
         retVal = readUnsigned(fields[2], UINT32_MAX, parsed[0]) &&
-            readUnsigned(fields[3], 1, parsed[1]) &&
-            readUnsigned(fields[4], UINT64_MAX, parsed[2]) &&
-            readUnsigned(fields[5], UINT32_MAX, parsed[3]) &&
-            readUnsigned(rawDigits, negative ? 8388608 : 8388607, parsed[4]) &&
-            readUnsigned(fields[7], UINT32_MAX, parsed[5]) &&
-            readUnsigned(fields[8], UINT32_MAX, parsed[6]) &&
-            readUnsigned(fields[9], 1, parsed[7]) &&
-            readUnsigned(fields[10], 30000, parsed[8]) && validRate(static_cast<uint32_t>(parsed[8])) &&
-            readUnsigned(fields[11], UINT32_MAX, parsed[9]) &&
-            readUnsigned(fields[12], 2, parsed[10]);
+                 readUnsigned(fields[3], 1, parsed[1]) &&
+                 readUnsigned(fields[4], UINT64_MAX, parsed[2]) &&
+                 readUnsigned(fields[5], UINT32_MAX, parsed[3]) &&
+                 readUnsigned(rawDigits, negative ? 8388608 : 8388607, parsed[4]) &&
+                 readUnsigned(fields[7], UINT32_MAX, parsed[5]) &&
+                 readUnsigned(fields[8], UINT32_MAX, parsed[6]) &&
+                 readUnsigned(fields[9], 1, parsed[7]) &&
+                 readUnsigned(fields[10], 30000, parsed[8]) && validRate(static_cast<uint32_t>(parsed[8])) &&
+                 readUnsigned(fields[11], UINT32_MAX, parsed[9]) &&
+                 readUnsigned(fields[12], 2, parsed[10]);
         // Validate every added field before committing any of this report. Keep
         // 64-bit counts intact; last-fault flags have only two defined bits.
         if (retVal && hasDiagnostics)
         {
             retVal = readUnsigned(fields[13], UINT64_MAX, parsed[11]) &&
-                readUnsigned(fields[14], UINT64_MAX, parsed[12]) &&
-                readUnsigned(fields[15], UINT64_MAX, parsed[13]) &&
-                readUnsigned(fields[16], UINT64_MAX, parsed[14]) &&
-                readUnsigned(fields[17], UINT64_MAX, parsed[15]) &&
-                readUnsigned(fields[18], 3, parsed[16]);
+                     readUnsigned(fields[14], UINT64_MAX, parsed[12]) &&
+                     readUnsigned(fields[15], UINT64_MAX, parsed[13]) &&
+                     readUnsigned(fields[16], UINT64_MAX, parsed[14]) &&
+                     readUnsigned(fields[17], UINT64_MAX, parsed[15]) &&
+                     readUnsigned(fields[18], 3, parsed[16]);
         }
     }
     if (retVal)
@@ -191,7 +197,7 @@ bool ReceiverMonitor::acceptLine(uint32_t nowMs)
         // Counter reset or a backward uptime jump starts observation again; unsigned
         // uptime subtraction handles the normal millis() wrap without a false restart.
         const bool sameSession = _receivedFrame && nowMs - _lastFrameMs < _connectionTimeoutMs &&
-            static_cast<uint32_t>(parsed[0] - _uptimeMs) < 0x80000000UL && parsed[2] >= _sampleCount;
+                                 static_cast<uint32_t>(parsed[0] - _uptimeMs) < 0x80000000UL && parsed[2] >= _sampleCount;
         if (!sameSession || parsed[1] == 0)
         {
             _observedProgress = false;
@@ -226,12 +232,11 @@ bool ReceiverMonitor::acceptLine(uint32_t nowMs)
         // the requested running rate, and Stop/Reboot must report stopped acquisition.
         if (_commandStatus == "pending" && parsed[9] == _commandId && parsed[10] != 0)
         {
-            const bool applied = _commandAction == "start" ?
-                _acquisitionRunning && _appliedRate == _requestedRate &&
-                (!_requestedRecording || (hasRecording && recordingStatusNext._values[RecordingStatus::state] == RecordingStatus::recording)) :
-                !_acquisitionRunning && (!hasRecording ||
-                (recordingStatusNext._values[RecordingStatus::state] != RecordingStatus::saving &&
-                 recordingStatusNext._values[RecordingStatus::state] != RecordingStatus::deleting));
+            const bool applied = _commandAction == "start" ? _acquisitionRunning && _appliedRate == _requestedRate &&
+                                                                 (!_requestedRecording || (hasRecording && recordingStatusNext._values[RecordingStatus::state] == RecordingStatus::recording))
+                                                           : !_acquisitionRunning && (!hasRecording ||
+                                                                                         (recordingStatusNext._values[RecordingStatus::state] != RecordingStatus::saving &&
+                                                                                             recordingStatusNext._values[RecordingStatus::state] != RecordingStatus::deleting));
             _commandStatus = parsed[10] == 1 && applied ? "confirmed" : "rejected";
         }
         // Preparing/saving/deleting may take longer than a short command. A fresh
@@ -240,8 +245,8 @@ bool ReceiverMonitor::acceptLine(uint32_t nowMs)
         // times out. An unrelated operation cannot extend this command's deadline.
         if (_commandStatus == "pending" && parsed[9] == _commandId && parsed[10] == 0 && hasRecording &&
             (recordingStatusNext._values[RecordingStatus::state] == RecordingStatus::preparing ||
-             recordingStatusNext._values[RecordingStatus::state] == RecordingStatus::saving ||
-             recordingStatusNext._values[RecordingStatus::state] == RecordingStatus::deleting))
+                recordingStatusNext._values[RecordingStatus::state] == RecordingStatus::saving ||
+                recordingStatusNext._values[RecordingStatus::state] == RecordingStatus::deleting))
         {
             _commandSentMs = nowMs;
         }
@@ -251,19 +256,21 @@ bool ReceiverMonitor::acceptLine(uint32_t nowMs)
     return retVal;
 }
 
-/**
- * @brief Drain available serial bytes and update pending-command timeout state.
+/* **
+ * update - Drain available serial bytes and update pending-command timeout
+ * state.
  *
  * Called from webApp, never from an interrupt. Read at most 256 bytes per call;
- * longer buffered input is handled by the next pass. No call waits for another byte.
- * A whole valid line refreshes the link; malformed text does not. Lines are capped
- * by lineCapacity and fragments expire after 500 ms. LF ends a line; CR is ignored.
+ * longer buffered input is handled by the next pass. No call waits for another
+ * byte. A whole valid line refreshes the link; malformed text does not. Lines
+ * are capped by lineCapacity and fragments expire after 500 ms. LF ends a line;
+ * CR is ignored.
  *
  * A command with no matching confirmation after five seconds becomes timeout,
  * unless fresh matching reports say preparation/saving/deletion is still busy;
- * those reports restart the five-second wait in acceptLine().
- * That means its outcome is unknown, not that receiver definitely did nothing. Do not
- * retry automatically: the next status can still show what receiver is actually doing.
+ * those reports restart the five-second wait in acceptLine(). That means its
+ * outcome is unknown, not that receiver definitely did nothing. Do not retry
+ * automatically: the next status can still show what receiver is actually doing.
  */
 void ReceiverMonitor::update()
 {
@@ -310,18 +317,20 @@ void ReceiverMonitor::update()
     }
 }
 
-/**
- * @brief Build a browser reply from the most recent validated receiver report.
- * @return JSON text with live measurements, or null measurements after disconnection.
+/* **
+ * getStateJson - Build a browser reply from the most recent validated receiver
+ * report. Returns: JSON text with live measurements, or null measurements after
+ * disconnection.
  *
  * A report older than three seconds is disconnected. "receiving" additionally
- * requires running/ready flags, recent count progress, and a recently read sample.
- * receiver sample age is extended by time since Feather received the report; the boards'
- * absolute clocks are never compared. Stale values must not masquerade as live data.
+ * requires running/ready flags, recent count progress, and a recently read
+ * sample. receiver sample age is extended by time since Feather received the
+ * report; the boards' absolute clocks are never compared. Stale values must not
+ * masquerade as live data.
  *
  * All 64-bit totals are decimal strings so JavaScript cannot round away digits.
- * Version-2 reports lack diagnostics and show them as null. Command outcome fields
- * remain available even when live measurements become unknown.
+ * Version-2 reports lack diagnostics and show them as null. Command outcome
+ * fields remain available even when live measurements become unknown.
  */
 String ReceiverMonitor::getStateJson() const
 {
@@ -329,8 +338,8 @@ String ReceiverMonitor::getStateJson() const
     const uint32_t ageMs = nowMs - _lastFrameMs;
     const bool connected = _receivedFrame && ageMs < _connectionTimeoutMs;
     const bool receiving = connected && _acquisitionRunning && _adcReady && _observedProgress &&
-        nowMs - _lastProgressMs < _connectionTimeoutMs &&
-        static_cast<uint64_t>(_sampleAgeMs) + ageMs < _connectionTimeoutMs;
+                           nowMs - _lastProgressMs < _connectionTimeoutMs &&
+                           static_cast<uint64_t>(_sampleAgeMs) + ageMs < _connectionTimeoutMs;
     String retVal = "{\"connected\":" + String(connected ? "true" : "false");
     retVal += ",\"lastMessageAgeMs\":" + (_receivedFrame ? String(ageMs) : String("null"));
     retVal += ",\"rejectedFrames\":" + String(_rejectedFrames);
@@ -344,13 +353,13 @@ String ReceiverMonitor::getStateJson() const
     retVal += ",\"diagnosticsAvailable\":" + String(showDiagnostics ? "true" : "false");
     const char* names[] = {"missedEdges", "rejectedReads", "readFailures", "overlapReads", "readyTimeouts"};
     const uint64_t totals[] = {_missedEdges, _rejectedReads, _readFailures, _overlapReads, _readyTimeouts};
-    for (size_t index = 0; index < 5; ++index)
+    for (size_t iCounter = 0; iCounter < 5; ++iCounter)
     {
-        retVal += ",\"" + String(names[index]) + "\":";
+        retVal += ",\"" + String(names[iCounter]) + "\":";
         if (showDiagnostics)
         {
             char totalText[24];
-            snprintf(totalText, sizeof(totalText), "%llu", static_cast<unsigned long long>(totals[index]));
+            snprintf(totalText, sizeof(totalText), "%llu", static_cast<unsigned long long>(totals[iCounter]));
             retVal += "\"" + String(totalText) + "\"";
         }
         else
@@ -382,12 +391,14 @@ String ReceiverMonitor::getStateJson() const
     return retVal;
 }
 
-/**
- * @brief Check that samples-per-second is one of the seven rates offered by this UI.
- * @return True for an exact supported rate, not for every integer below 30000.
+/* **
+ * validRate - Check that samples-per-second is one of the seven rates offered by
+ * this UI. Returns: True for an exact supported rate, not for every integer
+ * below 30000.
  *
- * This matches receiver's commandProtocol::rateRegister choices. Neither this test nor
- * the dropdown establishes that acquisition can sustain every offered rate.
+ * This matches receiver's commandProtocol::rateRegister choices. Neither this
+ * test nor the dropdown establishes that acquisition can sustain every offered
+ * rate.
  */
 bool ReceiverMonitor::validRate(uint32_t rate)
 {
@@ -400,19 +411,21 @@ bool ReceiverMonitor::validRate(uint32_t rate)
     return retVal;
 }
 
-/**
- * @brief Send one validated command to receiver and mark it pending without waiting.
- * @param action start, stop, reboot, or delete; all other text is rejected.
- * @param rate Samples/second for Start; Stop/Reboot always transmit zero instead.
- * @param record Whether Start must also create a recording; false for other actions.
- * Deletion needs recording-capable firmware, a ready card and stopped acquisition.
- * @return True if the entire command was accepted by the serial transmit buffer.
- * False means disconnected, busy, invalid settings/state, or insufficient buffer room.
+/* **
+ * sendCommand - Send one validated command to receiver and mark it pending
+ * without waiting. action start, stop, reboot, or delete; all other text is
+ * rejected. rate Samples/second for Start; Stop/Reboot always transmit zero
+ * instead. record Whether Start must also create a recording; false for other
+ * actions. Deletion needs recording-capable firmware, a ready card and stopped
+ * acquisition. Returns: True if the entire command was accepted by the serial
+ * transmit buffer. False means disconnected, busy, invalid settings/state, or
+ * insufficient buffer room.
  *
- * Only the loop task calls this. A successful return is NOT hardware confirmation:
- * acceptLine() later checks the matching request ID, receiver result, and applied state.
- * The five-second timeout is handled in update(); there is no automatic retransmit.
- * An already running acquisition cannot be retuned to a different rate with Start.
+ * Only the loop task calls this. A successful return is NOT hardware
+ * confirmation: acceptLine() later checks the matching request ID, receiver
+ * result, and applied state. The five-second timeout is handled in update();
+ * there is no automatic retransmit. An already running acquisition cannot be
+ * retuned to a different rate with Start.
  */
 bool ReceiverMonitor::sendCommand(const char* action, uint32_t rate, bool record)
 {
@@ -422,14 +435,14 @@ bool ReceiverMonitor::sendCommand(const char* action, uint32_t rate, bool record
     const bool knownAction = isStart || isDelete || strcmp(action, "stop") == 0 || strcmp(action, "reboot") == 0;
     const auto recordingState = _recordingMonitor._recordingStatus._values[RecordingStatus::state];
     const bool storageBusy = _recordingMonitor._available && (recordingState == RecordingStatus::preparing ||
-        recordingState == RecordingStatus::saving || recordingState == RecordingStatus::deleting);
+                                                                 recordingState == RecordingStatus::saving || recordingState == RecordingStatus::deleting);
     bool retVal = false;
     if (knownAction && _receivedFrame && nowMs - _lastFrameMs < _connectionTimeoutMs &&
         _commandStatus != "pending" && !storageBusy && (!record || (isStart && _recordingMonitor._available)) &&
         (!isDelete || (_recordingMonitor._available && !_acquisitionRunning &&
-            _recordingMonitor._recordingStatus._values[RecordingStatus::card] == RecordingStatus::ready)) &&
+                          _recordingMonitor._recordingStatus._values[RecordingStatus::card] == RecordingStatus::ready)) &&
         (!isStart || (_adcReady && validRate(rate) &&
-        (!_acquisitionRunning || rate == _appliedRate))))
+                         (!_acquisitionRunning || rate == _appliedRate))))
     {
         // Each request gets a new ID so an old reply cannot complete this one.
         // Skip zero after 32-bit wrap: zero means "no command" in the protocol.
@@ -441,8 +454,8 @@ bool ReceiverMonitor::sendCommand(const char* action, uint32_t rate, bool record
         // Older receivers keep receiving their original command format. Version 3 adds
         // the recording flag; version-4 or version-5 status advertises support.
         const String command = "CMD," + String(_recordingMonitor._available ? "3," : "2,") + String(nextId) + "," +
-            action + "," + String(isStart ? rate : 0) +
-            (_recordingMonitor._available ? String(record ? ",1" : ",0") : String("")) + "\n";
+                               action + "," + String(isStart ? rate : 0) +
+                               (_recordingMonitor._available ? String(record ? ",1" : ",0") : String("")) + "\n";
         // Require space for the whole line before writing. Remember pending state
         // only if every character was accepted, including the ending newline.
         if (_hardwareSerial.availableForWrite() >= static_cast<int>(command.length()))

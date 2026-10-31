@@ -14,7 +14,7 @@
 
 /**
  * @file monitorChecks.cpp
- * @brief Exercise actual UART parsing and JSON output with no connected hardware.
+ * Exercise actual UART parsing and JSON output with no connected hardware.
  */
 #include <cassert>
 #include <iostream>
@@ -27,12 +27,13 @@ FakeSerial Serial;
 FakeSerial Serial1;
 FakeEsp ESP;
 
-/**
- * @brief Place a serial line in the fake receive buffer and drain it through real code.
+/* **
+ * deliver - Place a serial line in the fake receive buffer and drain it through
+ * real code.
  *
- * monitor.update() handles only a bounded number of bytes per call, so repeat until
- * all bytes are consumed. This simulates successive Arduino loop passes without
- * opening a serial port or invoking a private parser directly.
+ * monitor.update() handles only a bounded number of bytes per call, so repeat
+ * until all bytes are consumed. This simulates successive Arduino loop passes
+ * without opening a serial port or invoking a private parser directly.
  */
 static void deliver(ReceiverMonitor& receiverMonitor, HardwareSerial& hardwareSerial, const std::string& frame)
 {
@@ -43,13 +44,15 @@ static void deliver(ReceiverMonitor& receiverMonitor, HardwareSerial& hardwareSe
     }
 }
 
-/**
- * @brief Check the actual Feather serial parser and browser JSON against known messages.
+/* **
+ * main - Check the actual Feather serial parser and browser JSON against known
+ * messages.
  *
- * Verify exact 64-bit counter text, supported status versions, rejection of malformed
- * new fields, and that bad messages do not refresh connection time. Simulate receiver
- * reboot by sending reset counters and Feather disconnect by advancing its clock.
- * The test exercises code shared with firmware; it does not verify a physical UART.
+ * Verify exact 64-bit counter text, supported status versions, rejection of
+ * malformed new fields, and that bad messages do not refresh connection time.
+ * Simulate receiver reboot by sending reset counters and Feather disconnect by
+ * advancing its clock. The test exercises code shared with firmware; it does not
+ * verify a physical UART.
  */
 int main()
 {
@@ -72,8 +75,7 @@ int main()
     testMs = 100;
     const std::string invalid[] = {
         "18446744073709551616,12,8,7,4,3\n", "-1,12,8,7,4,3\n",
-        "1,,8,7,4,3\n", "1,12,8,7,4,4\n", "1,12,8,7,4\n", "1,12,8,7,4,3,0\n"
-    };
+        "1,,8,7,4,3\n", "1,12,8,7,4,4\n", "1,12,8,7,4\n", "1,12,8,7,4,3,0\n"};
     for (const auto& suffix : invalid)
     {
         deliver(receiverMonitor, hardwareSerial, prefix + suffix);
@@ -117,8 +119,7 @@ int main()
     deliver(receiverMonitorRecording, hardwareSerialRecording,
         "RECEIVER,4,200,1,1,30000,1,0,0,1,30000,1,1,0,0,0,0,0,0," + recordingFields);
     assert(std::string(receiverMonitorRecording.getStateJson()).find("\"commandStatus\":\"rejected\"") != std::string::npos);
-    deliver(receiverMonitorRecording, hardwareSerialRecording, v4 +
-        "0,1,0,0,0,0,0,0,1000000,800000,65536,4,4,65536,0,0,0,0,0,0,0,0,0,0\n");
+    deliver(receiverMonitorRecording, hardwareSerialRecording, v4 + "0,1,0,0,0,0,0,0,1000000,800000,65536,4,4,65536,0,0,0,0,0,0,0,0,0,0\n");
     assert(std::string(receiverMonitorRecording.getStateJson()).find("\"rejectedFrames\":1") != std::string::npos);
     deliver(receiverMonitorRecording, hardwareSerialRecording, "RECEIVER,2,300,1,0,0,0,4294967295,0,0,1000,0,0\n");
     assert(!receiverMonitorRecording.sendCommand("start", 1000, true));

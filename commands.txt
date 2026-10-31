@@ -13,3 +13,8 @@ Run smoke tests
 cd C:\Users\karls\source\esp32Digitizer
 .\test\runHardwareSmoke.ps1
 
+Build feather
+& "$env:USERPROFILE\.platformio\penv\Scripts\platformio.exe" run --project-dir .\espFeather -e ads127-hardware-smoke
+
+Upload to feather
+& "$env:USERPROFILE\.platformio\penv\Scripts\platformio.exe" run --project-dir .\espFeather -e ads127-hardware-smoke -t upload --upload-port COM4

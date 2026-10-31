@@ -1,0 +1,184 @@
+Index naming audit — 2026-10-22
+
+Applied convention: Foo is a type, foo is an object, foos is a collection,
+and iFoo is an index. Data members keep the leading underscore.
+
+Backend changes:
+  FileRecordingBackend: _slot -> _iSlot; lastSlot -> iSlotLast.
+  Slot-list loops: index -> iSlot. Filename character loop: digit -> iCharacter.
+  Statistics/Snapshot: _file -> _fileNumber (one-based display number, not a file object).
+
+Other changes, grouped by file (scope shown when needed):
+
+espFeather/test/hardware/InputSnapshot.cpp
+  file: index -> iPoint
+
+espFeather/test/hardware/benchDacLoopback.cpp
+  file: index -> iLoopbackPoint
+
+espFeather/webApp/data/static/js/recordingPanel.js
+  file: index -> iPoint
+
+espFeather/webApp/data/static/js/waveformGraph.js
+  file: index -> iSample, trace -> iTrace
+
+espFeather/webApp/include/DacGenerator.h
+  file: _writeIndex -> _iSampleRecord
+
+espFeather/webApp/include/RecordingStatus.h
+  file: index -> iField
+
+espFeather/webApp/src/DacGenerator.cpp
+  file: _writeIndex -> _iSampleRecord, i -> iSampleRecord
+
+espFeather/webApp/src/ReceiverMonitor.cpp
+  readUnsigned: index -> iCharacter
+  getStateJson: index -> iCounter
+  acceptLine: index (character loop) -> iCharacter, index (field loop) -> iField
+
+espFeather/webApp/src/RecordingMonitor.cpp
+  file: index -> iField
+
+espP4/lib/bufferedWriter/src/BufferedWriter.cpp
+  file: index -> iByte
+
+espP4/lib/bufferedWriter/test/bufferedWriterChecks.cpp
+  file: index -> iWord
+
+espP4/lib/fileRecorder/src/FileRecordingBackend.cpp
+  allocate: index -> iSlot
+  finalizeLossTotals: index -> iSlot
+  scanHeaders: digit -> iCharacter
+  Statistics/Snapshot only: _file -> _fileNumber
+
+espP4/lib/fileRecorder/src/FileRecordingBackend.h
+  Statistics/Snapshot only: _file -> _fileNumber
+
+espP4/lib/fileRecorder/src/RetainedPayloadChecksums.cpp
+  file: _slot -> _iEntry, _readSlot -> _iReadEntry, index -> iEntry
+
+espP4/lib/fileRecorder/src/RetainedPayloadChecksums.h
+  file: _slot -> _iEntry, _readSlot -> _iReadEntry
+
+espP4/lib/fileRecorder/src/SessionFileHeader.cpp
+  file: index -> iByte
+
+espP4/lib/fileRecorder/test/sessionChecks.cpp
+  file: index -> iByte
+
+espP4/lib/fileRecorder/test/writeBatchChecks.cpp
+  file: index -> iByte
+
+espP4/main/include/recordingFormat.h
+  packSamples: index -> iWord
+  store32: index -> iByte
+
+espP4/main/src/AdcReceiver.cpp
+  file: index -> iCaptureBlock
+
+espP4/main/src/ConsoleRecordingReporter.cpp
+  capture: index -> iExample
+
+espP4/main/src/FrameDecoder.cpp
+  file: index -> iByte
+
+espP4/main/src/RecordingController.cpp
+  file: index -> iByte
+
+espP4/test/analogReaderChecks.py
+  file: index -> iSample
+
+espP4/test/captureRamWaveform.py
+  file: index -> iWaveformBin
+
+espP4/test/choke/SdChokeTest.cpp
+  file: index -> iByte
+  Statistics/Snapshot only: _file -> _fileNumber
+
+espP4/test/choke/SdChokeTest.h
+  Statistics/Snapshot only: _file -> _fileNumber
+
+espP4/test/choke/main.cpp
+  file: index -> iCharacter
+
+espP4/test/compareWaveforms.py
+  file: index -> iRow
+
+espP4/test/comparisonChecks.py
+  file: index -> iSample
+
+espP4/test/constantReport.py
+  calibrationMapping: index -> iRow
+  voltagePanels: index -> iPanel
+
+espP4/test/decoderChecks.cpp
+  header64: index -> iByte
+  checkRecordingFormat: index -> iByte
+  appendFrame: index -> iClock
+  pack: index -> iPair
+  referenceDecode: index -> iPair, frame -> iFrame
+  checkReference: index -> iCounter
+  checkOutput: index -> iWord
+  main: index -> iPair, frame -> iFrame
+
+espP4/test/exactSampleChecks.cpp
+  file: index -> iSample, mismatch -> iMismatch
+  file: block -> iDescriptor
+
+espP4/test/hardware/RamWaveform.cpp
+  accept: index -> iWord
+  report: index -> iWaveformBin
+
+espP4/test/hardware/SdSmokeSummary.cpp
+  reset: index -> iBin
+  accept: index -> iByte, bin -> iBin
+  getComplete: index -> iBin
+  getMean: index -> iBin
+  report: index -> iBin
+  file: _firstBin -> _iFirstBin
+
+espP4/test/hardware/SdSmokeSummary.h
+  file: index -> iBin
+  file: _firstBin -> _iFirstBin
+
+espP4/test/hardware/SdWriteTest.cpp
+  file: index -> iWord
+
+espP4/test/hardware/sdTestData.h
+  file: index -> iWord, firstWord -> iFirstWord
+
+espP4/test/hardwareSmokeChecks.cpp
+  file: index -> iByte
+
+espP4/test/hardwareSmokePlot.py
+  file: index -> iPoint
+
+espP4/test/hardwareSmokeReport.py
+  file: index -> iRow
+
+espP4/test/hardwareSmokeReportChecks.py
+  file: index -> iBin
+
+espP4/test/hardwareSmokeRetainedReport.py
+  file: index -> iBin
+
+espP4/test/inspectAnalogRecording.py
+  inspectRecording, raw-sample loop: index -> iSample
+  inspectRecording, plotted-point loop: index -> iPoint
+
+espP4/test/profile/CaptureProfile.cpp
+  file: index -> iTask, core -> iCore
+
+espP4/test/ramWaveformChecks.cpp
+  file: bin -> iWaveformBin
+
+espP4/test/writerRolloverChecks.cpp
+  file: index -> iBlock
+
+Left unchanged intentionally:
+  Counts such as _completedBins and _count remain counts, even when used to append.
+  Byte offsets, timestamps, rates, bit masks and lookup values keep their meanings.
+  RecordingStatus field enums and JavaScript object keys are named fields, not object indices.
+  Slot/slot/_slots, write, and both verify overloads remain unchanged.
+  SDK APIs, serial messages, JSON fields, filenames and on-disk layouts are unchanged.
+  Generated build output and third-party dependencies were excluded.

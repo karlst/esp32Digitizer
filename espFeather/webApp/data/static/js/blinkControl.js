@@ -15,7 +15,7 @@
 // Legacy browser LED test. app.js no longer imports or initializes this module,
 // and index.html has no blink button. Kept for old pages that still use the routes.
 // Its status describes requested blinking, not whether the LED is lit right now.
-import { appendEvent } from "./eventLog.js";
+import {appendEvent} from "./eventLog.js";
 
 /**
  * Connect a legacy blink button only if both button and status elements exist.
@@ -69,9 +69,9 @@ export function initializeBlinkControl()
             {
                 const path = action ? `/api/blink/${action}` : "/api/blink";
                 const response = await fetch(path, {
-                    method: action ? "POST" : "GET",
-                    cache: "no-store",
-                    signal: abortController.signal
+                    method : action ? "POST" : "GET",
+                    cache : "no-store",
+                    signal : abortController.signal
                 });
                 if (!response.ok)
                 {
@@ -135,8 +135,7 @@ export function initializeBlinkControl()
     // Only initialize on pages that contain the complete control.
     if (button && status)
     {
-        button.addEventListener("click", () =>
-        {
+        button.addEventListener("click", () => {
             // Send an explicit desired state rather than a server-side toggle.
             if (stateKnown)
             {

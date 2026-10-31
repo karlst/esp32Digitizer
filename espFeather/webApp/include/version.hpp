@@ -14,7 +14,7 @@
 
 /**
  * @file version.hpp
- * @brief Web-app build-identification string printed by Feather at startup.
+ * Web-app build-identification string printed by Feather at startup.
  * This human-facing version is separate from the serial message format version
  * and the web asset cache suffix. Changing one does not automatically change others.
  */

@@ -39,6 +39,8 @@ $checks = @(
     @{ Name = 'P4 waveform comparison'; Kind = 'Python'; Path = 'espP4/test/comparisonChecks.py' },
     @{ Name = 'Hardware smoke disk parser and timing'; Kind = 'PowerShell'; Path = 'espP4/test/runHardwareSmokeChecks.ps1' },
     @{ Name = 'Hardware smoke pass/fail rules'; Kind = 'Python'; Path = 'espP4/test/hardwareSmokeReportChecks.py' },
+    @{ Name = 'External generator comparison'; Kind = 'Python'; Path = 'espP4/test/externalGeneratorChecks.py' },
+    @{ Name = '1 kHz waveform response'; Kind = 'Python'; Path = 'espP4/test/fastSquareChecks.py' },
     @{ Name = 'P4 constant-input analysis'; Kind = 'Python'; Path = 'espP4/test/constantChecks.py' }
 )
 if ($IncludeBrowser) {
@@ -52,13 +54,18 @@ try {
     # Check executables and script paths before spending time compiling. Individual
     # C++ runners diagnose missing Microsoft tools; the optional browser suite
     # diagnoses missing Playwright/Edge. Dependencies are never installed here.
-    $pythonExe = (Get-Command $Python -CommandType Application -ErrorAction Stop).Source
+    # An executable can appear in several PATH directories (for example, the
+    # activated ESP-IDF Python plus the Windows Store alias). Keep the first
+    # match in command-search order, not an array of paths passed as one command.
+    $pythonExe = (Get-Command $Python -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
     $nodeExe = ''
-    if ($IncludeBrowser) {
-        $nodeExe = (Get-Command $Node -CommandType Application -ErrorAction Stop).Source
+    if ($IncludeBrowser)
+    {
+        $nodeExe = (Get-Command $Node -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
     }
     foreach ($check in $checks) {
-        if (!(Test-Path -LiteralPath (Join-Path $repoRoot $check.Path) -PathType Leaf)) {
+        if (!(Test-Path -LiteralPath (Join-Path $repoRoot $check.Path) -PathType Leaf))
+        {
             throw "Missing check: $($check.Path)"
         }
     }
@@ -75,14 +82,16 @@ try {
         }
         # PowerShell does not automatically turn every native nonzero exit into
         # an exception. Check it explicitly before counting this suite as passed.
-        if ($LASTEXITCODE -ne 0) {
+        if ($LASTEXITCODE -ne 0)
+        {
             throw "Process exited with code $LASTEXITCODE."
         }
         $passed++
         Write-Host "PASS: $currentCheck"
     }
     Write-Host "`nSMOKE PASS: $passed/$($checks.Count) checks passed."
-    if (!$IncludeBrowser) {
+    if (!$IncludeBrowser)
+    {
         Write-Host 'Browser checks not run; use -IncludeBrowser to include them.'
     }
     Write-Host 'Firmware builds and hardware behavior have not been checked by this run.'

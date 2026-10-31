@@ -12,15 +12,18 @@
  * Public License in the repository LICENSE file or <https://www.gnu.org/licenses/>.
  */
 
-/** @file benchDacChecks.cpp
- * @brief PC checks of the exact DAC code calculation, without hardware access.
+/**
+ * @file benchDacChecks.cpp
+ * PC checks of the exact DAC code calculation, without hardware access.
  * Code bounds and periodicity do not establish physical output voltage or timing.
  */
 #include "benchDacWave.h"
 #include <cassert>
 #include <cstdio>
 
-/** @brief Check phase, nominal range, repeatability and delayed-update behavior. */
+/* **
+ * main - Check phase, nominal range, repeatability and delayed-update behavior.
+ */
 int main()
 {
     // Check the commanded codes at the sine's center, positive peak and negative

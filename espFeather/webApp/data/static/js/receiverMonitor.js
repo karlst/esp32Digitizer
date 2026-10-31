@@ -17,8 +17,8 @@
 // reports, validates them, and matches command acknowledgements before this code
 // displays them. receiver stores cumulative acquisition counters; browser reloads do not
 // reset them. Read refreshStatus for requests, updateControls for button rules.
-import { appendEvent } from "./eventLog.js";
-import { createRecordingPanel } from "./recordingPanel.js";
+import {appendEvent} from "./eventLog.js";
+import {createRecordingPanel} from "./recordingPanel.js";
 
 /**
  * Connect receiver controls and poll Feather's validated status every half-second.
@@ -38,11 +38,11 @@ export function initializeReceiverMonitor()
     // Preserve each 64-bit total as decimal text. Reasons are separate counters
     // because a single rejected read can fail both checks.
     const diagnosticCounters = [
-        ["missedEdges", document.getElementById("receiver-missed")],
-        ["rejectedReads", document.getElementById("receiver-rejected")],
-        ["readFailures", document.getElementById("receiver-read-failures")],
-        ["overlapReads", document.getElementById("receiver-overlaps")],
-        ["readyTimeouts", document.getElementById("receiver-timeouts")]
+        [ "missedEdges", document.getElementById("receiver-missed") ],
+        [ "rejectedReads", document.getElementById("receiver-rejected") ],
+        [ "readFailures", document.getElementById("receiver-read-failures") ],
+        [ "overlapReads", document.getElementById("receiver-overlaps") ],
+        [ "readyTimeouts", document.getElementById("receiver-timeouts") ]
     ];
     const readFault = document.getElementById("receiver-read-fault");
     const rate = document.getElementById("receiver-rate");
@@ -81,30 +81,35 @@ export function initializeReceiverMonitor()
         const pending = commandBusy || latestState?.commandStatus === "pending";
         const running = available && latestState.acquisitionRunning;
         const rec = available ? latestState.recording : null;
-        const storageBusy = rec && [1, 3, 6].includes(Number(rec.state));
+        const storageBusy = rec && [ 1, 3, 6 ].includes(Number(rec.state));
         acquisitionButton.disabled = !available || pending || storageBusy || (!running && !latestState.adcReady);
-        unavailableMessage.textContent = browserOffline ? "Controls unavailable: cannot reach Feather." :
-            !latestState?.connected ? "Controls unavailable: receiver is disconnected." :
-            pending ? "Controls unavailable: waiting for receiver command confirmation." :
-            !running && !latestState.adcReady ? "Start unavailable: digitizer is not ready." : "";
+        unavailableMessage.textContent = browserOffline ? "Controls unavailable: cannot reach Feather." : !latestState?.connected         ? "Controls unavailable: receiver is disconnected."
+                                                                                                      : pending                           ? "Controls unavailable: waiting for receiver command confirmation."
+                                                                                                      : !running && !latestState.adcReady ? "Start unavailable: digitizer is not ready."
+                                                                                                                                          : "";
         rebootButton.disabled = !available || pending || storageBusy;
         rateInput.disabled = !available || pending || running || storageBusy;
         recordInput.disabled = !available || !rec || pending || running || storageBusy;
         deleteButton.disabled = !available || !rec || pending || running || storageBusy || rec.card !== "1";
         // Running settings always come from RECEIVER, even after a page reload. Before
         // Start, retain the user's draft. Old firmware never gets a recording flag.
-        if (running && rec) { recordInput.checked = rec.enabled === "1"; }
-        if (available && !rec) { recordInput.checked = false; }
-        document.getElementById("recording-unavailable").textContent = !available ? "Recording status unavailable." :
-            !rec ? "Recording unavailable — receiver update required." : storageBusy ?
-            "Card operation in progress. Please wait." : rec.card !== "1" ?
-            "Card not ready. Acquisition without recording remains available." :
-            "A checked box creates a new recording on Start; existing files are kept.";
+        if (running && rec)
+        {
+            recordInput.checked = rec.enabled === "1";
+        }
+        if (available && !rec)
+        {
+            recordInput.checked = false;
+        }
+        document.getElementById("recording-unavailable").textContent = !available ? "Recording status unavailable." : !rec           ? "Recording unavailable — receiver update required."
+                                                                                                                  : storageBusy      ? "Card operation in progress. Please wait."
+                                                                                                                  : rec.card !== "1" ? "Card not ready. Acquisition without recording remains available."
+                                                                                                                                     : "A checked box creates a new recording on Start; existing files are kept.";
         acquisitionButton.setAttribute("aria-busy", String(Boolean(pending || storageBusy)));
         acquisitionButton.classList.toggle("stop-button", Boolean(running));
         acquisitionButton.textContent = running ? "Stop Acquisition" : "Start Acquisition";
-        runningMessage.textContent = !available ? "Acquisition state unknown — receiver disconnected." : running ?
-            `Acquisition started — ${latestState.appliedRate.toLocaleString("en-US")} samples/s` : "Acquisition stopped.";
+        runningMessage.textContent = !available ? "Acquisition state unknown — receiver disconnected." : running ? `Acquisition started — ${latestState.appliedRate.toLocaleString("en-US")} samples/s`
+                                                                                                                 : "Acquisition stopped.";
         if (available && (running || !rateDirty))
         {
             rateInput.value = String(latestState.appliedRate);
@@ -161,7 +166,7 @@ export function initializeReceiverMonitor()
         // only for user commands, not status polls, to avoid the old blinking UI.
         if (requestPending && action && !commandBusy)
         {
-            queuedCommand = { action, body };
+            queuedCommand = {action, body};
             commandBusy = true;
             updateControls();
         }
@@ -177,7 +182,10 @@ export function initializeReceiverMonitor()
             try
             {
                 const response = await fetch(action ? `/api/receiver/${action}` : "/api/receiver", {
-                    method: action ? "POST" : "GET", body, cache: "no-store", signal: abortController.signal
+                    method : action ? "POST" : "GET",
+                    body,
+                    cache : "no-store",
+                    signal : abortController.signal
                 });
                 if (!response.ok)
                 {
@@ -187,21 +195,21 @@ export function initializeReceiverMonitor()
                 const state = await response.json();
                 // Reject malformed responses before treating any acquisition data as live.
                 if (typeof state.connected !== "boolean" || (state.connected &&
-                    (typeof state.acquisitionRunning !== "boolean" || !Number.isInteger(state.appliedRate) ||
-                    typeof state.adcReady !== "boolean" || typeof state.receiving !== "boolean" ||
-                    typeof state.sampleCount !== "string" || !/^\d+$/.test(state.sampleCount) ||
-                    !Number.isFinite(state.samplesPerSecond) || !Number.isInteger(state.errorCode) ||
-                    (state.latestRaw !== null && !Number.isInteger(state.latestRaw)))))
+                                                                (typeof state.acquisitionRunning !== "boolean" || !Number.isInteger(state.appliedRate) ||
+                                                                    typeof state.adcReady !== "boolean" || typeof state.receiving !== "boolean" ||
+                                                                    typeof state.sampleCount !== "string" || !/^\d+$/.test(state.sampleCount) ||
+                                                                    !Number.isFinite(state.samplesPerSecond) || !Number.isInteger(state.errorCode) ||
+                                                                    (state.latestRaw !== null && !Number.isInteger(state.latestRaw)))))
                 {
                     throw new Error("Invalid receiver status response");
                 }
                 // Older receiver firmware has no diagnostics. Missing data stays unknown;
                 // malformed new diagnostics must not appear as reassuring zeros.
                 if (state.connected && state.diagnosticsAvailable &&
-                    (diagnosticCounters.some(([key]) =>
-                    {
+                    (diagnosticCounters.some(([ key ]) => {
                         return typeof state[key] !== "string" || !/^\d+$/.test(state[key]);
-                    }) || !Number.isInteger(state.readFault) || state.readFault < 0 || state.readFault > 3))
+                    }) ||
+                        !Number.isInteger(state.readFault) || state.readFault < 0 || state.readFault > 3))
                 {
                     throw new Error("Invalid receiver diagnostic counters");
                 }
@@ -218,21 +226,19 @@ export function initializeReceiverMonitor()
                     {
                         element.textContent = state.diagnosticsAvailable ? state[key] : "Unavailable";
                     }
-                    const faultNames = ["None since last Start", "Driver check failed",
-                        "New sample arrived during read", "Driver check failed; new sample arrived during read"];
+                    const faultNames = [ "None since last Start", "Driver check failed",
+                        "New sample arrived during read", "Driver check failed; new sample arrived during read" ];
                     readFault.textContent = state.diagnosticsAvailable ? faultNames[state.readFault] : "Unavailable";
                     rate.textContent = String(state.samplesPerSecond);
                     raw.textContent = state.latestRaw === null ? "—" : String(state.latestRaw);
-                    const errorNames = ["None", "ADC initialization failed", "ADC data-ready timeout", "ADC read/configuration error"];
+                    const errorNames = [ "None", "ADC initialization failed", "ADC data-ready timeout", "ADC read/configuration error" ];
                     error.textContent = errorNames[state.errorCode] ?? `Code ${state.errorCode}`;
-                    message.textContent = state.receiving ? "receiver is reading digitizer samples." :
-                        "receiver is reporting; waiting for fresh digitizer samples.";
+                    message.textContent = state.receiving ? "receiver is reading digitizer samples." : "receiver is reporting; waiting for fresh digitizer samples.";
                 }
                 else
                 {
                     clearMeasurements();
-                    message.textContent = state.lastMessageAgeMs === null ? "Waiting for receiver messages." :
-                        "receiver messages stopped; measurements are unknown.";
+                    message.textContent = state.lastMessageAgeMs === null ? "Waiting for receiver messages." : "receiver messages stopped; measurements are unknown.";
                 }
                 // Firmware uses conversion-count progress, not raw-value changes: a
                 // constant analog voltage still produces valid successive conversions.
@@ -249,14 +255,14 @@ export function initializeReceiverMonitor()
                 // HTTP 202 is transport acceptance only. Display/log success solely
                 // from the firmware's matched acknowledgement and applied-state checks.
                 const outcome = `${state.commandId}:${state.commandStatus}`;
-                if (lastOutcome && outcome !== lastOutcome && ["confirmed", "rejected", "timeout"].includes(state.commandStatus))
+                if (lastOutcome && outcome !== lastOutcome && [ "confirmed", "rejected", "timeout" ].includes(state.commandStatus))
                 {
-                    const text = state.commandStatus === "confirmed" ?
-                        (!state.connected ? "Last receiver command confirmed; current state unknown." :
-                        state.commandAction === "start" ? `Acquisition started — ${state.appliedRate.toLocaleString("en-US")} samples/s` :
-                        state.commandAction === "stop" ? "Acquisition stopped; recording file closed, if active." :
-                        state.commandAction === "delete" ? "Recordings deleted." : "receiver reboot confirmed.") :
-                        state.commandStatus === "timeout" ? "receiver command timed out — outcome unconfirmed." : "receiver rejected the command.";
+                    const text = state.commandStatus === "confirmed" ? (!state.connected ? "Last receiver command confirmed; current state unknown." : state.commandAction === "start" ? `Acquisition started — ${state.appliedRate.toLocaleString("en-US")} samples/s`
+                                                                                                                                                   : state.commandAction === "stop"   ? "Acquisition stopped; recording file closed, if active."
+                                                                                                                                                   : state.commandAction === "delete" ? "Recordings deleted."
+                                                                                                                                                                                      : "receiver reboot confirmed.")
+                                 : state.commandStatus === "timeout"                                                                                                                   ? "receiver command timed out — outcome unconfirmed."
+                                                                                                                                                                                       : "receiver rejected the command.";
                     commandMessage.textContent = text;
                     appendEvent(text);
                     if (state.commandStatus === "confirmed" && state.commandAction === "start")
@@ -301,25 +307,22 @@ export function initializeReceiverMonitor()
     }
 
     // Changing the dropdown only edits the next Start command. Stop ignores it.
-    rateInput.addEventListener("change", () =>
-    {
+    rateInput.addEventListener("change", () => {
         rateDirty = true;
         commandMessage.textContent = "Selected rate will take effect on Start Acquisition.";
     });
     // Prevent a page reload; choose Start/Stop from receiver-confirmed running state.
-    form.addEventListener("submit", (event) =>
-    {
+    form.addEventListener("submit", (event) => {
         event.preventDefault();
         if (!acquisitionButton.disabled)
         {
             const action = latestState.acquisitionRunning ? "stop" : "start";
-            const body = action === "start" ? new URLSearchParams({ sampleRate: rateInput.value, record: recordInput.checked ? "1" : "0" }) : null;
+            const body = action === "start" ? new URLSearchParams({sampleRate : rateInput.value, record : recordInput.checked ? "1" : "0"}) : null;
             refreshStatus(action, body);
         }
     });
     // Only a deliberate confirmed click requests reboot; a poll never does.
-    rebootButton.addEventListener("click", () =>
-    {
+    rebootButton.addEventListener("click", () => {
         if (!rebootButton.disabled && window.confirm("Reboot receiver? Acquisition will stop."))
         {
             refreshStatus("reboot");
@@ -327,11 +330,10 @@ export function initializeReceiverMonitor()
     });
     // Destructive card management is explicit, stopped-only, and separate from
     // Start. Cancel sends nothing; firmware repeats the state and confirmation checks.
-    deleteButton.addEventListener("click", () =>
-    {
+    deleteButton.addEventListener("click", () => {
         if (!deleteButton.disabled && window.confirm("Delete all files in /recordings/ on the SD card? This cannot be undone. Other folders will be kept."))
         {
-            refreshStatus("delete", new URLSearchParams({ confirm: "delete-recordings" }));
+            refreshStatus("delete", new URLSearchParams({confirm : "delete-recordings"}));
         }
     });
     // Background status reads never manipulate local DAC controls.

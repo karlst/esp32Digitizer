@@ -14,7 +14,7 @@
 
 /**
  * @file WebApp.h
- * @brief Application ownership and startup for the Feather UI.
+ * Application ownership and startup for the Feather UI.
  */
 #pragma once
 #include <WebServer.h>
@@ -22,7 +22,7 @@
 #include "WebController.h"
 
 /**
- * @brief Keep the Feather's services alive and call them in the required order.
+ * Keep the Feather's services alive and call them in the required order.
  * This is the top-level application object owned by main.cpp. begin() performs
  * startup once; update() is called repeatedly by Arduino loop(). Only the DAC
  * generator creates a separate worker task. The controller holds references to
@@ -31,19 +31,18 @@
 class WebApp
 {
 public:
-
-    /**
-     * @brief Construct the server and bind its controller dependencies.
+    /* **
+     * WebApp - Construct the server and bind its controller dependencies.
      */
     WebApp();
 
-    /**
-     * @brief Initialize hardware, filesystem, Wi-Fi, and routes; report success.
+    /* **
+     * begin - Initialize hardware, filesystem, Wi-Fi, and routes; report success.
      */
     bool begin();
 
-    /**
-     * @brief Service HTTP and nonblocking hardware activity.
+    /* **
+     * update - Service HTTP and nonblocking hardware activity.
      */
     void update();
 

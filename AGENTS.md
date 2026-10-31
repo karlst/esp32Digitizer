@@ -2,8 +2,8 @@
 
 These conventions apply throughout this project and may be updated as development proceeds.
 
-- Document all C++ classes and entry points with Doxygen-style comments, beginning with `/**` and using `*` at the start of subsequent lines.
-- Place a useful descriptive comment immediately before every function or method definition, including constructors. Header declarations and comments inside the body do not replace this requirement. Use Doxygen-style comments for C++ definitions.
+- Document C++ classes with descriptive comments beginning with `/**` and using `*` at the start of subsequent lines. Do not use `@brief`.
+- Place a useful descriptive comment immediately before every function or method definition, including constructors. Begin it with `/* **`, then `* functionName -` followed by plain-English explanation. Header declarations and comments inside the body do not replace this requirement. Follow Karl's examples in `FileRecordingBackend.cpp`; explain what the code does without compressed jargon.
 - Document logical paragraphs or blocks of code with `//` comments from the start. Explain their purpose and non-obvious decisions rather than simply repeating the code.
 - Separate logical paragraphs with a blank line before standalone comment blocks.
 - Update comments whenever the corresponding code changes so they remain accurate.
@@ -19,6 +19,14 @@ These conventions apply throughout this project and may be updated as developmen
   both rules (`SdRecorder _sdRecorder`). Collection names may be plural; result
   variables may remain `retVal`. Preserve names required by framework APIs,
   including Arduino's Serial/Serial1/ESP globals and fake SDK interfaces.
+- Do not name an index as though it were an object. Use `Foo` for a type, `foo`
+  for an object, `foos` for a collection, and `iFoo` for an index into that
+  collection. Member indices keep the underscore, for example `_iSlot`.
+  Counts, byte offsets, IDs and one-based display numbers are not objects or
+  zero-based indices; name them for their actual meaning.
+- Prefer short verb-and-object function names, such as `finishRecording`.
+  This is a readability preference, not a requirement to lengthen clear names
+  such as `allocate` and `preallocate`, or rename framework APIs.
 - Production startup files construct application services and invoke the real
   application class. Test startup supplies test services through ordinary
   interfaces. Do not instantiate concrete test/profile classes in production
@@ -26,6 +34,12 @@ These conventions apply throughout this project and may be updated as developmen
 - Prefer a single return point in each function. For functions that return a value, assign the result to `retVal` and return it at the end. Multiple return points are allowed when a single return point would make the code awkward.
 - Do not use `continue` statements.
 - Always use curly brackets for `if` statements, including single-statement bodies. Use braces for associated `else` branches as well.
+- Never put an `if` statement or `for` loop on one line. Put the body in a
+  multiline block, including single-statement bodies. Apply the equivalent
+  multiline style in scripts.
+- Use blank lines to separate logical paragraphs, following Karl's spacing in
+  `FileRecordingBackend.cpp`. Keep related statements together; do not add a
+  blank line after every statement. Preserve his existing blank lines.
 - Keep each C++ class in its own file, using a separate header/source pair where appropriate. Include a descriptive comment at the top of each file.
 - Follow other standard coding conventions as appropriate. These guidelines are not exhaustive.
 
@@ -89,9 +103,9 @@ These conventions apply throughout this project and may be updated as developmen
   or equivalent clear instruction for that work. Do not ask for a second
   conversational confirmation for the same authorized action. Discuss proposed
   changes first; read-only inspection may proceed without Go.
-- Before editing after Karl says Go, confirm that he has saved his editor changes.
-  An explicit statement that he has saved all changes already satisfies this check.
-  Preserve his spacing and blank lines when editing.
+- Karl has asked to stop the saved-editor-changes reminders; he is not editing
+  files concurrently. Do not ask after Go. Preserve his spacing and blank lines
+  when editing.
 - Karl handles all Git operations. Do not run Git commands, stage, commit, push,
   pull, switch branches, or otherwise change Git state unless he explicitly
   delegates a particular operation.

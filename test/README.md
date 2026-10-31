@@ -19,7 +19,7 @@ The writer checks include the existing counter wraparound test beyond 4 GiB;
 that suite may take longer than the small arithmetic checks.
 
 Coverage: recording lifecycle/command-independent sequencing, decoder,
-recording header/packing, buffered writer, exact sample values,
+recording header/packing, buffered writer, session file backend (RAM filesystem), exact sample values,
 RAM summaries, profiling math, Feather ADC driver/configuration, Feather DAC math, Feather status parsing, and
 Python recording/measurement analysis. Two suites check the hardware smoke
 readback parser and pass/fail rules using synthetic data, without accessing boards. PC tests cannot establish ADC/DAC analog
@@ -45,3 +45,9 @@ Firmware builds are separate; see [Building the firmware](../docs/BUILDING.md).
 and P4 SD recorder for 30 seconds, then compares actual disk readback with A2
 measurements. It requires the dedicated firmware on both boards. See
 [hardware smoke setup and commands](../docs/HARDWARE-SMOKE.md).
+
+## P4-only SD storage tests
+
+`runSdChoke.ps1 -P4 COM3` presents fresh-disk and add-files choices after the
+choke firmware has been uploaded. Each runs five minutes; add-files also checks
+that old files are unchanged. See [SD test instructions](../docs/SD-CHOKE-TEST.md).

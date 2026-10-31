@@ -14,7 +14,7 @@
 
 /**
  * @file SPI.h
- * @brief Define a pretend SPI controller for desktop tests.
+ * Define a pretend SPI controller for desktop tests.
  * ads127DriverChecks.cpp implements these methods and interprets commands in
  * memory. The executable never accesses SPI pins. API type names match Arduino.
  */
@@ -27,7 +27,7 @@
 #define SPI_MODE1 1
 
 /**
- * @brief Retain the driver's chosen clock and mode for assertions.
+ * Retain the driver's chosen clock and mode for assertions.
  */
 struct SPISettings
 {
@@ -35,23 +35,28 @@ struct SPISettings
     int _order;
     int _mode;
 
-    /**
-     * @brief Store requested bus settings.
+    /* **
+     * SPISettings - Store requested bus settings.
      */
-    SPISettings(uint32_t frequency, int order, int mode) : _frequency(frequency), _order(order), _mode(mode) {}
+    SPISettings(uint32_t frequency, int order, int mode)
+        : _frequency(frequency), _order(order), _mode(mode)
+    {
+    }
 };
 
 /**
- * @brief Provide the driver member's type without opening hardware.
+ * Provide the driver member's type without opening hardware.
  */
 class SPIClass
 {
 public:
-
-    /**
-     * @brief Retain construction compatibility only.
+    /* **
+     * SPIClass - Retain construction compatibility only.
      */
-    explicit SPIClass(int) {}
+    explicit SPIClass(int)
+    {
+    }
+
     void begin(int clock, int input, int output, int chipSelect);
     void beginTransaction(SPISettings settings);
     void endTransaction();

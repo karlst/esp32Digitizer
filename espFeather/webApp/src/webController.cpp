@@ -14,7 +14,7 @@
 
 /**
  * @file WebController.cpp
- * @brief Translate browser HTTP requests into Feather actions or queued receiver commands.
+ * Translate browser HTTP requests into Feather actions or queued receiver commands.
  *
  * webApp registers these routes once, then server.handleClient() calls their
  * handlers from Arduino loop(). GET reads status; POST requests a change. JSON
@@ -32,11 +32,12 @@
 #include <cmath>
 #include <cstdlib>
 
-/**
- * @brief Save references to the server and services owned by webApp.
+/* **
+ * WebController - Save references to the server and services owned by webApp.
  *
- * All referenced objects live as long as this controller. Route callbacks capture
- * this pointer to reach them later; no hardware is configured in this constructor.
+ * All referenced objects live as long as this controller. Route callbacks
+ * capture this pointer to reach them later; no hardware is configured in this
+ * constructor.
  */
 WebController::WebController(WebServer& webServer, LedBlinker& ledBlinker, DacGenerator& dacGenerator, ReceiverMonitor& receiverMonitor)
     : _webServer(webServer), _ledBlinker(ledBlinker), _dacGenerator(dacGenerator), _receiverMonitor(receiverMonitor)
@@ -44,18 +45,23 @@ WebController::WebController(WebServer& webServer, LedBlinker& ledBlinker, DacGe
     // Share services without copying their state.
 }
 
-/**
- * @brief Register the URL handlers the browser can call after the web server starts.
+/* **
+ * begin - Register the URL handlers the browser can call after the web server
+ * starts.
  *
  * server.on stores callbacks; it does not execute those callbacks here. [this]
  * lets each later callback access this controller's services. Static files are
  * served from flash, while /api routes read live state or request actions.
- * Legacy blink routes remain available even though the current page has no button.
+ * Legacy blink routes remain available even though the current page has no
+ * button.
  */
 void WebController::begin()
 {
     // Register handlers now; handleClient() serves matching requests later in loop().
-    _webServer.on("/", HTTP_GET, [this]() { serveIndex(); });
+    _webServer.on("/", HTTP_GET, [this]()
+    {
+        serveIndex();
+    });
     // Map /static/ URLs to LittleFS files, inferring MIME types from their extensions.
     // Assets are replaced independently of firmware. Revalidate them after an
     // upload so an old cached stylesheet cannot make enabled buttons look grey.
@@ -73,16 +79,23 @@ void WebController::begin()
     });
 
     // State reads synchronize reloads and multiple browser clients.
-    _webServer.on("/api/blink", HTTP_GET, [this]() { sendBlinkState(); });
+    _webServer.on("/api/blink", HTTP_GET, [this]()
+    {
+        sendBlinkState();
+    });
 
-    /** Enable blinking and reply with its settings; repeated Start keeps it enabled. */
+    /**
+     * Enable blinking and reply with its settings; repeated Start keeps it enabled.
+     */
     _webServer.on("/api/blink/start", HTTP_POST, [this]()
     {
         _ledBlinker.setEnabled(true);
         sendBlinkState();
     });
 
-    /** Disable blinking and reply with its settings; repeated Stop keeps it disabled. */
+    /**
+     * Disable blinking and reply with its settings; repeated Stop keeps it disabled.
+     */
     _webServer.on("/api/blink/stop", HTTP_POST, [this]()
     {
         _ledBlinker.setEnabled(false);
@@ -90,17 +103,37 @@ void WebController::begin()
     });
 
     // Read the DAC service's software state; this does not measure the output voltage.
-    _webServer.on("/api/dac", HTTP_GET, [this]() { sendDacState(); });
-    _webServer.on("/api/dac/start", HTTP_POST, [this]() { startDac(); });
+    _webServer.on("/api/dac", HTTP_GET, [this]()
+    {
+        sendDacState();
+    });
+    _webServer.on("/api/dac/start", HTTP_POST, [this]()
+    {
+        startDac();
+    });
 
     // A 202 response means accepted for delivery. Later status polls report
     // the receiver acknowledgment matched to this command.
-    _webServer.on("/api/receiver/start", HTTP_POST, [this]() { commandReceiver("start"); });
-    _webServer.on("/api/receiver/stop", HTTP_POST, [this]() { commandReceiver("stop"); });
-    _webServer.on("/api/receiver/reboot", HTTP_POST, [this]() { commandReceiver("reboot"); });
-    _webServer.on("/api/receiver/delete", HTTP_POST, [this]() { commandReceiver("delete"); });
+    _webServer.on("/api/receiver/start", HTTP_POST, [this]()
+    {
+        commandReceiver("start");
+    });
+    _webServer.on("/api/receiver/stop", HTTP_POST, [this]()
+    {
+        commandReceiver("stop");
+    });
+    _webServer.on("/api/receiver/reboot", HTTP_POST, [this]()
+    {
+        commandReceiver("reboot");
+    });
+    _webServer.on("/api/receiver/delete", HTTP_POST, [this]()
+    {
+        commandReceiver("delete");
+    });
 
-    /** Request DAC Stop and report acceptance, or HTTP 503 if unavailable. */
+    /**
+     * Request DAC Stop and report acceptance, or HTTP 503 if unavailable.
+     */
     _webServer.on("/api/dac/stop", HTTP_POST, [this]()
     {
         // A successful response means the initialized service accepted Stop.
@@ -115,7 +148,9 @@ void WebController::begin()
         }
     });
 
-    /** Reply to the browser, then mark a delayed Feather restart for update(). */
+    /**
+     * Reply to the browser, then mark a delayed Feather restart for update().
+     */
     _webServer.on("/api/reboot", HTTP_POST, [this]()
     {
         _webServer.sendHeader("Cache-Control", "no-store");
@@ -125,13 +160,14 @@ void WebController::begin()
     });
 }
 
-/**
- * @brief Complete a previously requested Feather reboot after a 750 ms grace period.
+/* **
+ * update - Complete a previously requested Feather reboot after a 750 ms grace
+ * period.
  *
- * The request handler already replied to the browser. Waiting outside that handler
- * lets the reply leave before restarting, although delivery is not guaranteed.
- * Request DAC stop before restart; its result is not checked here. Startup
- * restores defaults with output disabled if initialization succeeds.
+ * The request handler already replied to the browser. Waiting outside that
+ * handler lets the reply leave before restarting, although delivery is not
+ * guaranteed. Request DAC stop before restart; its result is not checked here.
+ * Startup restores defaults with output disabled if initialization succeeds.
  */
 void WebController::update()
 {
@@ -142,12 +178,14 @@ void WebController::update()
     }
 }
 
-/**
- * @brief Reply with one consistent snapshot of actual DAC settings and loopback samples.
+/* **
+ * sendDacState - Reply with one consistent snapshot of actual DAC settings and
+ * loopback samples.
  *
  * The generator copies shared data under its own lock and releases it before
  * formatting JSON. Network sending here does not hold that sampling lock.
- * no-store tells browser caches to fetch current status rather than reuse an old reply.
+ * no-store tells browser caches to fetch current status rather than reuse an old
+ * reply.
  */
 void WebController::sendDacState()
 {
@@ -155,12 +193,12 @@ void WebController::sendDacState()
     _webServer.send(200, "application/json", _dacGenerator.getStateJson());
 }
 
-/**
- * @brief Convert a required HTTP form field to a finite floating-point number.
- * @param name Field name, such as frequencyHz or sampleRate.
- * @param value Parsed result; use it only if this function returns true.
- * @return False for a missing field, no numeric characters, trailing junk, infinity,
- * or NaN (not a number). Range and integer-only checks belong to the caller.
+/* **
+ * readNumber - Convert a required HTTP form field to a finite floating-point
+ * number. name Field name, such as frequencyHz or sampleRate. value Parsed
+ * result; use it only if this function returns true. Returns: False for a
+ * missing field, no numeric characters, trailing junk, infinity, or NaN (not a
+ * number). Range and integer-only checks belong to the caller.
  *
  * strtof handles numeric syntax, which is broader than our browser editor (for
  * example, it can accept a leading sign or exponent). This helper alone does not
@@ -181,13 +219,15 @@ bool WebController::readNumber(const char* name, float& value)
     return retVal;
 }
 
-/**
- * @brief Validate all three submitted sine settings and start the local DAC together.
+/* **
+ * startDac - Validate all three submitted sine settings and start the local DAC
+ * together.
  *
- * Frequency is cycles/second, amplitude is peak volts around the offset, and offset
- * is the center voltage. generator.start enforces the allowed combined voltage
- * range and rejects changing a running waveform. Invalid input leaves settings
- * unchanged and returns HTTP 400; success returns the confirmed state as JSON.
+ * Frequency is cycles/second, amplitude is peak volts around the offset, and
+ * offset is the center voltage. generator.start enforces the allowed combined
+ * voltage range and rejects changing a running waveform. Invalid input leaves
+ * settings unchanged and returns HTTP 400; success returns the confirmed state
+ * as JSON.
  */
 void WebController::startDac()
 {
@@ -206,15 +246,17 @@ void WebController::startDac()
     }
 }
 
-/**
- * @brief Validate a browser request and ask the serial monitor to send it to receiver.
- * @param action One of the registered actions: start, stop, reboot, or delete.
+/* **
+ * commandReceiver - Validate a browser request and ask the serial monitor to
+ * send it to receiver. action One of the registered actions: start, stop,
+ * reboot, or delete.
  *
  * Only Start reads sampleRate and record; Stop/Reboot ignore invalid drafts.
- * Delete requires the browser's explicit confirmation field and stopped receiver state.
- * The monitor checks supported rates, connection freshness, and pending commands.
- * HTTP 202 means the command was sent and is awaiting receiver confirmation. HTTP 409
- * means it was not accepted for sending. This handler never waits for the receiver reply.
+ * Delete requires the browser's explicit confirmation field and stopped receiver
+ * state. The monitor checks supported rates, connection freshness, and pending
+ * commands. HTTP 202 means the command was sent and is awaiting receiver
+ * confirmation. HTTP 409 means it was not accepted for sending. This handler
+ * never waits for the receiver reply.
  */
 void WebController::commandReceiver(const char* action)
 {
@@ -224,10 +266,10 @@ void WebController::commandReceiver(const char* action)
     const bool isStart = strcmp(action, "start") == 0;
     const bool record = isStart && _webServer.hasArg("record") && _webServer.arg("record") == "1";
     const bool validRecord = !isStart || !_webServer.hasArg("record") ||
-        _webServer.arg("record") == "0" || _webServer.arg("record") == "1";
+                             _webServer.arg("record") == "0" || _webServer.arg("record") == "1";
     const bool confirmed = strcmp(action, "delete") != 0 || _webServer.arg("confirm") == "delete-recordings";
     const bool valid = strcmp(action, "start") != 0 ||
-        (readNumber("sampleRate", rate) && rate >= 0 && rate <= 30000 && floorf(rate) == rate);
+                       (readNumber("sampleRate", rate) && rate >= 0 && rate <= 30000 && floorf(rate) == rate);
     _webServer.sendHeader("Cache-Control", "no-store");
     if (valid && validRecord && confirmed && _receiverMonitor.sendCommand(action, static_cast<uint32_t>(rate), record))
     {
@@ -239,12 +281,14 @@ void WebController::commandReceiver(const char* action)
     }
 }
 
-/**
- * @brief Stream the saved HTML page from LittleFS, or return 404 if it is absent.
+/* **
+ * serveIndex - Stream the saved HTML page from LittleFS, or return 404 if it is
+ * absent.
  *
- * LittleFS is the flash filesystem uploaded separately from firmware. Opening for
- * reading does not create the file. Close after streaming so the handle is released.
- * A missing page is an asset-upload problem, not evidence that acquisition failed.
+ * LittleFS is the flash filesystem uploaded separately from firmware. Opening
+ * for reading does not create the file. Close after streaming so the handle is
+ * released. A missing page is an asset-upload problem, not evidence that
+ * acquisition failed.
  */
 void WebController::serveIndex()
 {
@@ -261,12 +305,13 @@ void WebController::serveIndex()
     }
 }
 
-/**
- * @brief Reply with the legacy LED test's commanded enabled flag.
+/* **
+ * sendBlinkState - Reply with the legacy LED test's commanded enabled flag.
  *
- * This describes whether blinking is requested, not whether the LED is lit at this
- * instant. The current page does not use this route; it remains available for older
- * clients. Disable response caching so successive queries see actual command state.
+ * This describes whether blinking is requested, not whether the LED is lit at
+ * this instant. The current page does not use this route; it remains available
+ * for older clients. Disable response caching so successive queries see actual
+ * command state.
  */
 void WebController::sendBlinkState()
 {

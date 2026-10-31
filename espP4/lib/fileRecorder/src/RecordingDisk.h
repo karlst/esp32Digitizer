@@ -2,12 +2,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 /**
  * @file RecordingDisk.h
- * Board adapter contract; file management does not know card pins or power.
+ * Separate board-specific card setup from the reusable file-writing code.
  */
 #pragma once
 
 /**
- * Mount an existing filesystem, or explicitly format it when requested.
+ * The backend calls prepare to make the card's filesystem available. The board
+ * implementation supplies pins, power and filesystem setup. format=true permits
+ * erasing and formatting the card; false must preserve it. getDrive supplies
+ * the filesystem drive prefix, such as "0:", used to form recording paths.
  */
 class RecordingDisk
 {

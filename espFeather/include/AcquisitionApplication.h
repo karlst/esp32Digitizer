@@ -14,7 +14,7 @@
 
 /**
  * @file AcquisitionApplication.h
- * @brief Feather ADC command coordination, independent of the selected test harness.
+ * Feather ADC command coordination, independent of the selected test harness.
  */
 #pragma once
 #include <Arduino.h>
@@ -23,7 +23,7 @@
 #include "BenchLine.h"
 
 /**
- * @brief Configure the ADC, wait for P4 readiness, then run until stop or timeout.
+ * Configure the ADC, wait for P4 readiness, then run until stop or timeout.
  * Arduino startup calls initialize once and poll repeatedly on the same task.
  * This object borrows the configuration driver and optional services; it owns
  * command parsing and run state. USB commands select a sampling rate, while
@@ -34,19 +34,29 @@ class AcquisitionApplication
 {
 public:
     AcquisitionApplication(Ads127LowRate& ads127LowRate, AcquisitionServices& acquisitionServices,
-                           uint32_t runMs, uint32_t receiverTimeoutMs);
+        uint32_t runMs, uint32_t receiverTimeoutMs);
     void initialize();
     void poll();
+
 private:
     void printHelp();
+    void handleTestLine(const char* line);
     void requestRun(const Ads127Config& adsConfigRequested);
     void requestStop();
     void acceptReply(const char* line);
-    enum class State { idle, waiting, running, stopping };
+    enum class State
+    {
+        idle,
+        waiting,
+        running,
+        stopping
+    };
     Ads127LowRate& _ads127LowRate;
     AcquisitionServices& _acquisitionServices;
-    const uint32_t _runMs;
-    const uint32_t _receiverTimeoutMs;
+    uint32_t _runMs;
+    uint32_t _receiverTimeoutMs;
+    BenchLine _consoleLine;
+    bool _collectingTest = false;
     BenchLine _benchLine;
     State _state = State::idle;
     unsigned long _runId = 0;

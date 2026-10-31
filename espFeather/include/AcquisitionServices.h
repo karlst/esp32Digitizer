@@ -14,12 +14,12 @@
 
 /**
  * @file AcquisitionServices.h
- * @brief Optional signal and measurement services supplied by the startup program.
+ * Optional signal and measurement services supplied by the startup program.
  */
 #pragma once
 
 /**
- * @brief Coordinate an external source with ADC capture without owning that source.
+ * Coordinate an external source with ADC capture without owning that source.
  * AcquisitionApplication calls these methods on Arduino's single setup/loop task.
  * start precedes ADC START; finish follows ADC STOP and the receiver STOP request.
  * A successful method confirms software acceptance only, not an accurate voltage.
@@ -30,37 +30,100 @@
 class AcquisitionServices
 {
 public:
-
-    /** @brief Allow deletion through the interface; this does not stop hardware. */
+    /* **
+     * ~AcquisitionServices - Allow deletion through the interface; this does not
+     * stop hardware.
+     */
     virtual ~AcquisitionServices() = default;
 
-    /** @brief Prepare optional hardware without starting a signal. */
-    virtual bool initialize() { return true; }
+    /* **
+     * initialize - Prepare optional hardware without starting a signal.
+     */
+    virtual bool initialize()
+    {
+        return true;
+    }
 
-    /** @brief Select the ADC's external channel rather than its internal short. */
-    virtual bool getExternalInput() const { return true; }
+    /* **
+     * configureDuration - Optional test duration selection while idle; ordinary
+     * services refuse it.
+     */
+    virtual bool configureDuration(unsigned seconds)
+    {
+        (void)seconds;
+        return false;
+    }
 
-    /** @brief Print optional operator information; idle describes controller state. */
-    virtual void describe(bool idle) { (void)idle; }
+    /* **
+     * getExternalInput - Select the ADC's external channel rather than its internal
+     * short.
+     */
+    virtual bool getExternalInput() const
+    {
+        return true;
+    }
 
-    /** @brief Clear optional measurement state before asking P4 to receive. */
-    virtual void reset() {}
+    /* **
+     * describe - Print optional operator information; idle describes controller
+     * state.
+     */
+    virtual void describe(bool idle)
+    {
+        (void)idle;
+    }
 
-    /** @brief Start an optional source after P4 confirms readiness. */
-    virtual bool start() { return true; }
+    /* **
+     * reset - Clear optional measurement state before asking P4 to receive.
+     */
+    virtual void reset()
+    {
+    }
 
-    /** @brief Start optional measurement after ADC START is acknowledged. */
-    virtual void begin() {}
+    /* **
+     * start - Start an optional source after P4 confirms readiness.
+     */
+    virtual bool start()
+    {
+        return true;
+    }
 
-    /** @brief Collect any pending observations without printing during capture. */
-    virtual void poll() {}
+    /* **
+     * begin - Start optional measurement after ADC START is acknowledged.
+     */
+    virtual void begin()
+    {
+    }
 
-    /** @brief Report a latched service failure to the controller. */
-    virtual bool getFailed() { return false; }
+    /* **
+     * poll - Collect any pending observations without printing during capture.
+     */
+    virtual void poll()
+    {
+    }
 
-    /** @brief Request frequent polling while collecting a short measurement burst. */
-    virtual bool getSampling() const { return false; }
+    /* **
+     * getFailed - Report a latched service failure to the controller.
+     */
+    virtual bool getFailed()
+    {
+        return false;
+    }
 
-    /** @brief Stop the source and report observations after ADC stop was requested. */
-    virtual void finish(unsigned long runId, bool clean) { (void)runId; (void)clean; }
+    /* **
+     * getSampling - Request frequent polling while collecting a short measurement
+     * burst.
+     */
+    virtual bool getSampling() const
+    {
+        return false;
+    }
+
+    /* **
+     * finish - Stop the source and report observations after ADC stop was requested.
+     */
+    virtual void finish(unsigned long runId, bool clean)
+    {
+        (void)runId;
+        (void)clean;
+    }
 };

@@ -14,7 +14,7 @@
 
 /**
  * @file Ads127Config.h
- * @brief ADC settings and receiver timing for this board's 32.768-MHz clock.
+ * ADC settings and receiver timing for this board's 32.768-MHz clock.
  * Each entry describes one complete supported configuration. Callers pass the
  * configuration itself, never its array position. adsConfig is the default.
  * The serial protocol carries samples/second; each board resolves that value
@@ -24,7 +24,7 @@
 #include <cstdint>
 
 /**
- * @brief Settings needed to configure the ADC and interpret its output wire.
+ * Settings needed to configure the ADC and interpret its output wire.
  * Feather writes the two encoded register values while the ADC is stopped.
  * P4 uses samples/second and slots to set up reception. These are hardware
  * settings, not measurements or proof that the requested rate was achieved.
@@ -55,12 +55,15 @@ struct Ads127Config
     // first contains our 8-bit status plus 24-bit sample. P4 checks this spacing.
     uint8_t _slots;
 
-    /** @brief Compare all settings, so equal rates cannot hide different hardware choices. */
+    /* **
+     * matches - Compare all settings, so equal rates cannot hide different hardware
+     * choices.
+     */
     constexpr bool matches(const Ads127Config& other) const
     {
         return _samplesPerSecond == other._samplesPerSecond && _osr == other._osr &&
-            _filterCode == other._filterCode && _clockDividerCode == other._clockDividerCode &&
-            _slots == other._slots;
+               _filterCode == other._filterCode && _clockDividerCode == other._clockDividerCode &&
+               _slots == other._slots;
     }
 };
 
@@ -76,25 +79,31 @@ static constexpr Ads127Config ads127Configs[] = {
     {128000, 128, 0x0d, 0x40, 2},
     {256000, 64, 0x0c, 0x20, 2},
     {512000, 32, 0x0b, 0x00, 2},
-    ads127DefaultConfig
-};
+    ads127DefaultConfig};
 
-/**
- * @brief Resolve an actual rate in samples/second; return null for unsupported rates.
- * The returned pointer refers to a permanent, read-only configuration. There
- * is exactly one supported configuration per rate in this table.
+/* **
+ * getAds127Config - Resolve an actual rate in samples/second; return null for
+ * unsupported rates. The returned pointer refers to a permanent, read-only
+ * configuration. There is exactly one supported configuration per rate in this
+ * table.
  */
 inline const Ads127Config* getAds127Config(uint32_t samplesPerSecond)
 {
     const Ads127Config* retVal = nullptr;
     for (const Ads127Config& candidate : ads127Configs)
     {
-        if (candidate._samplesPerSecond == samplesPerSecond) { retVal = &candidate; }
+        if (candidate._samplesPerSecond == samplesPerSecond)
+        {
+            retVal = &candidate;
+        }
     }
     return retVal;
 }
 
-/** @brief Refuse unknown or inconsistent settings before any hardware or storage action. */
+/* **
+ * isSupportedAds127Config - Refuse unknown or inconsistent settings before any
+ * hardware or storage action.
+ */
 inline bool isSupportedAds127Config(const Ads127Config& requestedConfig)
 {
     const Ads127Config* supportedConfig = getAds127Config(requestedConfig._samplesPerSecond);

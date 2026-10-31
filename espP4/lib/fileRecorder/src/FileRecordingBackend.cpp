@@ -2,19 +2,23 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 /**
  * @file FileRecordingBackend.cpp
- * Write a recording to a list of preallocated SD files. 
- *  - _slots contains that list;
+ * Write a recording to a list of preallocated SD files.
+ * Each Slot holds one file's path and header. _slots is the selected list and
+ * _iSlot identifies the file currently being written.
  *  - prepForRecording chooses the files; 
  *  - copyToRingBuffer copies sample bytes into the RAM ring; 
  *  - pump writes queued bytes;
  *  - finishRecording closes the session; 
- *  - verify reads retained data back. The sample-processing task calls copyToRingBuffer and skipInput. 
- * The disk task handles all filesystem calls. 
+ *  - verify reads back the data still present after any circular overwrites.
+ * The sample-processing task calls copyToRingBuffer and skipInput.
+ * The disk task handles all filesystem calls.
  * The class treats sample data as bytes and does not control the ADC.
  * 
- * Files are named with a prefix ending with an integer. This class manages file names to avoid collisions
- * A session is one run of the digitizer, from start to stop. Session numbers are stored in file headers.
- * This class assigns the session number
+ * Files are named R0000000.BIN, R0000001.BIN, and so on, in /RECORD. These
+ * filename numbers do not identify positions in _slots. scanHeaders finds the
+ * next unused filename number without deleting files already on the card.
+ * A session is one run of the digitizer. This class assigns its number above
+ * the numbers found in valid file headers; formatting starts again at 1.
  */
 #include "FileRecordingBackend.h"
 #include <algorithm>
@@ -53,7 +57,10 @@ bool FileRecordingBackend::initializeMemory(uint8_t* (*allocateRing)(uint32_t),
 
     if (retVal)
     {
-        // PC smoke tests use ordinary Windows memory; P4 needs memory suitable for SD transfers.
+        // ESP_PLATFORM is defined by the ESP build. That branch reserves 16 KiB
+        // of internal RAM aligned to 64 bytes for DMA (hardware data transfers
+        // without CPU copying). The PC checks use ordinary allocated memory;
+        // they run the same file-management code with a simulated filesystem.
 #ifdef ESP_PLATFORM
         if (!_scratchMemory)
         {
@@ -99,16 +106,20 @@ bool FileRecordingBackend::checkOperation(FRESULT result, const char* operation)
  * scanHeaders - Read existing recording-file headers before preparing a session.
  * prepareFiles calls this after mounting the card and locating /RECORD. It
  * examines names such as R0000001.BIN and reads the first header bytes of each
- * matching file.
+ * matching file. Each header is 512 bytes, one SD sector (the card's basic
+ * transfer unit), keeping the following sample data on a sector boundary.
  *
  * - Append files with valid headers and matching sizes to the supplied slots list. 
- * - Set nextFile above the highest existing file number. 
- * - Set nextSession above the highest session number in valid headers.
+ * - Set nextFile above the highest existing filename number, even when that
+ *   file's header is damaged, so a new allocation will not replace it.
+ * - Set nextSession above the highest session number in valid headers, so files
+ *   from the new run can be distinguished from earlier runs.
  *
  * entries counts every directory entry, including unrelated files and subdirectories. 
- * refuse more than 4096 entries to limit the scan and its memory use. 
+ * Refuse more than 4096 entries to limit the scan and its memory use; 4096 is
+ * this implementation's limit, not an SD-card or filesystem requirement.
  *
- * returns True for success, false otherwise. 
+ * Return true when the scan completes, false on an I/O error or a scan limit. 
  */
 bool FileRecordingBackend::scanHeaders(std::vector<Slot>& slots, uint32_t& nextFile, uint64_t& nextSession, uint32_t& entries)
 {
@@ -200,8 +211,10 @@ bool FileRecordingBackend::scanHeaders(std::vector<Slot>& slots, uint32_t& nextF
  * capacity is the number of sample-data bytes reserved in each file; the
  * 512-byte header is additional.
  *
- * Called during preparation, before samples arrive. f_expand reserves contiguous
- * disk space, then f_write saves a header marking the file unused. FA_CREATE_NEW
+ * Called during preparation, before samples arrive. f_expand reserves one
+ * consecutive range of filesystem clusters (groups of disk sectors), avoiding
+ * a fragmented file. This is filesystem placement, not physical flash layout.
+ * f_write then saves a header marking the file unused. FA_CREATE_NEW
  * refuses an existing filename. Return true only after every requested file has
  * been allocated and closed. A failed attempt may leave a new file behind; it
  * does not remove existing files.
@@ -211,7 +224,9 @@ bool FileRecordingBackend::allocate(uint32_t first, uint64_t capacity)
     bool retVal = first <= 9999999 && _recordingSessionConfig._fileCount <= 10000000 - first;
     for (uint32_t iSlot = 0; retVal && iSlot < _recordingSessionConfig._fileCount; ++iSlot)
     {
-        // Report which file is about to be allocated.
+        // snprintf builds bounded text in progress; it does not print it.
+        // reportProgress passes that text to the optional reporting function
+        // before f_expand reserves space, which can take time on a large card.
         char progress[96];
         snprintf(progress, sizeof(progress), "allocating file %u of %u",
             static_cast<unsigned>(iSlot + 1), static_cast<unsigned>(_recordingSessionConfig._fileCount));
@@ -304,7 +319,9 @@ void FileRecordingBackend::resetSession(const RecordingSessionConfig& config)
 
 /* **
  * validateConfig - Check memory, UTC and file-size settings before disk access.
- * Return false if the requested size cannot fit the filesystem's size type.
+ * Return false for unsupported settings or a size that cannot be represented
+ * by the filesystem. UTC must be from 2020 through 2099; the constants below
+ * are seconds since 1970 at the start of 2020 and 2100.
  * useExisting uses the sizes already stored in file headers, so it does not
  * require a new file count or duration.
  */
@@ -439,7 +456,9 @@ bool FileRecordingBackend::prepareFiles(RecordingDisk& recordingDisk)
         }
     }
 
-    // Include the header's capacity, not the amount written by an earlier run.
+    // Sum the sample-byte capacities stored in the headers, excluding the
+    // headers themselves. An earlier run may have filled only part of a file;
+    // its unused reserved space is still available when that file is reused.
     for (const auto& slot : _slots)
     {
         if (UINT64_MAX - _sessionCapacity < slot._sessionFileHeader._capacity)
@@ -672,8 +691,9 @@ bool FileRecordingBackend::closeSlot()
  * replaces its previous recording.
  *
  * Called by write only when the current file has reached its byte capacity.
- * Missing input does not trigger a file change. With stopWhenFull, copyToRingBuffer should
- * already have limited accepted bytes to the total capacity; needing another
+ * Missing input does not trigger a file change. With stopWhenFull,
+ * copyToRingBuffer has already limited accepted bytes to the total capacity;
+ * needing another
  * file here indicates an accounting error. Return false if closing or opening
  * fails, or if the pool is exhausted.
  */
@@ -692,6 +712,8 @@ bool FileRecordingBackend::advance()
 
     if (retVal)
     {
+        // For five selected files, indices advance 0, 1, 2, 3, 4, then 0.
+        // Reuse replaces that file's previous sample data without reallocating it.
         _iSlot = (_iSlot + 1) % static_cast<uint32_t>(_slots.size());
         ++_sequence;
         if (_slots[_iSlot]._writtenThisSession)

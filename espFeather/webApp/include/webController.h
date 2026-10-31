@@ -14,7 +14,7 @@
 
 /**
  * @file WebController.h
- * @brief HTTP routes for page delivery and hardware commands.
+ * HTTP routes for page delivery and hardware commands.
  */
 #pragma once
 #include <WebServer.h>
@@ -23,7 +23,7 @@
 #include "ReceiverMonitor.h"
 
 /**
- * @brief Connect URL routes to the application services, without owning their hardware.
+ * Connect URL routes to the application services, without owning their hardware.
  * All handlers execute in Arduino's loop task when WebServer services a request.
  * The generator supplies its own synchronization for its separate worker. The
  * receiver monitor uses this same loop task, so handlers need no extra monitor lock.
@@ -32,51 +32,51 @@
 class WebController
 {
 public:
-
-    /**
-     * @brief Bind to services owned by the application.
+    /* **
+     * WebController - Bind to services owned by the application.
      */
     WebController(WebServer& webServer, LedBlinker& ledBlinker, DacGenerator& dacGenerator, ReceiverMonitor& receiverMonitor);
 
-    /**
-     * @brief Register page, asset, and API routes before server startup.
+    /* **
+     * begin - Register page, asset, and API routes before server startup.
      */
     void begin();
 
-    /**
-     * @brief Execute an acknowledged reboot after allowing the response to leave.
+    /* **
+     * update - Execute an acknowledged reboot after allowing the response to leave.
      */
     void update();
 
 private:
-
-    /**
-     * @brief Stream the landing page or report a missing asset.
+    /* **
+     * serveIndex - Stream the landing page or report a missing asset.
      */
     void serveIndex();
 
-    /**
-     * @brief Respond with authoritative blink state as uncached JSON.
+    /* **
+     * sendBlinkState - Respond with authoritative blink state as uncached JSON.
      */
     void sendBlinkState();
 
-    /**
-     * @brief Send settings and timestamped DAC/ADC graph data.
+    /* **
+     * sendDacState - Send settings and timestamped DAC/ADC graph data.
      */
     void sendDacState();
 
-    /**
-     * @brief Validate submitted settings and start output atomically.
+    /* **
+     * startDac - Validate submitted settings and start output atomically.
      */
     void startDac();
 
-    /**
-     * @brief Validate a receiver command and queue it for UART acknowledgement.
+    /* **
+     * commandReceiver - Validate a receiver command and queue it for UART
+     * acknowledgement.
      */
     void commandReceiver(const char* action);
 
-    /**
-     * @brief Parse a required finite decimal form parameter without accepting trailing junk.
+    /* **
+     * readNumber - Parse a required finite decimal form parameter without accepting
+     * trailing junk.
      */
     bool readNumber(const char* name, float& value);
 

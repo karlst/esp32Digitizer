@@ -8,9 +8,11 @@
 #include <cstdint>
 
 /**
- * Settings for one recording session. Calculate each new file's capacity from
- * seconds per file, samples per second and bytes per sample. Switch files when
- * that byte capacity is reached, not when a timer expires.
+ * Settings supplied before one run of the digitizer, called a session.
+ * New file size = seconds per file x samples per second x bytes per sample,
+ * plus a 512-byte header. Switch files when their sample-byte capacity is full,
+ * not when a timer expires. For example, 15 x 1,024,000 x 3 reserves 46,080,000
+ * sample bytes per file. File count and duration are choices made by the caller.
  *
  * formatAndAllocate erases the card and creates files. addFiles preserves
  * existing files and creates _fileCount additional files. useExisting selects
@@ -19,8 +21,10 @@
  * overwriteOldest also allows previously recorded files.
  *
  * When the selected files fill, stopWhenFull stops accepting data.
- * overwriteOldest reuses only files selected for this session; it does not
- * overwrite unrelated recordings.
+ * overwriteOldest returns to the first selected file and writes it again.
+ * With addFiles, only the newly created files are selected; previous recordings
+ * are preserved. With useExisting, compatible older recordings may be selected
+ * for reuse. Unrelated files are never part of this pool.
  */
 struct RecordingSessionConfig
 {

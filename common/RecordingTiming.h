@@ -12,15 +12,17 @@
  * Public License in the repository LICENSE file or <https://www.gnu.org/licenses/>.
  */
 
-/** @file RecordingTiming.h
- * @brief Shared limits for preparing storage before ADC sampling begins.
+/**
+ * @file RecordingTiming.h
+ * Shared limits for preparing storage before ADC sampling begins.
  */
 #pragma once
 #include <cstdint>
+
 namespace recordingTiming
 {
-    // P4 supervises preparation for three minutes. Feather allows an extra
-    // five seconds for P4's failure reply. Neither duration is recording time.
-    constexpr uint32_t preparationTimeoutMs = 180000;
-    constexpr uint32_t readyWaitMs = preparationTimeoutMs + 5000;
-}
+// P4 supervises preparation for three minutes. Feather allows an extra
+// five seconds for P4's failure reply. Neither duration is recording time.
+constexpr uint32_t preparationTimeoutMs = 180000;
+constexpr uint32_t readyWaitMs = preparationTimeoutMs + 5000;
+} // namespace recordingTiming

@@ -12,13 +12,16 @@
  * Public License in the repository LICENSE file or <https://www.gnu.org/licenses/>.
  */
 
-/** @file LoopbackPoint.h
- * @brief LoopbackPoint declaration shared by its callers.
+/**
+ * @file LoopbackPoint.h
+ * LoopbackPoint declaration shared by its callers.
  */
 #pragma once
 #include <cstdint>
 
-/** @brief One physical A2 measurement; time is microseconds after sampling begins. */
+/**
+ * One physical A2 measurement; time is microseconds after sampling begins.
+ */
 struct LoopbackPoint
 {
     uint32_t _timeUs;

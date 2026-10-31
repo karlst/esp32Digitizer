@@ -12,16 +12,28 @@
  * Public License in the repository LICENSE file or <https://www.gnu.org/licenses/>.
  */
 
-/** @file BenchAcquisitionServices.cpp
- * @brief Connect test-only signal generation and observation to acquisition lifecycle calls.
+/**
+ * @file BenchAcquisitionServices.cpp
+ * Connect test-only signal generation and observation to acquisition lifecycle calls.
  */
 #include <Arduino.h>
+#if ADS127_EXTERNAL_GENERATOR
+#include <driver/dac.h>
+#endif
 #include "BenchAcquisitionServices.h"
 
-/** @brief Prepare stopped source and measurement hardware; report combined readiness. */
+/* **
+ * initialize - Prepare stopped source and measurement hardware; report combined
+ * readiness.
+ */
 bool BenchAcquisitionServices::initialize()
 {
     _ready = true;
+#if ADS127_EXTERNAL_GENERATOR
+    // Disable A1 explicitly. The Rigol supplies voltage independently; this
+    // firmware never enables the Feather DAC or samples Feather A2.
+    _ready = dac_output_disable(DAC_CHANNEL_1) == ESP_OK;
+#endif
 #if ADS127_P4_DAC_TEST
     _ready = _benchDac.initialize();
 #endif
@@ -31,27 +43,59 @@ bool BenchAcquisitionServices::initialize()
     return _ready;
 }
 
-/** @brief DAC tests use the external input; internal-short tests leave it disconnected. */
+/* **
+ * configureDuration - Configure stopped smoke observations; other bench builds
+ * refuse the extension.
+ */
+bool BenchAcquisitionServices::configureDuration(unsigned seconds)
+{
+    bool retVal = false;
+#if ADS127_HARDWARE_SMOKE
+    retVal = seconds == 30 || seconds == 300 || seconds == 600;
+    if (retVal)
+    {
+        _seconds = seconds;
+#if ADS127_COMPARE_INPUT
+        _inputSnapshot.setDuration(seconds);
+#endif
+    }
+#else
+    (void)seconds;
+#endif
+    return retVal;
+}
+
+/* **
+ * getExternalInput - Both Feather DAC and Rigol tests use CH0P/CH0N. Internal-
+ * short tests leave that external input disconnected inside the ADC.
+ */
 bool BenchAcquisitionServices::getExternalInput() const
 {
-#if ADS127_P4_DAC_TEST
+#if ADS127_P4_DAC_TEST || ADS127_EXTERNAL_GENERATOR
     return true;
 #else
     return false;
 #endif
 }
 
-/** @brief Print the selected test identity and voltage pattern without starting it. */
+/* **
+ * describe - Print the selected test identity and voltage pattern without
+ * starting it.
+ */
 void BenchAcquisitionServices::describe(bool idle)
 {
     (void)idle;
-#if ADS127_HARDWARE_SMOKE
-    Serial.printf("SMOKE_FEATHER version=3 ready=%u seconds=30\n",
-                  unsigned(_ready && idle));
+#if ADS127_EXTERNAL_GENERATOR
+    Serial.printf("SMOKE_FEATHER version=6 ready=%u seconds=%u\n",
+        unsigned(_ready && idle), _seconds);
+    Serial.println("SOURCE: EXTERNAL generator; Feather DAC disabled; no A2 measurements.");
+#elif ADS127_HARDWARE_SMOKE
+    Serial.printf("SMOKE_FEATHER version=4 ready=%u seconds=%u\n",
+        unsigned(_ready && idle), _seconds);
 #endif
 #if ADS127_COMPARE_INPUT && !ADS127_HARDWARE_SMOKE
     Serial.println(_ready ? "COMPARE READY: simultaneous A1->A2 input and P4 RAM output; keep coax connected."
-                            : "COMPARE UNAVAILABLE: DAC/input ADC initialization failed.");
+                          : "COMPARE UNAVAILABLE: DAC/input ADC initialization failed.");
 #endif
 #if ADS127_P4_DAC_TEST
     Serial.println("ADS127 DAC TEST: external CH0; A1/GPIO25 -> CH0P, CH0N grounded; SD controlled by P4.");
@@ -64,12 +108,14 @@ void BenchAcquisitionServices::describe(bool idle)
     Serial.println("DAC: nominal 10 Hz sine, 1.25 V offset, 0.5 V peak (0.75..1.75 V); 500 us updates.");
 #endif
     Serial.println("DAC stays OFF until receiver READY; verify powered analog wiring before starting.");
-#else
+#elif !ADS127_EXTERNAL_GENERATOR
     Serial.println("ADS127 DMA CONTROL: DAC off; coax stays disconnected; SD untouched.");
 #endif
 }
 
-/** @brief Discard observations from the previous run before ARM is sent. */
+/* **
+ * reset - Discard observations from the previous run before ARM is sent.
+ */
 void BenchAcquisitionServices::reset()
 {
 #if ADS127_COMPARE_INPUT
@@ -77,7 +123,10 @@ void BenchAcquisitionServices::reset()
 #endif
 }
 
-/** @brief Enable the source only after P4's matching READY reply. */
+/* **
+ * start - Enable the Feather DAC only after P4's matching READY reply. In the
+ * Rigol build this succeeds without changing the independently running source.
+ */
 bool BenchAcquisitionServices::start()
 {
     bool retVal = true;
@@ -87,7 +136,9 @@ bool BenchAcquisitionServices::start()
     return retVal;
 }
 
-/** @brief Start the input-observation clock after ADC START is acknowledged. */
+/* **
+ * begin - Start the input-observation clock after ADC START is acknowledged.
+ */
 void BenchAcquisitionServices::begin()
 {
 #if ADS127_COMPARE_INPUT
@@ -95,7 +146,9 @@ void BenchAcquisitionServices::begin()
 #endif
 }
 
-/** @brief Collect pending input observations on Arduino's task without printing. */
+/* **
+ * poll - Collect pending input observations on Arduino's task without printing.
+ */
 void BenchAcquisitionServices::poll()
 {
 #if ADS127_COMPARE_INPUT
@@ -103,7 +156,10 @@ void BenchAcquisitionServices::poll()
 #endif
 }
 
-/** @brief Combine latched source and observation faults for coordinated shutdown. */
+/* **
+ * getFailed - Combine latched source and observation faults for coordinated
+ * shutdown.
+ */
 bool BenchAcquisitionServices::getFailed()
 {
     bool retVal = false;
@@ -116,7 +172,10 @@ bool BenchAcquisitionServices::getFailed()
     return retVal;
 }
 
-/** @brief Request fast polling only while the local ADC is measuring a window. */
+/* **
+ * getSampling - Request fast polling only while the local ADC is measuring a
+ * window.
+ */
 bool BenchAcquisitionServices::getSampling() const
 {
     bool retVal = false;
@@ -126,11 +185,19 @@ bool BenchAcquisitionServices::getSampling() const
     return retVal;
 }
 
-/** @brief Disable the source and export retained observations after ADC stop request. */
+/* **
+ * finish - Disable the Feather DAC and export observations after ADC stop.
+ * The Rigol build reports controller completion without touching the generator.
+ */
 void BenchAcquisitionServices::finish(unsigned long runId, bool clean)
 {
     (void)runId;
     (void)clean;
+#if ADS127_EXTERNAL_GENERATOR
+    // Report controller completion, not generator shutdown. Karl switches the
+    // independent generator off after the test, before removing board power.
+    Serial.printf("EXTERNAL_END run=%lu clean=%u\n", runId, unsigned(clean));
+#endif
 #if ADS127_P4_DAC_TEST
     _benchDac.stop();
 #endif

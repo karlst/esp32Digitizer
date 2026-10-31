@@ -14,7 +14,7 @@
 
 /**
  * @file ads127DriverChecks.cpp
- * @brief Exercise the real Feather ADS127 driver against a delayed-reply SPI fake.
+ * Exercise the real Feather ADS127 driver against a delayed-reply SPI fake.
  * Run through runAdcDriverChecks.ps1 on the PC; no board or serial port is used.
  * The fake begins with a stale reply and changes register values between reads.
  * This catches returning the request frame's old byte instead of the next frame.
@@ -42,8 +42,8 @@ static unsigned statusWrites = 0;
 static uint8_t stickyStatus = 0;
 static bool rejectStatusWrite = false;
 
-/**
- * @brief Check that begin selects the agreed Feather GPIOs and manual CS.
+/* **
+ * begin - Check that begin selects the agreed Feather GPIOs and manual CS.
  */
 void SPIClass::begin(int clock, int input, int output, int chipSelect)
 {
@@ -52,8 +52,8 @@ void SPIClass::begin(int clock, int input, int output, int chipSelect)
     ++beginCount;
 }
 
-/**
- * @brief Check the diagnostic's slow clock and TI-required SPI mode.
+/* **
+ * beginTransaction - Check the diagnostic's slow clock and TI-required SPI mode.
  */
 void SPIClass::beginTransaction(SPISettings spiSettings)
 {
@@ -63,10 +63,11 @@ void SPIClass::beginTransaction(SPISettings spiSettings)
     transactionBytes = 0;
 }
 
-/**
- * @brief Return the previous frame's value while accepting the next read request.
- * The second response byte deliberately differs from all useful register values.
- * Writes return an echo in the next frame; CONTROL bits self-clear in readback.
+/* **
+ * transfer - Return the previous frame's value while accepting the next read
+ * request. The second response byte deliberately differs from all useful
+ * register values. Writes return an echo in the next frame; CONTROL bits
+ * self-clear in readback.
  */
 uint8_t SPIClass::transfer(uint8_t byte)
 {
@@ -119,8 +120,9 @@ uint8_t SPIClass::transfer(uint8_t byte)
     return retVal;
 }
 
-/**
- * @brief Require exactly two complete two-byte frames and a deselected ADC.
+/* **
+ * endTransaction - Require exactly two complete two-byte frames and a deselected
+ * ADC.
  */
 void SPIClass::endTransaction()
 {
@@ -128,10 +130,11 @@ void SPIClass::endTransaction()
     transactionOpen = false;
 }
 
-/**
- * @brief Check reply delay, configuration, write failures and absent-device data.
- * The driver reports transfer completion separately from identity validation;
- * zero/FF replies must remain visible to the diagnostic rather than become success.
+/* **
+ * main - Check reply delay, configuration, write failures and absent-device
+ * data. The driver reports transfer completion separately from identity
+ * validation; zero/FF replies must remain visible to the diagnostic rather than
+ * become success.
  */
 int main()
 {

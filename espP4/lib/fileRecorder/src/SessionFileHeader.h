@@ -2,14 +2,20 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 /**
  * @file SessionFileHeader.h
- * Portable 512-byte recording header; encode fields explicitly, never dump a struct.
+ * Store recording information in a fixed 512-byte header with a defined byte layout.
  */
 #pragma once
 #include <cstdint>
 
 /**
  * Information stored in each file's 512-byte header. No separate disk catalog is
- * required. _streamOffset counts saved sample bytes from the start of the
+ * required. _session identifies one run; _sequence gives the writing order of
+ * files within that run, including replacements when files are reused.
+ * _capacity is the reserved sample-data space and _validBytes is how much of
+ * it was written; neither includes the 512-byte header. Unused space at the end
+ * of a partially filled file is not recorded data.
+ *
+ * _streamOffset counts saved sample bytes from the start of the
  * session; it is not elapsed time if samples were lost.
  *
  * Each retained header stores the session loss total in _lostBytes. _lossFinal
