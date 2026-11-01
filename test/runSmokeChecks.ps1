@@ -41,6 +41,7 @@ $checks = @(
     @{ Name = 'Hardware smoke pass/fail rules'; Kind = 'Python'; Path = 'espP4/test/hardwareSmokeReportChecks.py' },
     @{ Name = 'External generator comparison'; Kind = 'Python'; Path = 'espP4/test/externalGeneratorChecks.py' },
     @{ Name = '1 kHz waveform response'; Kind = 'Python'; Path = 'espP4/test/fastSquareChecks.py' },
+    @{ Name = 'Grounded-input noise and FFT'; Kind = 'Python'; Path = 'espP4/test/groundedNoiseChecks.py' },
     @{ Name = 'P4 constant-input analysis'; Kind = 'Python'; Path = 'espP4/test/constantChecks.py' }
 )
 if ($IncludeBrowser) {

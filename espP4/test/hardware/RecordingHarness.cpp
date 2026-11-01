@@ -20,13 +20,17 @@
 #include "RecordingApplication.h"
 #include <cstdio>
 #include <cstring>
+#if CONFIG_P4_HARDWARE_SMOKE
+#include "SdSmokeSummary.h"
+#endif
 
 /* **
  * RecordingHarness - Borrow the startup-owned recorder; construction starts no
- * test.
+ * test. Smoke startup also supplies its SD readback reporter; other bench
+ * builds leave that pointer null and cannot select the grounded-input report.
  */
-RecordingHarness::RecordingHarness(SdRecorder& sdRecorder)
-    : _sdRecorder(sdRecorder)
+RecordingHarness::RecordingHarness(SdRecorder& sdRecorder, SdSmokeSummary* sdSmokeSummary)
+    : _sdRecorder(sdRecorder), _sdSmokeSummary(sdSmokeSummary)
 {
 }
 
@@ -41,20 +45,41 @@ bool RecordingHarness::initialize()
 }
 
 /* **
- * line - Handle the hardware-smoke @TEST command before recording preparation.
+ * line - Handle hardware-smoke configuration before recording preparation.
+ * @NOISE 1 enables individual-sample reporting; @NOISE 0 disables it. Accept
+ * either only while idle. @TEST also clears that selection, so a later ordinary
+ * test cannot accidentally request the lengthy noise transfer.
  * Accept 30, 300 or 600 seconds while idle, with SD selected.
  *
  * A 30-second run uses two 16-second files and stops when full. Longer runs use
  * five 16-second files and overwrite the oldest selected file. Add these files
- * without erasing earlier recordings. Return true for a recognized @TEST
- * command, including a rejected request; the printed reply says whether its
+ * without erasing earlier recordings. Return true for a recognized @TEST or
+ * @NOISE command, including a rejected request; the printed reply says whether its
  * settings were accepted. This does not start capture.
  */
 bool RecordingHarness::line(RecordingApplication& recordingApplication, const char* text)
 {
     bool retVal = false;
 #if CONFIG_P4_HARDWARE_SMOKE
-    if (strncmp(text, "@TEST", 5) == 0)
+    if (strncmp(text, "@NOISE", 6) == 0)
+    {
+        retVal = true;
+        unsigned enabled = 0;
+        char extra = 0;
+        const bool accepted = sscanf(text, "@NOISE %u %c", &enabled, &extra) == 1 && enabled <= 1 &&
+            recordingApplication.getIdle() && !recordingApplication.isRecordingDestinationLocked() &&
+            !_ramMode && _sdSmokeSummary != nullptr;
+        if (accepted)
+        {
+            _sdSmokeSummary->setNoiseReporting(enabled != 0);
+            printf("NOISE OK enabled=%u\n", enabled);
+        }
+        else
+        {
+            printf("NOISE rejected\n");
+        }
+    }
+    else if (strncmp(text, "@TEST", 5) == 0)
     {
         retVal = true;
         unsigned seconds = 0;
@@ -74,6 +99,10 @@ bool RecordingHarness::line(RecordingApplication& recordingApplication, const ch
         if (accepted)
         {
             _seconds = seconds;
+            if (_sdSmokeSummary != nullptr)
+            {
+                _sdSmokeSummary->setNoiseReporting(false);
+            }
             printf("TEST OK seconds=%u\n", seconds);
         }
         else
@@ -96,7 +125,7 @@ void RecordingHarness::command(RecordingApplication& recordingApplication, char 
 #if CONFIG_P4_HARDWARE_SMOKE
     if (key == 'h')
     {
-        printf("SMOKE_P4 version=8 ready=%u seconds=%lu\n",
+        printf("SMOKE_P4 version=9 ready=%u seconds=%lu\n",
             unsigned(recordingApplication.getIdle() && !recordingApplication.isRecordingDestinationLocked() && !_ramMode),
             static_cast<unsigned long>(_seconds));
     }

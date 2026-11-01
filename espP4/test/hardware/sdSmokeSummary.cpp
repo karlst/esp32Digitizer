@@ -43,6 +43,66 @@ static void pauseReport()
 }
 
 /* **
+ * setNoiseReporting - The idle bench command selects whether SD readback sends
+ * one second of individual readings to the PC. This does not start recording.
+ * reset clears the counters but preserves this selection for the next readback.
+ */
+void SdSmokeSummary::setNoiseReporting(bool enabled)
+{
+    _noiseReporting = enabled;
+}
+
+/* **
+ * reportNoiseSample - accept calls this for readings from 1 s to just before
+ * 2 s into retained SD data, after recording stops. packedValue holds the original
+ * three bytes, lowest byte first. Send 64 readings per hex row and a CRC-32
+ * checksum over those original bytes so the PC can detect transfer corruption.
+ * Only this disk task accesses the row buffer. printf copies its contents to
+ * serial output before it is reused; no ring-buffer pointers are exposed.
+ */
+void SdSmokeSummary::reportNoiseSample(uint32_t packedValue)
+{
+    if (_noiseCount == 0)
+    {
+        printf("NOISE_BEGIN version=1 firstSample=%llu count=%lu rate=%lu\n",
+            static_cast<unsigned long long>(_firstSample + _rate),
+            static_cast<unsigned long>(_rate), static_cast<unsigned long>(_rate));
+    }
+
+    // CRC-32/ISO-HDLC uses the reflected polynomial 0xedb88320, an all-ones
+    // initial value and a final complement, matching Python's zlib.crc32.
+    static constexpr char hexDigits[] = "0123456789abcdef";
+    const unsigned iSample = _noiseCount % _noiseChunkSamples;
+    for (unsigned iByte = 0; iByte < 3; ++iByte)
+    {
+        const uint8_t byte = static_cast<uint8_t>(packedValue >> (8 * iByte));
+        _noiseHex[iSample * 6 + iByte * 2] = hexDigits[byte >> 4];
+        _noiseHex[iSample * 6 + iByte * 2 + 1] = hexDigits[byte & 15];
+        _noiseCrc ^= byte;
+        for (unsigned bit = 0; bit < 8; ++bit)
+        {
+            _noiseCrc = (_noiseCrc >> 1) ^ ((_noiseCrc & 1) ? 0xedb88320U : 0U);
+        }
+    }
+    ++_noiseCount;
+
+    // Yield between rows even when serial has room. This gives the idle task
+    // CPU time and prevents a long readback report from triggering its watchdog.
+    if (iSample + 1 == _noiseChunkSamples || _noiseCount == _rate)
+    {
+        _noiseHex[(iSample + 1) * 6] = '\0';
+        printf("NOISE_DATA,%lu,%s\n",
+            static_cast<unsigned long>(_noiseCount - iSample - 1), _noiseHex);
+        pauseReport();
+    }
+    if (_noiseCount == _rate)
+    {
+        printf("NOISE_END count=%lu crc=%08lx\n",
+            static_cast<unsigned long>(_noiseCount), static_cast<unsigned long>(~_noiseCrc));
+    }
+}
+
+/* **
  * reset - Clear the counters before reading a recording. samplesPerSecond is
  * the number of ADC readings per second. beginRange calls this before setting
  * the actual readback range; direct PC tests can use the default 30-second range.
@@ -56,6 +116,8 @@ void SdSmokeSummary::reset(uint32_t samplesPerSecond)
     _range = false;
     _samples = _clipped = 0;
     _waveformCount = 0;
+    _noiseCount = 0;
+    _noiseCrc = 0xffffffffU;
     _partial = _partialBytes = 0;
     for (unsigned iBin = 0; iBin < 801; ++iBin)
     {
@@ -93,6 +155,13 @@ void SdSmokeSummary::accept(const uint8_t* data, size_t bytes)
                                       ? static_cast<int32_t>(_partial) - 16777216
                                       : static_cast<int32_t>(_partial);
             const uint64_t iBin = _rate != 0 ? (_firstSample + _samples) * 10 / _rate - _iFirstBin : 801;
+
+            // Skip the first second, then send one second of consecutive values.
+            // This runs during readback, not while the ADC is filling the ring.
+            if (_noiseReporting && _rate != 0 && _samples >= _rate && _samples - _rate < _rate)
+            {
+                reportNoiseSample(_partial);
+            }
             if (_rate != 0 && _samples >= _rate && _samples - _rate < _waveformSamples)
             {
                 _waveform[_waveformCount++] = value;
@@ -153,6 +222,7 @@ void SdSmokeSummary::accept(const uint8_t* data, size_t bytes)
 bool SdSmokeSummary::getComplete() const
 {
     bool retVal = _rate == 1024000 && _partialBytes == 0 && _clipped == 0;
+    retVal = retVal && (!_noiseReporting || _noiseCount == _rate);
     if (_range)
     {
         retVal = retVal && _bins <= 801 && _totalSamples > _firstSample &&

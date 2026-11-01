@@ -1,0 +1,4 @@
+# PC FFT calculations; install into the Python environment used to run the test.
+numpy
+# Existing hardware runner uses this for USB serial communication.
+pyserial

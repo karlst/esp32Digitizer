@@ -55,9 +55,11 @@ idf.py -B build/smoke -D SDKCONFIG=sdkconfig.smoke -p COM3 flash
 
 Neither board starts the signal or recording at boot. Rebuild and upload **both
 boards** from the current source before using new report features. P4 currently
-reports version 8; Feather reports version 4 for its DAC or version 6 for the
+reports version 9; Feather reports version 4 for its DAC or version 6 for the
 external generator. Older P4 reports are accepted for some slower tests, but
-the 1 kHz test requires version 8. Changing duration alone needs no new upload.
+the 1 kHz test requires version 8 or 9. Changing duration alone needs no new upload.
+Grounded-input noise requires P4 version 9; see [GROUNDED-NOISE.md](GROUNDED-NOISE.md).
+Install its NumPy dependency before running the updated PC smoke suites.
 
 ## Connect and run
 

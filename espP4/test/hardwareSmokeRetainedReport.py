@@ -8,7 +8,7 @@ from constantReport import calibrationMapping
 from hardwareSmokePlot import writePlot
 
 
-def analyzeRetained(feather, p4, progress=None, plotPath=None, scopeLevels=None, frequencyHz=0.5):
+def analyzeRetained(feather, p4, progress=None, plotPath=None, scopeLevels=None, frequencyHz=0.5, noise=False):
     """Check whole-run counters, exact retained coverage and unadjusted voltage levels.
 
     Earlier overwritten samples have no readback proof. Firmware verifies each
@@ -16,6 +16,8 @@ def analyzeRetained(feather, p4, progress=None, plotPath=None, scopeLevels=None,
     that verdict plus consistent session/range metadata. Normal tests require a
     matching A2 window. scopeLevels selects external firmware and supplies scope
     low/high readings in volts instead; no Feather input observations are used.
+    noise uses that same DAC-disabled controller, but requires grounded inputs
+    and the version-9 individual-sample report instead of scope readings.
     """
     from hardwareSmokeReport import single, errorLimitPercent
     checks = []
@@ -28,13 +30,17 @@ def analyzeRetained(feather, p4, progress=None, plotPath=None, scopeLevels=None,
 
     if frequencyHz not in (0.5, 1000) or (frequencyHz == 1000 and scopeLevels is None):
         raise ValueError('Unsupported waveform mode')
-    version = 6 if scopeLevels is not None else 4
-    if f'SMOKE_FEATHER version={version} ready=1 ' not in feather or not any(f'SMOKE_P4 version={v} ready=1 ' in p4 for v in ((8,) if frequencyHz == 1000 else ((7, 8) if scopeLevels is not None else (5, 7, 8)))):
+    if noise and (scopeLevels is not None or frequencyHz != 0.5):
+        raise ValueError('Grounded noise and generator modes cannot be combined')
+    externalController = scopeLevels is not None or noise
+    version = 6 if externalController else 4
+    p4Versions = (9,) if noise else ((8, 9) if frequencyHz == 1000 else ((7, 8, 9) if externalController else (5, 7, 8, 9)))
+    if f'SMOKE_FEATHER version={version} ready=1 ' not in feather or not any(f'SMOKE_P4 version={v} ready=1 ' in p4 for v in p4Versions):
         raise ValueError('Selectable-duration firmware is required on both boards')
     seconds = int(single(r'^TEST OK seconds=(\d+)$', p4, 'P4 duration'))
     if seconds not in (30, 300, 600) or single(r'^TEST OK seconds=(\d+)$', feather, 'Feather duration') != str(seconds):
         raise ValueError('Board durations do not match')
-    if scopeLevels is not None:
+    if externalController:
         run, externalClean = map(int, single(
             r'^EXTERNAL_END run=(\d+) clean=(\d+)$', feather, 'External-source completion'))
         if externalClean != 1:
@@ -82,7 +88,7 @@ def analyzeRetained(feather, p4, progress=None, plotPath=None, scopeLevels=None,
         raise ValueError('Receiver reported missing or invalid samples')
     if 'ADC START echo confirmed.' not in feather or 'ADC STOP command echo confirmed' not in feather:
         raise ValueError('ADC start/stop was not confirmed')
-    if scopeLevels is None:
+    if not externalController:
         single(r'^DAC OFF updates=\d+ missedIntervals=0 maxGapUs=\d+ driverFault=0$', feather, 'DAC completion')
     confirm('Digitizer -> P4 DMA: OK - no reported receive errors')
     confirm('Recording buffer: no overflow')
@@ -90,7 +96,7 @@ def analyzeRetained(feather, p4, progress=None, plotPath=None, scopeLevels=None,
     confirm(f'SD readback: retained-file checksums match ({retainedBytes:,} bytes)')
 
     inputs, outputs = {}, {}
-    if scopeLevels is None:
+    if not externalController:
         converter, calibration = calibrationMapping(feather, run)
         if converter is None:
             raise ValueError('Input calibration is missing')
@@ -122,13 +128,18 @@ def analyzeRetained(feather, p4, progress=None, plotPath=None, scopeLevels=None,
         if int(position) != iBin or int(amount) != expected or not math.isfinite(mean) or not -8388608 < mean < 8388607:
             raise ValueError('Disk bin order, sample count or range is invalid')
         outputs[iBin] = mean * 2500.0 / 8388608
-    if scopeLevels is not None:
+    if externalController:
         # Keep all disk/counter checks above shared with the Feather test. Only
         # the voltage reference and free-running waveform analysis differ.
         from externalGeneratorReport import analyzeWaveform
         result = dict(checks=checks, bytesWritten=totalBytes, bytesRetained=retainedBytes,
                       seconds=samples/rate, requestedSeconds=seconds, samples=samples,
                       file=saved[0])
+        if noise:
+            if seconds != 30 or single(r'^NOISE OK enabled=(\d+)$', p4, 'Noise selection') != '1':
+                raise ValueError('Noise test requires an acknowledged 30-second recording')
+            from groundedNoiseReport import analyzeNoise
+            return analyzeNoise(p4, result, first, plotPath)
         if frequencyHz == 1000:
             from fastSquareReport import analyzeFastSquare
             return analyzeFastSquare(p4, scopeLevels, result, rate, first, plotPath)

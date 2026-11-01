@@ -19,6 +19,7 @@ param(
     [ValidateSet(0, 30, 300, 600)][int]$Seconds = 0,
     [switch]$LinkOnly,
     [switch]$External,
+    [switch]$Noise,
     [ValidateSet(0.5, 1000)][double]$Frequency = 0.5
 )
 $ErrorActionPreference = 'Stop'
@@ -41,6 +42,10 @@ try {
     if ($External)
     {
         $durationArguments += '--external'
+    }
+    if ($Noise)
+    {
+        $durationArguments += '--noise'
     }
     & $Python 'espP4/test/runHardwareSmoke.py' --feather $Feather --p4 $P4 @durationArguments
     # Python already printed the short failure reason. Preserve its exit status

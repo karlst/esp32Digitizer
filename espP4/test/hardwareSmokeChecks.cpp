@@ -26,6 +26,7 @@
 #include <cassert>
 #include <cstdio>
 #include <cmath>
+#include <cstring>
 
 /* **
  * checkSampleSpread - Alternating codes around a large DC level must retain
@@ -102,11 +103,48 @@ static void checkRecordingLayouts()
 }
 
 /* **
- * main - Check byte splits, sign, full duration, and rejection of incomplete
- * tails.
+ * printNoiseFixture - Feed three seconds of known signed codes through the real
+ * SD readback parser on the PC. Its noise reporter must send only the middle
+ * second. Python checks every returned value, its position and its CRC, using
+ * awkward byte boundaries here to exercise readings split between calls.
+ * This uses memory only; it does not operate a board or SD card.
  */
-int main()
+static void printNoiseFixture()
 {
+    SdSmokeSummary sdSmokeSummary;
+    sdSmokeSummary.setNoiseReporting(true);
+    constexpr uint32_t rate = 1024000;
+    constexpr int32_t codes[] = {-8388607, -123456, -1, 0, 1, 123456, 8388606};
+    sdSmokeSummary.beginRange(rate, 0, uint64_t{rate} * 3);
+    uint8_t block[4093] = {};
+    const uint64_t bytes = uint64_t{rate} * 3 * 3;
+    for (uint64_t offset = 0; offset < bytes;)
+    {
+        const size_t amount = bytes - offset < sizeof(block) ? static_cast<size_t>(bytes - offset) : sizeof(block);
+        for (size_t iByte = 0; iByte < amount; ++iByte)
+        {
+            const uint64_t position = offset + iByte;
+            const unsigned iCode = static_cast<unsigned>((position / 3) % 7);
+            block[iByte] = static_cast<uint8_t>(static_cast<uint32_t>(codes[iCode]) >> (8 * (position % 3)));
+        }
+        sdSmokeSummary.accept(block, amount);
+        offset += amount;
+    }
+    assert(sdSmokeSummary.getComplete());
+}
+
+/* **
+ * main - Check byte splits, sign, duration and incomplete tails. The optional
+ * --noise-fixture argument emits the real firmware's serial report for Python
+ * to validate; the default invocation retains the ordinary arithmetic tests.
+ */
+int main(int argc, char** argv)
+{
+    if (argc == 2 && std::strcmp(argv[1], "--noise-fixture") == 0)
+    {
+        printNoiseFixture();
+        return 0;
+    }
     checkRecordingLayouts();
     checkSampleSpread();
     assert(ads127BenchTiming::runMs == 30000);

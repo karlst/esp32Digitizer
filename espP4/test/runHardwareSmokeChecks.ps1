@@ -41,6 +41,13 @@ try {
     {
         throw "Hardware smoke checks failed: $LASTEXITCODE"
     }
+    # Validate the actual C++ serial report with the Python decoder. This runs
+    # a PC executable and uses synthetic samples; no COM ports are opened.
+    & python "$projectRoot/test/groundedNoiseChecks.py" --firmware-report "$buildDir/hardwareSmokeChecks.exe"
+    if ($LASTEXITCODE -ne 0)
+    {
+        throw "Noise transfer checks failed: $LASTEXITCODE"
+    }
 }
 finally { Pop-Location }
 

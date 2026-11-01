@@ -23,6 +23,7 @@
 #include "SdWriteTest.h"
 #include "DecoderTiming.h"
 #include "sdkconfig.h"
+class SdSmokeSummary;
 #if CONFIG_P4_CAPTURE_PROFILE
 #include "CaptureProfile.h"
 #endif
@@ -36,7 +37,7 @@
 class RecordingHarness : public RecordingObserver, public RecordingConsoleCommands
 {
 public:
-    explicit RecordingHarness(SdRecorder& sdRecorder);
+    explicit RecordingHarness(SdRecorder& sdRecorder, SdSmokeSummary* sdSmokeSummary = nullptr);
     bool initialize();
     bool line(RecordingApplication& recordingApplication, const char* text) override;
     void command(RecordingApplication& recordingApplication, char key) override;
@@ -49,6 +50,7 @@ public:
 
 private:
     SdRecorder& _sdRecorder;
+    SdSmokeSummary* _sdSmokeSummary;
     SdWriteTest _sdWriteTest;
     RamCaptureDestination _ramCaptureDestination;
     DecoderTiming _decoderTiming;

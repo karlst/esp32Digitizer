@@ -17,6 +17,8 @@ Ordinary mode uses the Feather DAC and A1->A2 jumper. --external requires the
 dedicated Feather build and a powered external generator connected to CH0.
 This opens COM ports and starts one recording; it never builds, uploads, formats,
 or deletes existing recordings. Generator power/output remain manual.
+--noise uses the DAC-disabled Feather with both CH0 inputs grounded. It records
+30 seconds, then transfers one second of individual SD readings for a PC FFT.
 """
 import argparse
 import json
@@ -29,7 +31,7 @@ from captureComparison import readPort
 from hardwareSmokeReport import analyze, summary
 
 
-def capture(featherPort, p4Port, output, seconds=30, linkOnly=False, scopeLevels=None, frequencyHz=0.5):
+def capture(featherPort, p4Port, output, seconds=30, linkOnly=False, scopeLevels=None, frequencyHz=0.5, noise=False):
     """Identify both idle firmwares, prepare SD, capture once and validate readback.
 
     A reader thread for each board collects USB serial output while this thread
@@ -44,6 +46,12 @@ def capture(featherPort, p4Port, output, seconds=30, linkOnly=False, scopeLevels
     """
     if frequencyHz not in (0.5, 1000) or (frequencyHz == 1000 and scopeLevels is None):
         raise ValueError('1 kHz requires external-generator mode')
+    if noise:
+        if scopeLevels is not None or seconds != 30 or frequencyHz != 0.5:
+            raise ValueError('Grounded noise requires 30 seconds and no generator settings')
+        # Fail before opening ports if the PC cannot perform the FFT.
+        import groundedNoiseReport
+    externalController = scopeLevels is not None or noise
     import serial
     if seconds not in (30, 300, 600):
         raise ValueError('Duration must be 30, 300 or 600 seconds')
@@ -88,6 +96,7 @@ def capture(featherPort, p4Port, output, seconds=30, linkOnly=False, scopeLevels
         nextPrepareProgress = 15
         lastPreparation = 'P4 has not reported receiving the Feather request'
         nextProgress = 15
+        nextNoiseProgress = 0
         nonce = time.time_ns() % 4000000000 + 1
         linkReplies = set()
         linkQueued = False
@@ -102,6 +111,7 @@ def capture(featherPort, p4Port, output, seconds=30, linkOnly=False, scopeLevels
                            'link': 'Serial probe failed: ' + lastLinkStatus,
                            'clock': 'P4 did not accept UTC; check its log and reset before retrying',
                            'configure': 'Both boards must acknowledge the selected duration before starting',
+                           'noiseConfigure': 'P4 did not acknowledge individual noise reporting',
                            'prepare': 'Storage or receiver did not become ready; check both logs',
                            'capture': 'Recording or SD readback did not finish'}
                 detail = '; last preparation status: ' + lastPreparation if phase == 'prepare' else ''
@@ -141,8 +151,8 @@ def capture(featherPort, p4Port, output, seconds=30, linkOnly=False, scopeLevels
                     raise ValueError(name + ' is not ready; reset both boards before retrying')
                 if phase == 'identity':
                     expected = 'SMOKE_FEATHER' if name == 'Feather' else 'SMOKE_P4'
-                    version = (6 if scopeLevels is not None else 4) if name == 'Feather' else (8 if frequencyHz == 1000 else (7 if scopeLevels is not None else 5))
-                    compatibleP4 = name == 'P4' and (re.fullmatch(r'SMOKE_P4 version=8 ready=1 seconds=(30|300|600)', line) or (frequencyHz == 0.5 and scopeLevels is None and re.fullmatch(r'SMOKE_P4 version=7 ready=1 seconds=(30|300|600)', line)))
+                    version = (6 if externalController else 4) if name == 'Feather' else (9 if noise else (8 if frequencyHz == 1000 else (7 if externalController else 5)))
+                    compatibleP4 = name == 'P4' and not noise and (re.fullmatch(r'SMOKE_P4 version=[89] ready=1 seconds=(30|300|600)', line) or (frequencyHz == 0.5 and scopeLevels is None and re.fullmatch(r'SMOKE_P4 version=7 ready=1 seconds=(30|300|600)', line)))
                     if re.fullmatch(expected + rf' version={version} ready=1 seconds=(30|300|600)', line) or compatibleP4:
                         ready.add(name)
                     elif line.startswith(expected + ' version='):
@@ -196,9 +206,23 @@ def capture(featherPort, p4Port, output, seconds=30, linkOnly=False, scopeLevels
                         raise ValueError(name + ' rejected the selected duration; reset both boards')
                     if line == f'TEST OK seconds={seconds}':
                         configured.add(name)
-                    if len(configured) == 2:
+                    if len(configured) == 2 and noise:
+                        ports['P4'].write(b'@NOISE 1\n')
+                        phase = 'noiseConfigure'
+                        deadline = time.monotonic() + 12
+                    elif len(configured) == 2:
                         # Mark started before requesting the capture so an
                         # interrupted command still requests source shutdown.
+                        started = True
+                        ports['Feather'].write(b'g')
+                        phase = 'prepare'
+                        prepareStarted = time.monotonic()
+                        deadline = prepareStarted + 10
+                        print('Preparing SD card and receiver...', flush=True)
+                elif phase == 'noiseConfigure':
+                    if name == 'P4' and line == 'NOISE rejected':
+                        raise ValueError('P4 rejected noise reporting; reset it before retrying')
+                    if name == 'P4' and line == 'NOISE OK enabled=1':
                         started = True
                         ports['Feather'].write(b'g')
                         phase = 'prepare'
@@ -223,7 +247,10 @@ def capture(featherPort, p4Port, output, seconds=30, linkOnly=False, scopeLevels
                     if name == 'Feather' and line.startswith('ADC START echo confirmed.'):
                         phase = 'capture'
                         captureStarted = time.monotonic()
-                        deadline = captureStarted + seconds + 300
+                        # A million three-byte readings become six million hex
+                        # characters. Allow 20 minutes on the 115200-baud link;
+                        # this extends readback only, not ADC recording time.
+                        deadline = captureStarted + seconds + (1200 if noise else 300)
                         print(f'Recording {seconds} seconds, then reading retained SD files back...')
                     elif ('FAILED' in line or 'PREPARE FAILED' in line or
                           line.startswith(('No matching receiver READY', 'Test already pending/running',
@@ -231,23 +258,31 @@ def capture(featherPort, p4Port, output, seconds=30, linkOnly=False, scopeLevels
                                            'ADC127 FAULT', 'ADC127 TIMEOUT'))):
                         raise ValueError(f'{name}: {line}; last preparation status: {lastPreparation}')
                 elif phase == 'capture':
+                    if noise and name == 'P4' and line.startswith('NOISE_DATA,'):
+                        fields = line.split(',')
+                        if len(fields) == 3 and fields[1].isdigit():
+                            received = int(fields[1]) + len(fields[2]) // 6
+                            percent = min(100, received * 100 // 1024000)
+                            if percent >= nextNoiseProgress:
+                                print(f'Individual SD readings transferred: {received:,} / 1,024,000 ({percent}%)', flush=True)
+                                nextNoiseProgress = percent + 5
                     refused = ('No matching receiver READY', 'ADC127 FAILED',
                                'Source/ADC START failed', 'DAC setup failed',
                                'Test already pending/running')
                     if name == 'Feather' and line.startswith(refused):
                         raise ValueError('ADC capture could not start; check the Feather log')
-                    if name == 'Feather' and line.startswith('EXTERNAL_END run=' if scopeLevels is not None else 'INPUT_END run='):
+                    if name == 'Feather' and line.startswith('EXTERNAL_END run=' if externalController else 'INPUT_END run='):
                         ended.add(name)
                     if name == 'P4' and line.startswith('SMOKE_SD_END run='):
                         ended.add(name)
                     finished = len(ended) == 2
-        if scopeLevels is None:
+        if not externalController:
             result = analyze('\n'.join(records['Feather']), '\n'.join(records['P4']),
                              showProgress, session / 'comparison.html')
         else:
             from hardwareSmokeRetainedReport import analyzeRetained
             result = analyzeRetained('\n'.join(records['Feather']), '\n'.join(records['P4']),
-                                     showProgress, session / 'comparison.html', scopeLevels, frequencyHz)
+                                     showProgress, session / 'comparison.html', scopeLevels, frequencyHz, noise)
         (session / 'result.json').write_text(json.dumps(result, indent=2), encoding='utf-8')
         report = summary(result)
         if result['calibration'].startswith('ESTIMATE'):
@@ -255,7 +290,8 @@ def capture(featherPort, p4Port, output, seconds=30, linkOnly=False, scopeLevels
         (session / 'result.txt').write_text(report + '\n', encoding='utf-8')
         print(summary(result, includeChecks=False))
         if not result['passed']:
-            raise ValueError('External waveform checks failed; see comparison.html and result.json')
+            raise ValueError('Noise magnitude target failed; see comparison.html and result.json' if noise else
+                             'External waveform checks failed; see comparison.html and result.json')
         if result['calibration'].startswith('ESTIMATE'):
             print('Input voltage uses nominal calibration; absolute accuracy is limited.')
     except BaseException as error:
@@ -293,6 +329,7 @@ def main():
     parser.add_argument('--p4', default='COM3')
     parser.add_argument('--seconds', type=int, choices=(30, 300, 600), help='Omit to select duration from a menu')
     parser.add_argument('--external', action='store_true', help='Use external-generator Feather firmware; DAC stays disabled')
+    parser.add_argument('--noise', action='store_true', help='Ground both CH0 inputs; record 30 s and analyze 1 s without scope readings')
     parser.add_argument('--frequency', type=float, choices=(0.5, 1000), default=0.5, help='External square-wave frequency in Hz')
     parser.add_argument('--scope-low', type=float, help='Measured scope Vbase in volts')
     parser.add_argument('--scope-high', type=float, help='Measured scope Vtop in volts')
@@ -301,6 +338,8 @@ def main():
     args = parser.parse_args()
     result = 0
     try:
+        if args.noise and (args.external or args.frequency != 0.5 or args.scope_low is not None or args.scope_high is not None or args.seconds not in (None, 30)):
+            raise ValueError('--noise uses 30 seconds and cannot be combined with generator settings')
         if args.frequency == 1000 and not args.external:
             raise ValueError('--frequency 1000 requires --external')
         scopeLevels = None
@@ -318,6 +357,10 @@ def main():
         elif args.scope_low is not None or args.scope_high is not None:
             raise ValueError('Scope readings require --external')
         seconds = args.seconds
+        if args.noise:
+            seconds = 30
+            print('Grounded-input test: both CH0 inputs must be grounded; all signal sources disconnected. Feather DAC stays disabled.')
+            print('Records 30 seconds with SD writes active, then transfers 1 second of individual readings. Transfer takes several minutes.')
         if args.link_only and seconds is None:
             seconds = 30  # Unused by the probe; bypass the recording-duration menu.
         if seconds is None:
@@ -326,7 +369,7 @@ def main():
                 seconds = {'1': 30, '2': 300, '3': 600}.get(input('Select [1/2/3]: ').strip())
                 if seconds is None:
                     print('Enter 1, 2 or 3.')
-        capture(args.feather, args.p4, args.output, seconds, args.link_only, scopeLevels, args.frequency)
+        capture(args.feather, args.p4, args.output, seconds, args.link_only, scopeLevels, args.frequency, args.noise)
     except (OSError, ValueError, ImportError, KeyboardInterrupt) as error:
         print('FAIL:', str(error) or 'Interrupted')
         print('Keep the SD card installed if recording/readback was interrupted.')

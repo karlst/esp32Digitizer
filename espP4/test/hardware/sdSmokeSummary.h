@@ -37,14 +37,19 @@
  * At most 801 bins cover the retained 80 seconds plus a partial bin.
  * Save 128 consecutive readings at the center of each of the first 40 bins.
  * A second 5120-sample window covers five ms one second into retained data.
+ * Optional grounded-input mode sends one full second during readback in small
+ * rows. Only a 385-byte text buffer is added; the million readings stay on SD
+ * until read. The PC, not this class, calculates the FFT and noise verdict.
  * Extra fixed storage is about 63 KiB, in this test-only object; no ring-buffer
  * memory is consumed and no sample statistics run during acquisition.
- * This object neither allocates memory nor accesses hardware. It uses each
- * supplied read buffer only during accept; SdRecorder may reuse it afterwards.
+ * This object allocates no memory. Optional serial reporting waits for output
+ * and yields CPU time, only after capture has stopped. It uses each supplied
+ * read buffer only during accept; SdRecorder may reuse it afterwards.
  */
 class SdSmokeSummary : public RecordingReadback
 {
 public:
+    void setNoiseReporting(bool enabled);
     void reset(uint32_t samplesPerSecond);
     void beginRange(uint32_t rate, uint64_t firstSample, uint64_t totalSamples) override;
     void accept(const uint8_t* data, size_t bytes);
@@ -59,6 +64,14 @@ public:
     void report(uint32_t run, bool storageClean) const;
 
 private:
+    void reportNoiseSample(uint32_t packedValue);
+    bool _noiseReporting = false;
+    uint32_t _noiseCount = 0;
+    uint32_t _noiseCrc = 0xffffffffU;
+    // Hex sends the original three bytes without a megabyte-sized staging buffer.
+    static constexpr unsigned _noiseChunkSamples = 64;
+    char _noiseHex[_noiseChunkSamples * 6 + 1] = {};
+
     // Five milliseconds at the test's 1,024,000 samples/s. Read one second
     // into retained SD data, after startup; retain consecutive samples, not averages.
     static constexpr unsigned _waveformSamples = 5120;

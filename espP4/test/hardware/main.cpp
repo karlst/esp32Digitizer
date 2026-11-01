@@ -56,7 +56,11 @@ static SdRecorder sdRecorder(getRecordingSessionConfig(), &sdSmokeSummary, &cons
 static SdRecorder sdRecorder(getRecordingSessionConfig(), nullptr, &consoleRecordingReporter);
 #endif
 static SdCaptureDestination sdCaptureDestination(sdRecorder);
+#if CONFIG_P4_HARDWARE_SMOKE
+static RecordingHarness recordingHarness(sdRecorder, &sdSmokeSummary);
+#else
 static RecordingHarness recordingHarness(sdRecorder);
+#endif
 static AdcReceiver adcReceiver;
 static SampleDecoder sampleDecoder(adcReceiver, &recordingHarness);
 static RecordingApplication recordingApplication(adcReceiver, sampleDecoder, sdCaptureDestination,
