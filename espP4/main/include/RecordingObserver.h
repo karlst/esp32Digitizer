@@ -22,7 +22,9 @@
 #include "freertos/task.h"
 
 /**
- * Observe recording without owning raw buffers or changing decoded samples.
+ * Observe recording without owning raw buffers. A diagnostic may additionally
+ * supply a checked initial FSYNC level before decoding; the default preserves
+ * ordinary startup. Observations never modify the decoded voltage values.
  * Core 0 owns all calls except decoded and paused, which run on Core 1.
  * started precedes READY; stopped follows receiver disable and decoder drain.
  * Timing fields must not be read on Core 0 until stopped. No observer is called
@@ -31,6 +33,27 @@
 class RecordingObserver
 {
 public:
+    /* **
+     * getInitialFsyncLow - Count a first captured HIGH as frame zero.
+     * False preserves ordinary mid-stream startup. A test may return true only
+     * after arming an independent pulse counter while the stopped ADC holds
+     * FSYNC LOW; it must check again before READY permits ADC start.
+     */
+    virtual bool getInitialFsyncLow() const
+    {
+        return false;
+    }
+
+    /* **
+     * getDiscardStartupFrame - Withhold the first frame in a checked stopped
+     * startup. The diagnostic must account for that pulse when numbering words.
+     * False leaves ordinary recording and its error checks unchanged.
+     */
+    virtual bool getDiscardStartupFrame() const
+    {
+        return false;
+    }
+
     /* **
      * ~RecordingObserver - Allow destruction through the interface.
      */

@@ -114,7 +114,8 @@ void RecordingController::handleLine(const char* line)
     unsigned long samplesPerSecond = 0;
     char extra = 0;
 
-    if (sscanf(line, "ADC127 LINK %lu %c", &run, &extra) == 1 && _recordingApplication.getIdle())
+    const int linkFields = sscanf(line, "ADC127 LINK %lu %c", &run, &extra);
+    if (linkFields == 1 && _recordingApplication.getIdle())
     {
         // Probe echoes a nonce without preparing storage or starting acquisition.
         reply("ADC127 LINK_OK %lu\n", run);
@@ -169,7 +170,20 @@ void RecordingController::handleLine(const char* line)
     }
     else if (_linkDiagnostics)
     {
-        _recordingReporter.message("LINK REJECTED: unrecognized UART line; see received hex\n");
+        // The raw UART dump shows only bytes received after diagnostics began.
+        // Show the assembled line too, including any earlier prefix, and say
+        // whether parsing or the idle-state requirement rejected this probe.
+        char message[320];
+        unsigned used = static_cast<unsigned>(snprintf(message, sizeof(message),
+            "LINK REJECTED fields=%d idle=%u length=%u assembledHex:",
+            linkFields, unsigned(_recordingApplication.getIdle()), unsigned(strlen(line))));
+        for (unsigned iByte = 0; iByte < 64 && line[iByte] != '\0'; ++iByte)
+        {
+            used += static_cast<unsigned>(snprintf(message + used, sizeof(message) - used,
+                " %02X", unsigned(static_cast<unsigned char>(line[iByte]))));
+        }
+        snprintf(message + used, sizeof(message) - used, "\n");
+        _recordingReporter.message(message);
     }
 }
 
@@ -238,6 +252,13 @@ void RecordingController::handleClockLine(const char* line)
     {
         if (_recordingApplication.getIdle() && !_recordingApplication.isRecordingDestinationLocked())
         {
+            // The PC waits for LINK ARMED before asking Feather to send its
+            // probe. Discard pre-probe UART bytes AND any partly assembled line
+            // so a startup fragment cannot be prepended to the fresh command.
+            // This is allowed only before acquisition; ordinary commands and
+            // active recording never have their input cleared by this path.
+            ESP_ERROR_CHECK(uart_flush_input(_featherPort));
+            _benchLine = BenchLine{};
             _linkBytes = _linkLines = _linkErrors = _linkPolls = 0;
             _linkHexBytes = 0;
             _linkDiagnostics = true;

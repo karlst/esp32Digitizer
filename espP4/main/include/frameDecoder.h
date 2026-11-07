@@ -23,6 +23,16 @@
 #include <cstddef>
 #include <cstdint>
 
+// On the P4, keep the per-byte/per-sample hot path independent of flash cache
+// instruction fetches while Core 0 formats and writes concurrently. Desktop
+// builds use exactly the same decoding logic without a hardware section attribute.
+#ifdef ESP_PLATFORM
+#include "esp_attr.h"
+#define FRAME_DECODER_IRAM IRAM_ATTR
+#else
+#define FRAME_DECODER_IRAM
+#endif
+
 /**
  * Core 1's decoder keeps unfinished samples between raw input blocks.
  * A sample is one ADC conversion result. In our selected channel arrangement,
@@ -35,6 +45,11 @@
  * An optional output callback receives copies of complete raw words in batches
  * of at most 512. A rejected batch sets a persistent failure flag but does not hide diagnostic
  * counts. reset clears the failure flag but keeps the selected callback.
+ * reset's optional initialFsyncLow argument preserves the first frame only when
+ * a caller has independently checked stopped-ADC startup; its default is false.
+ * The separate discardStartupFrame option counts but withholds that first frame
+ * for the timing diagnostic. Only its initial 31/32-clock interval is allowed;
+ * all subsequent frames still require the full configured length.
  * The output is 32-bit status+sample words, not the final three-byte SD format.
  * This class owns no DMA buffer or ready/free queue. SampleDecoder supplies each raw
  * block and must not return it to freeBlocks until feed() has finished reading.
@@ -45,8 +60,8 @@ public:
     using outputCallback = bool (*)(const uint32_t*, size_t, void*);
     void setOutput(outputCallback callback, void* context);
     bool getOutputFailed() const;
-    void reset(uint32_t clocksPerFrame);
-    void feed(const uint8_t* data, size_t length);
+    void reset(uint32_t clocksPerFrame, bool initialFsyncLow = false, bool discardStartupFrame = false);
+    void FRAME_DECODER_IRAM feed(const uint8_t* data, size_t length);
     const CaptureStats& getCaptureStats() const;
     uint32_t getPendingBits() const;
 
@@ -58,9 +73,10 @@ private:
     size_t _outputCount = 0;
     bool _outputBroken = false;
     void beginFrame(uint64_t position);
+    void checkFrame(uint64_t clocks);
     void appendBits(uint32_t value, unsigned count);
     void clockBit(unsigned pair);
-    void finishWord();
+    void FRAME_DECODER_IRAM finishWord();
     CaptureStats _captureStats = {};
     uint64_t _lastRise = 0;
     uint32_t _frameClocks = 0;
@@ -68,4 +84,6 @@ private:
     uint32_t _bits = 0;
     bool _previousHigh = true;
     bool _synchronized = false;
+    // Pending only until the second frame begins, not a permanent run mode.
+    bool _discardStartupFrame = false;
 };

@@ -35,8 +35,21 @@ struct CaptureStats
     uint32_t _badHeaders = 0;
     uint32_t _badPeriods = 0;
     uint32_t _shortWords = 0;
+    // The explicit stopped-start diagnostic discards exactly one initial frame.
+    // It reports its observed length separately; ordinary captures leave zero.
+    uint32_t _startupDiscardedFrames = 0;
+    uint32_t _startupFrameClocks = 0;
     uint32_t _latestWord = 0;
     int32_t _latestSample = 0;
     uint32_t _headers[256] = {};
     uint32_t _badExamples[8] = {};
+
+    // Preserve startup evidence and the first period error for diagnostics.
+    // Clock positions are indexes into received DCLK observations, not P4 time.
+    // Prefix bytes retain packed pin states; they are not decoded ADC words.
+    uint8_t _prefixBytes[16] = {};
+    uint32_t _prefixLength = 0;
+    uint64_t _firstFrameClocks[4] = {};
+    uint64_t _firstBadPeriodClock = 0, _firstBadPeriodPreviousClock = 0;
+    uint32_t _firstBadPeriodBits = 0;
 };

@@ -25,6 +25,7 @@
 #include <cstdio>
 #include <vector>
 #include "FrameDecoder.h"
+#include "fsync/FsyncAssociationAnalysis.h"
 #include "sdTestData.h"
 #include "recordingFormat.h"
 #include "test/support/ads127BenchTiming.h"
@@ -366,10 +367,187 @@ static void checkOutput()
 }
 
 /* **
- * main - Exercise good streams, boundary failures, reset, and diagnostic limits.
+ * checkStartupDiscard - Reproduce the missing initial clock with distinct word
+ * values so a one-sample mapping error cannot hide behind a constant input.
+ * Exercise split input blocks, the full-first-frame case and malformed starts.
+ * These are software checks; hardware startup must still be tested on the P4.
+ */
+static void checkStartupDiscard()
+{
+    // Build three visibly different samples, then remove zero, one or two
+    // initial DCLK observations. Only lengths 32 and 31 receive the diagnostic
+    // startup exception. Length 30 must still leave a framing-error count.
+    for (unsigned missing : {0U, 1U, 2U})
+    {
+        for (size_t chunk : {size_t(1), size_t(7), size_t(4096)})
+        {
+            std::vector<unsigned> pairs;
+            appendFrame(pairs, 32, 0x08111111);
+            appendFrame(pairs, 32, 0x08222222);
+            appendFrame(pairs, 32, 0x08333333);
+            pairs.erase(pairs.begin(), pairs.begin() + missing);
+            FrameDecoder frameDecoder;
+            OutputCheck outputCheck;
+            frameDecoder.setOutput(collectOutput, &outputCheck);
+
+            // 32 clocks/frame; true says FSYNC was checked LOW before arming;
+            // the second true explicitly discards that first startup frame.
+            // feedChunks varies memory boundaries independently of frame edges.
+            frameDecoder.reset(32, true, true);
+            feedChunks(frameDecoder, pairs, chunk);
+            const auto& stats = frameDecoder.getCaptureStats();
+            const std::vector<uint32_t> expected = {0x08222222, 0x08333333};
+            assert(outputCheck._words == expected);
+            assert(stats._startupDiscardedFrames == 1 && stats._startupFrameClocks == 32 - missing);
+            assert(stats._frames == 3 && stats._words == 2);
+            assert(stats._badPeriods == (missing == 2 ? 1U : 0U));
+            assert(stats._shortWords == (missing == 2 ? 1U : 0U));
+
+            // Reset must restore the non-discarding checked startup too.
+            outputCheck = {};
+            frameDecoder.reset(32, true);
+            pairs.clear();
+            appendFrame(pairs, 32, 0x08444444);
+            feedChunks(frameDecoder, pairs, chunk);
+            assert(outputCheck._words == std::vector<uint32_t>{0x08444444});
+            assert(stats._startupDiscardedFrames == 0 && stats._startupFrameClocks == 0);
+        }
+    }
+
+    // After consuming the startup exception, exercise more than two complete
+    // output batches. This catches accidentally retaining the discard flag or
+    // omitting a word when the normal inline path takes over. Both a full and
+    // a one-clock-short first frame must produce exactly the same later words.
+    for (unsigned missing : {0U, 1U})
+    {
+        std::vector<unsigned> pairs;
+        std::vector<uint32_t> expected;
+        for (unsigned iSample = 0; iSample < 1100; ++iSample)
+        {
+            const uint32_t word = 0x08000000U | iSample;
+            appendFrame(pairs, 32, word);
+            if (iSample != 0)
+            {
+                expected.push_back(word);
+            }
+        }
+        pairs.erase(pairs.begin(), pairs.begin() + missing);
+        FrameDecoder frameDecoder;
+        OutputCheck outputCheck;
+        frameDecoder.setOutput(collectOutput, &outputCheck);
+        frameDecoder.reset(32, true, true);
+        feedChunks(frameDecoder, pairs, 4096);
+        const auto& stats = frameDecoder.getCaptureStats();
+        assert(outputCheck._words == expected);
+        assert(stats._frames == 1100 && stats._words == 1099);
+        assert(stats._startupDiscardedFrames == 1);
+        assert(stats._startupFrameClocks == 32 - missing);
+        assert(stats._badPeriods == 0 && stats._shortWords == 0 && stats._badHeaders == 0);
+    }
+
+    // Missing clocks later in the stream must not receive the startup exception.
+    // Nor may a short frame whose first edge was actually observed after idle.
+    for (unsigned idle : {0U, 4U})
+    {
+        std::vector<unsigned> pairs(idle, 0);
+        appendFrame(pairs, 32, 0x08111111);
+        appendFrame(pairs, 32, 0x08222222);
+        appendFrame(pairs, 32, 0x08333333);
+        const size_t removedClock = idle == 0 ? 32 + 24 : idle + 24;
+        pairs.erase(pairs.begin() + removedClock);
+        FrameDecoder frameDecoder;
+        frameDecoder.reset(32, true, true);
+        feedChunks(frameDecoder, pairs, 1);
+        assert(frameDecoder.getCaptureStats()._badPeriods == 1);
+        assert(frameDecoder.getCaptureStats()._shortWords == 1);
+    }
+
+    // The saved timestamp of discarded pulse one is never attached to a word.
+    // Pulse two identifies word zero, including when the timer later wraps.
+    using Anchor = FsyncAssociationAnalysis::Anchor;
+    const Anchor anchors[] = {{1, 0xffffff00U}, {2, 0xffffff9cU},
+        {1026, 0xffffff9cU + 160000U}, {2050, 0xffffff9cU + 320000U},
+        {3074, 0xffffff9cU + 480000U}};
+    const auto result = FsyncAssociationAnalysis::analyze(anchors, 5, 3073, 1);
+    assert(result._passed && result._firstMatched == 1 && result._matched == 4);
+    assert(!FsyncAssociationAnalysis::analyze(anchors, 5, 3072, 1)._passed);
+    assert(!FsyncAssociationAnalysis::analyze(anchors, 5, 3073, 2)._passed);
+    puts("PASS: explicit first-frame discard, retained word identity and later framing-error rejection.");
+}
+
+/* **
+ * main - PC executable entry point called by runDecoderChecks.ps1. Exercise
+ * good streams, boundary failures, reset, and diagnostic limits with synthetic
+ * pin states. Failed assertions terminate the process; no board is contacted.
  */
 int main()
 {
+    checkStartupDiscard();
+    // Stopped-ADC startup must retain the first word even if the first captured
+    // pin state is HIGH. Split at every byte size to exercise carried state.
+    for (unsigned idleClocks : {0U, 1U, 2U, 3U, 40U})
+    {
+        for (size_t chunk : {size_t(1), size_t(7), size_t(4096)})
+        {
+            FrameDecoder firstSampleDecoder;
+            firstSampleDecoder.reset(32, true);
+            std::vector<unsigned> firstPairs(idleClocks, 0);
+            appendFrame(firstPairs, 32, 0x08123456);
+            feedChunks(firstSampleDecoder, firstPairs, chunk);
+            assert(firstSampleDecoder.getCaptureStats()._words == 1);
+            assert(firstSampleDecoder.getCaptureStats()._latestWord == 0x08123456);
+            assert(firstSampleDecoder.getCaptureStats()._badHeaders == 0);
+            assert(firstSampleDecoder.getCaptureStats()._firstFrameClocks[0] == idleClocks);
+            const auto expectedPrefix = pack(firstPairs);
+            const size_t prefixLength = expectedPrefix.size() < 16 ? expectedPrefix.size() : 16;
+            assert(firstSampleDecoder.getCaptureStats()._prefixLength == prefixLength);
+            assert(std::memcmp(firstSampleDecoder.getCaptureStats()._prefixBytes,
+                expectedPrefix.data(), prefixLength) == 0);
+
+            // A later ordinary reset must restore the existing conservative
+            // mid-frame behavior; the opt-in must not leak into another run.
+            firstSampleDecoder.reset(32);
+            firstPairs.clear();
+            appendFrame(firstPairs, 32, 0x08123456);
+            feedChunks(firstSampleDecoder, firstPairs, chunk);
+            assert(firstSampleDecoder.getCaptureStats()._words == 0);
+        }
+    }
+
+    // Known 156.25-tick sample spacing across a 32-bit timer wrap. A late
+    // callback/read timestamp, wrong sample number, duplicate or absent data
+    // must not turn into an accepted timing association.
+    using Anchor = FsyncAssociationAnalysis::Anchor;
+    Anchor anchors[] = {{1, 0xffff0000U}, {1025, 0xffff0000U + 160000U},
+        {2049, 0xffff0000U + 320000U}, {3073, 0xffff0000U + 480000U}};
+    assert(FsyncAssociationAnalysis::analyze(anchors, 4, 3073)._passed);
+    assert(!FsyncAssociationAnalysis::analyze(anchors, 3, 3073)._passed);
+    assert(!FsyncAssociationAnalysis::analyze(anchors, 4, 3072)._passed);
+    anchors[1]._pulseCount += 1;
+    assert(!FsyncAssociationAnalysis::analyze(anchors, 4, 3073)._passed);
+    anchors[1]._pulseCount -= 1;
+    anchors[1]._ticks += 160;
+    assert(!FsyncAssociationAnalysis::analyze(anchors, 4, 3073)._passed);
+    anchors[1]._ticks -= 160;
+    anchors[1]._pulseCount = anchors[0]._pulseCount;
+    assert(!FsyncAssociationAnalysis::analyze(anchors, 4, 3073)._passed);
+    anchors[0]._pulseCount = 0;
+    assert(!FsyncAssociationAnalysis::analyze(anchors, 4, 3073)._passed);
+    assert(!FsyncAssociationAnalysis::analyze(nullptr, 0, 0)._passed);
+
+    // PCNT is a small hardware pulse counter that resets every 32767 rises.
+    // These calls check reconstruction from an earlier accumulated total and
+    // a later small register, including wrap and impossible backward advances.
+    assert(FsyncAssociationAnalysis::extendCount(0, 0) == 0);
+    assert(FsyncAssociationAnalysis::extendCount(100, 103) == 103);
+    assert(FsyncAssociationAnalysis::extendCount(32766, 2) == 32769);
+    assert(FsyncAssociationAnalysis::extendCount(65535, 3) == 65537);
+    assert(FsyncAssociationAnalysis::extendCount(100, 99) == 0);
+    assert(FsyncAssociationAnalysis::extendCount(100, -1) == 0);
+    assert(FsyncAssociationAnalysis::extendCount(100, 32767) == 0);
+    assert(FsyncAssociationAnalysis::extendCount(100, 3000) == 0);
+    puts("PASS: explicit stopped-ADC first sample, reset isolation and timestamp association arithmetic.");
+
     checkRecordingFormat();
     checkSdTestData();
     checkOutput();
@@ -511,10 +689,15 @@ int main()
     pairs.erase(pairs.begin() + 24);
     feedChunks(frameDecoder, pairs);
     assert(frameDecoder.getCaptureStats()._badPeriods == 1 && frameDecoder.getCaptureStats()._shortWords == 1);
+    assert(frameDecoder.getCaptureStats()._firstBadPeriodPreviousClock == 4);
+    assert(frameDecoder.getCaptureStats()._firstBadPeriodClock == 35);
+    assert(frameDecoder.getCaptureStats()._firstBadPeriodBits == 31);
     assert(frameDecoder.getCaptureStats()._latestSample == 8388607);
 
     // A final incomplete word is reported separately, never counted as complete.
     frameDecoder.reset(32);
+    assert(frameDecoder.getCaptureStats()._prefixLength == 0);
+    assert(frameDecoder.getCaptureStats()._firstBadPeriodClock == 0);
     pairs.assign(4, 0);
     appendFrame(pairs, 32, 0x08123456U);
     pairs.resize(16);

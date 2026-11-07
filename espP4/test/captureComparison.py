@@ -33,10 +33,20 @@ maximumLineBytes = 8192
 
 
 def readPort(port, name, events, stop):
-    """Drain a port independently and join partial lines across read timeouts."""
+    """Reader-thread entry point shared by comparison and timing-test runners.
+
+    port is an already open serial connection with a finite read timeout; name
+    identifies its board in the thread-safe events queue. stop is a threading
+    event checked between reads. This thread owns its pending byte buffer but
+    never owns log files or sends commands. Complete lines become (name, text)
+    queue items. Exceptions become READER_ERROR lines for the main thread to
+    reject and log. Returning means the reader ended, not that hardware stopped.
+    """
     pending = bytearray()
     try:
         while not stop.is_set():
+            # Read at least one byte so an empty port waits for its configured
+            # timeout instead of spinning. Retain incomplete lines across reads.
             pending.extend(port.read(max(1, port.in_waiting)))
             while b'\n' in pending:
                 raw, _, rest = pending.partition(b'\n')

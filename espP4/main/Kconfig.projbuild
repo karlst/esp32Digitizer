@@ -12,7 +12,35 @@
 
 menu "P4 capture diagnostics"
 
+config P4_INPUT_SKEW
+    bool "Same-pulse GPIO1/GPIO6 hardware timestamp comparison"
+    default n
+    help
+        Standalone calibration image. Requires disconnecting ADC FSYNC from
+        GPIO1 and feeding the same generator signal to GPIO1 and GPIO6.
+        No ADC acquisition, Feather commands or SD access.
+
+config P4_FSYNC_ASSOCIATION
+    depends on !P4_INPUT_SKEW
+    bool "RAM-only FSYNC timestamp/sample association test"
+    default n
+    help
+        Separate startup using the real receiver and decoder. Uses GPIO1's
+        existing FSYNC input, MCPWM capture and a PCNT hardware pulse counter.
+        No SD writes, generated pulses or GPS capture. Pair with the external
+        source Feather bench firmware. See docs/FSYNC-ASSOCIATION-TEST.md.
+
+config P4_PULSE_DELAY
+    depends on P4_FSYNC_ASSOCIATION
+    bool "Also capture a direct pulse on GPIO6 to measure ADC response delay"
+    default n
+    help
+        Uses the same timer as FSYNC and exports short raw ADC windows around
+        direct edges. No output pin is driven. See docs/PULSE-DELAY-TEST.md
+        before wiring; the analog and digital branches need different voltages.
+
 config P4_SD_CHOKE
+    depends on !P4_FSYNC_ASSOCIATION && !P4_INPUT_SKEW
     bool "Standalone SD file-ring tests (fresh disk / add files)"
     default n
     help
@@ -51,7 +79,7 @@ config P4_CHOKE_LIVE_REPORT
 endif
 
 config P4_DIAGNOSTICS
-    depends on !P4_SD_CHOKE
+    depends on !P4_SD_CHOKE && !P4_FSYNC_ASSOCIATION && !P4_INPUT_SKEW
     bool "Include manual RAM and generated-data SD tests"
     default n
     help
@@ -61,7 +89,7 @@ config P4_DIAGNOSTICS
 
 
 config P4_HARDWARE_SMOKE
-    depends on !P4_SD_CHOKE
+    depends on !P4_SD_CHOKE && !P4_FSYNC_ASSOCIATION && !P4_INPUT_SKEW
     bool "Thirty-second DAC-to-SD hardware smoke test"
     default n
     help
@@ -69,7 +97,7 @@ config P4_HARDWARE_SMOKE
         Pair with Feather ads127-hardware-smoke. No automatic capture at boot.
 
 config P4_CAPTURE_PROFILE
-    depends on !P4_HARDWARE_SMOKE && !P4_SD_CHOKE
+    depends on !P4_HARDWARE_SMOKE && !P4_SD_CHOKE && !P4_FSYNC_ASSOCIATION && !P4_INPUT_SKEW
     bool "Measure CPU headroom during a 60-second capture"
     default n
     select FREERTOS_GENERATE_RUN_TIME_STATS

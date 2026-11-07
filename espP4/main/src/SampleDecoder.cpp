@@ -54,11 +54,17 @@ void SampleDecoder::initialize()
  * configure - Select the destination and reset decoding before starting the
  * receiver. clocksPerFrame is the expected number of ADC clock edges between
  * frame starts. Call only while decoding from the previous run has finished.
+ * An optional observer may certify that FSYNC was LOW before receiver arm;
+ * only that explicit guarantee permits counting an initially HIGH first frame.
+ * A second opt-in withholds that startup frame; the timing diagnostic accounts
+ * for its pulse separately rather than attaching it to retained word zero.
  */
 void SampleDecoder::configure(CaptureDestination& captureDestination, uint32_t clocksPerFrame)
 {
     _captureDestination = &captureDestination;
-    _frameDecoder.reset(clocksPerFrame);
+    _frameDecoder.reset(clocksPerFrame,
+        _recordingObserver != nullptr && _recordingObserver->getInitialFsyncLow(),
+        _recordingObserver != nullptr && _recordingObserver->getDiscardStartupFrame());
 }
 
 /* **

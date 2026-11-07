@@ -1,0 +1,6 @@
+# Isolated diagnostic build; ordinary recording and smoke settings stay separate.
+CONFIG_P4_FSYNC_ASSOCIATION=y
+# CONFIG_P4_HARDWARE_SMOKE is not set
+# CONFIG_P4_CAPTURE_PROFILE is not set
+# CONFIG_P4_DIAGNOSTICS is not set
+# CONFIG_P4_SD_CHOKE is not set

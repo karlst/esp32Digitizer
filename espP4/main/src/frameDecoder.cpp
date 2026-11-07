@@ -22,6 +22,8 @@
  * Reading path: feed() -> beginFrame()/appendBits() -> finishWord() ->
  * flushOutput(). Core 1's decodeTask calls feed() with a private raw block;
  * desktop tests call the same functions without any chip hardware.
+ * beginFrame keeps normal processing inline. checkFrame handles startup and
+ * malformed frames separately so rare checks do not enlarge the normal loop.
  *
  * PARLIO has already captured DOUT0 (serial ADC bits) alongside FSYNC (the
  * separate frame-start wire) and DMA has moved them into RAM. Each byte holds
@@ -120,10 +122,17 @@ static inline uint32_t unpackData(const uint8_t* data)
  * reset - Core 0 clears statistics and partial samples before a new capture.
  * Receiving must be stopped and Core 1 must have finished all queued blocks.
  * clocksPerFrame comes from the shared rate table (32 times the slot count).
- * Ignore an initial high FSYNC until a low-to-high transition is actually seen;
- * starting in the middle of a frame must not manufacture a complete sample.
+ * Normally ignore an initial high FSYNC until a low-to-high transition is seen.
+ * initialFsyncLow is allowed only when the caller established LOW before arming
+ * reception and prevented ADC start until reception was ready. In that case a
+ * first captured HIGH starts frame zero, even with no preceding captured LOW.
+ * This argument is a caller guarantee, not something the decoder can measure.
+ * discardStartupFrame additionally withholds that first frame from output. The
+ * FSYNC diagnostic uses this because reception can start one clock into it.
+ * Only a 31-clock initial frame starting at captured clock zero, or a full
+ * 32-clock frame, is accepted. Every later frame retains the normal checks.
  */
-void FrameDecoder::reset(uint32_t clocksPerFrame)
+void FrameDecoder::reset(uint32_t clocksPerFrame, bool initialFsyncLow, bool discardStartupFrame)
 {
     _captureStats = {};
     _outputCount = 0;
@@ -131,8 +140,9 @@ void FrameDecoder::reset(uint32_t clocksPerFrame)
     _frameClocks = clocksPerFrame;
     _lastRise = 0;
     _word = _bits = 0;
-    _previousHigh = true;
+    _previousHigh = !initialFsyncLow;
     _synchronized = false;
+    _discardStartupFrame = discardStartupFrame && initialFsyncLow && clocksPerFrame == 32;
 }
 
 /* **
@@ -151,6 +161,12 @@ void FrameDecoder::reset(uint32_t clocksPerFrame)
  */
 void FrameDecoder::feed(const uint8_t* data, size_t length)
 {
+    // Retain a bounded raw prefix across even one-byte feeds. This explains
+    // first-frame alignment without changing which bits are decoded or accepted.
+    for (size_t iPrefix = 0; iPrefix < length && _captureStats._prefixLength < 16; ++iPrefix)
+    {
+        _captureStats._prefixBytes[_captureStats._prefixLength++] = data[iPrefix];
+    }
     size_t iByte = 0;
     while (length - iByte >= 4)
     {
@@ -221,25 +237,82 @@ void FrameDecoder::feed(const uint8_t* data, size_t length)
  * counts captured DCLK instants since reset, not CPU cycles or bytes.
  * frameClocks is 32 at 1,024,000 samples/s, larger in slower configurations.
  * Checking this spacing detects some missing/extra clocks but cannot prove none
- * were lost.
+ * were lost. Keep the normal path inside feed/clockBit, as in the original
+ * throughput build. The added startup exception had made the compiler stop
+ * inlining this function, adding a call for every sample. Compiler-specific
+ * inline hints below support both the P4 compiler and the desktop checks.
+ * Exceptional checks remain in checkFrame; no integrity check is removed.
  */
+#if defined(__GNUC__)
+__attribute__((always_inline)) inline
+#elif defined(_MSC_VER)
+__forceinline
+#else
+inline
+#endif
 void FrameDecoder::beginFrame(uint64_t position)
 {
     if (_synchronized)
     {
-        if (position - _lastRise != _frameClocks)
+        const uint64_t clocks = position - _lastRise;
+        // Ordinary complete frames need only these comparisons. Startup runs
+        // the slower validation once; malformed later frames still use it.
+        if (clocks != _frameClocks || _bits != 32 || _discardStartupFrame)
         {
-            ++_captureStats._badPeriods;
-        }
-        if (_bits != 32)
-        {
-            ++_captureStats._shortWords;
+            checkFrame(clocks);
         }
     }
     _lastRise = position;
+    if (_captureStats._frames < 4)
+    {
+        _captureStats._firstFrameClocks[_captureStats._frames] = position;
+    }
     ++_captureStats._frames;
     _synchronized = true;
     _word = _bits = 0;
+}
+
+/* **
+ * checkFrame - Handle startup or a malformed preceding frame. beginFrame calls
+ * before changing lastRise, bits or frame count. clocks is the elapsed number
+ * of captured DCLK observations since the previous rising FSYNC. Accept the
+ * special 31-clock first frame only at captured position zero. Consume the
+ * discard flag here so later words no longer compare a 64-bit frame counter
+ * against one. Period and short-word errors retain their original meanings.
+ * Keep this exceptional path out of the inline common path even at high
+ * optimization levels; larger inline bodies were the observed regression.
+ */
+#if defined(__GNUC__)
+__attribute__((noinline))
+#elif defined(_MSC_VER)
+__declspec(noinline)
+#endif
+void FrameDecoder::checkFrame(uint64_t clocks)
+{
+    const bool startup = _discardStartupFrame && _captureStats._frames == 1;
+    const bool acceptedStartup = startup &&
+        (clocks == 32 || (_lastRise == 0 && clocks == 31));
+    if (startup)
+    {
+        _captureStats._startupDiscardedFrames = 1;
+        _captureStats._startupFrameClocks = static_cast<uint32_t>(clocks);
+        _discardStartupFrame = false;
+    }
+
+    if (clocks != _frameClocks && !acceptedStartup)
+    {
+        if (_captureStats._badPeriods == 0)
+        {
+            _captureStats._firstBadPeriodClock = _lastRise + clocks;
+            _captureStats._firstBadPeriodPreviousClock = _lastRise;
+            _captureStats._firstBadPeriodBits = _bits;
+        }
+        ++_captureStats._badPeriods;
+    }
+    if (_bits != 32 && !acceptedStartup)
+    {
+        ++_captureStats._shortWords;
+    }
 }
 
 /* **
@@ -320,6 +393,13 @@ void FrameDecoder::clockBit(unsigned pair)
  */
 void FrameDecoder::finishWord()
 {
+    // The diagnostic deliberately omits the entire first frame, even when all
+    // 32 bits arrived. beginFrame records this omission when pulse two arrives.
+    // The next complete frame is therefore retained word zero in both cases.
+    if (_discardStartupFrame)
+    {
+        return;
+    }
     const unsigned header = _word >> 24;
 
     // The 256 histogram entries cover every possible status byte. This retains

@@ -27,6 +27,7 @@
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
 #include "esp_rom_crc.h"
+#include "sdkconfig.h"
 
 /* **
  * SdRecorder - Save the session settings and optional reporting objects. The
@@ -140,6 +141,8 @@ bool SdRecorder::prepare(uint32_t run, uint32_t rate, const RecordingLayout* rec
         _recordingLayout = recordingLayout ? recordingLayout : &_recordingLayoutDefault;
         _runId = run;
         _sampleRate = rate;
+        _packUs = _ringCopyUs = _checksumUs = 0;
+        _submissionCount = 0;
         _preparationCancelled.store(false);
         _state.store(Phase::preparing);
     }
@@ -188,7 +191,16 @@ void SdRecorder::closeCancelledPreparation()
  */
 bool SdRecorder::submitSamples(const uint32_t* words, size_t count)
 {
+#if CONFIG_P4_FSYNC_ASSOCIATION
+    // Measure the actual packer separately from ring submission and CRC work.
+    // Elapsed time includes any interruption; it is not exclusive CPU time.
+    const int64_t packStarted = esp_timer_get_time();
+#endif
     const size_t bytes = recordingFormat::packSamples(words, count, _packedSamples, sizeof(_packedSamples));
+#if CONFIG_P4_FSYNC_ASSOCIATION
+    _packUs += esp_timer_get_time() - packStarted;
+    ++_submissionCount;
+#endif
     bool retVal = count > 0 && count <= 512 && bytes == count * 3;
     if (retVal)
     {
@@ -212,11 +224,23 @@ bool SdRecorder::submitSamples(const uint32_t* words, size_t count)
  */
 bool SdRecorder::submitBytes(const uint8_t* data, uint32_t bytes)
 {
+#if CONFIG_P4_FSYNC_ASSOCIATION
+    const int64_t copyStarted = esp_timer_get_time();
+#endif
     const uint32_t accepted = getReady() ? _fileRecordingBackend.copyToRingBuffer(data, bytes) : 0;
+#if CONFIG_P4_FSYNC_ASSOCIATION
+    _ringCopyUs += esp_timer_get_time() - copyStarted;
+#endif
     if (accepted)
     {
         _submittedBytes += accepted;
+#if CONFIG_P4_FSYNC_ASSOCIATION
+        const int64_t checksumStarted = esp_timer_get_time();
+#endif
         _retainedPayloadChecksums.accept(data, accepted);
+#if CONFIG_P4_FSYNC_ASSOCIATION
+        _checksumUs += esp_timer_get_time() - checksumStarted;
+#endif
     }
     const bool retVal = bytes != 0 && accepted == bytes;
     if (!retVal)
@@ -259,6 +283,13 @@ bool SdRecorder::getFull() const
  */
 void SdRecorder::finish(bool captureClean, uint32_t expectedSamples)
 {
+#if CONFIG_P4_FSYNC_ASSOCIATION
+    // All submissions have stopped. Print only now, never from the hot path.
+    printf("SD CPU batches=%lu bytes=%llu packUs=%llu ringCopyUs=%llu checksumUs=%llu\n",
+        (unsigned long)_submissionCount, (unsigned long long)_submittedBytes,
+        (unsigned long long)_packUs, (unsigned long long)_ringCopyUs,
+        (unsigned long long)_checksumUs);
+#endif
     _clean = captureClean && _recordingLayout->countMatches(_submittedBytes, expectedSamples);
     _state.store(Phase::finishing);
 }

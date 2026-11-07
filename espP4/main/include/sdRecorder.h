@@ -95,4 +95,9 @@ private:
     // Core 1 owns this batch until submit() copies it into the backend ring.
     // Keep it outside the decoder's stack; the global recorder owns its lifetime.
     uint8_t _packedSamples[512 * 3] = {};
+
+    // Diagnostic-build totals: Core 1 updates, finish reads after decoder drain.
+    // Ordinary recording builds do not execute the timing probes.
+    uint64_t _packUs = 0, _ringCopyUs = 0, _checksumUs = 0;
+    uint32_t _submissionCount = 0;
 };

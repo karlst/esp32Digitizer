@@ -1,0 +1,8 @@
+# Isolated same-pulse GPIO1/GPIO6 timing calibration.
+CONFIG_P4_INPUT_SKEW=y
+# CONFIG_P4_FSYNC_ASSOCIATION is not set
+# CONFIG_P4_PULSE_DELAY is not set
+# CONFIG_P4_HARDWARE_SMOKE is not set
+# CONFIG_P4_CAPTURE_PROFILE is not set
+# CONFIG_P4_DIAGNOSTICS is not set
+# CONFIG_P4_SD_CHOKE is not set
