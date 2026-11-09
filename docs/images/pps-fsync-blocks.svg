@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1700" height="1280" viewBox="0 0 1700 1280" role="img"><title>PPS, sample boundaries and capture clock</title><rect width="100%" height="100%" fill="white"/>
+<text x="60" y="66" font-family="Arial,sans-serif" font-size="36" font-weight="700" fill="#243746">PPS, sample boundaries and the capture clock</text>
+<text x="60" y="124" font-family="Arial,sans-serif" font-size="28" font-weight="700" fill="#243746">1. Blocks</text>
+<text x="60" y="188" font-family="Arial,sans-serif" font-size="25" font-weight="700" fill="#227968">PPS</text>
+<text x="288.5" y="135" font-family="Arial,sans-serif" font-size="22" font-weight="700" fill="#227968">PPS 0</text>
+<text x="848.5" y="135" font-family="Arial,sans-serif" font-size="22" font-weight="700" fill="#227968">PPS 1</text>
+<text x="1408.5" y="135" font-family="Arial,sans-serif" font-size="22" font-weight="700" fill="#227968">PPS 2</text>
+<polyline points="230,225 320,225 320,155 355,155 355,225 880,225 880,155 915,155 915,225 1440,225 1440,155 1475,155 1475,225 1610,225" fill="none" stroke="#227968" stroke-width="3"/>
+<text x="60" y="321" font-family="Arial,sans-serif" font-size="25" font-weight="700" fill="#237ca0">FSYNC</text>
+<polyline points="265,375 290,375 290,300 308,300 308,375 330,375 330,300 348,300 348,375 370,375 370,300 388,300 388,375 410,375 410,300 428,300 428,375 450,375 450,300 468,300 468,375 485,375" fill="none" stroke="#237ca0" stroke-width="3"/>
+<polyline points="825,375 850,375 850,300 868,300 868,375 890,375 890,300 908,300 908,375 930,375 930,300 948,300 948,375 970,375 970,300 988,300 988,375 1010,375 1010,300 1028,300 1028,375 1045,375" fill="none" stroke="#237ca0" stroke-width="3"/>
+<polyline points="1385,375 1410,375 1410,300 1428,300 1428,375 1450,375 1450,300 1468,300 1468,375 1490,375 1490,300 1508,300 1508,375 1530,375 1530,300 1548,300 1548,375 1570,375 1570,300 1588,300 1588,375 1605,375" fill="none" stroke="#237ca0" stroke-width="3"/>
+<text x="636.5" y="341" font-family="Arial,sans-serif" font-size="32" font-weight="700" fill="#61727e">...</text>
+<text x="580.0" y="384" font-family="Arial,sans-serif" font-size="18" font-weight="400" fill="#61727e">samples continue</text>
+<text x="1196.5" y="341" font-family="Arial,sans-serif" font-size="32" font-weight="700" fill="#61727e">...</text>
+<text x="1140.0" y="384" font-family="Arial,sans-serif" font-size="18" font-weight="400" fill="#61727e">samples continue</text>
+<rect x="370" y="420" width="560" height="55" fill="#e1eef5"/>
+<rect x="930" y="420" width="560" height="55" fill="#ece5f1"/>
+<text x="597.5" y="457" font-family="Arial,sans-serif" font-size="26" font-weight="700" fill="#237ca0">sBlock 0</text>
+<text x="1157.5" y="457" font-family="Arial,sans-serif" font-size="26" font-weight="700" fill="#80568a">sBlock 1</text>
+<polyline points="370,288 370,483" fill="none" stroke="#9aabb6" stroke-width="2"/>
+<polyline points="930,288 930,483" fill="none" stroke="#9aabb6" stroke-width="2"/>
+<polyline points="1490,288 1490,483" fill="none" stroke="#9aabb6" stroke-width="2"/>
+<text x="307.0" y="513" font-family="Arial,sans-serif" font-size="21" font-weight="700" fill="#237ca0">First sample</text>
+<text x="579.0" y="543" font-family="Arial,sans-serif" font-size="23" font-weight="700" fill="#237ca0">Last sample of sBlock 0</text>
+<polyline points="850,517 890,517 890,383" fill="none" stroke="#237ca0" stroke-width="2"/>
+<polygon points="890,383 885.0,395.0 895.0,395.0" fill="#237ca0"/>
+<text x="998.0" y="592" font-family="Arial,sans-serif" font-size="23" font-weight="700" fill="#80568a">First sample of sBlock 1</text>
+<polyline points="985,582 930,582 930,483" fill="none" stroke="#80568a" stroke-width="2"/>
+<polygon points="930,483 925.0,495.0 935.0,495.0" fill="#80568a"/>
+<text x="60" y="633" font-family="Arial,sans-serif" font-size="23" font-weight="400" fill="#243746">The block split is shortly after PPS. The last and first samples are consecutive.</text>
+<polyline points="60,673 1640,673" fill="none" stroke="#d4dfe4" stroke-width="2"/>
+<text x="60" y="738" font-family="Arial,sans-serif" font-size="28" font-weight="700" fill="#243746">2. Inside the capture timer - enlarged time scale</text>
+<text x="60" y="782" font-family="Arial,sans-serif" font-size="23" font-weight="400" fill="#61727e">FSYNC and PPS edges need not line up with the capture clock.</text>
+<text x="60" y="870" font-family="Arial,sans-serif" font-size="25" font-weight="700" fill="#237ca0">Input edge</text>
+<text x="60" y="905" font-family="Arial,sans-serif" font-size="22" font-weight="400" fill="#61727e">FSYNC or PPS</text>
+<polyline points="410,929 875,929 875,841 1550,841" fill="none" stroke="#237ca0" stroke-width="3"/>
+<polyline points="875,828 875,1135" fill="none" stroke="#a9bcc8" stroke-width="2"/>
+<text x="1110" y="921" font-family="Arial,sans-serif" font-size="23" font-weight="400" fill="#237ca0">The edge triggers hardware</text>
+<text x="1110" y="953" font-family="Arial,sans-serif" font-size="23" font-weight="400" fill="#237ca0">to save a timer count.</text>
+<text x="60" y="1036" font-family="Arial,sans-serif" font-size="25" font-weight="700" fill="#227968">MCPWM clock</text>
+<text x="60" y="1072" font-family="Arial,sans-serif" font-size="22" font-weight="400" fill="#227968">160 MHz</text>
+<polyline points="410,1100 450,1100 450,1020 525,1020 525,1100 600,1100 600,1020 675,1020 675,1100 750,1100 750,1020 825,1020 825,1100 900,1100 900,1020 975,1020 975,1100 1050,1100 1050,1020 1125,1020 1125,1100 1200,1100 1200,1020 1275,1020 1275,1100 1350,1100 1350,1020 1425,1020 1425,1100 1500,1100 1500,1020 1575,1020 1575,1100 1590,1100" fill="none" stroke="#227968" stroke-width="3"/>
+<text x="430.5" y="1155" font-family="Arial,sans-serif" font-size="23" font-weight="700" fill="#227968">100</text>
+<text x="580.5" y="1155" font-family="Arial,sans-serif" font-size="23" font-weight="700" fill="#227968">101</text>
+<text x="730.5" y="1155" font-family="Arial,sans-serif" font-size="23" font-weight="700" fill="#227968">102</text>
+<text x="880.5" y="1155" font-family="Arial,sans-serif" font-size="23" font-weight="700" fill="#227968">103</text>
+<text x="1030.5" y="1155" font-family="Arial,sans-serif" font-size="23" font-weight="700" fill="#227968">104</text>
+<text x="1180.5" y="1155" font-family="Arial,sans-serif" font-size="23" font-weight="700" fill="#227968">105</text>
+<text x="1330.5" y="1155" font-family="Arial,sans-serif" font-size="23" font-weight="700" fill="#227968">106</text>
+<text x="1480.5" y="1155" font-family="Arial,sans-serif" font-size="23" font-weight="700" fill="#227968">107</text>
+<text x="60" y="1155" font-family="Arial,sans-serif" font-size="23" font-weight="400" fill="#227968">Timer count</text>
+<polyline points="600,1000 600,977 750,977 750,1000" fill="none" stroke="#61727e" stroke-width="2"/>
+<text x="638.5" y="965" font-family="Arial,sans-serif" font-size="22" font-weight="700" fill="#227968">6.25 ns</text>
+<text x="60" y="1236" font-family="Arial,sans-serif" font-size="24" font-weight="400" fill="#243746">The timer advances in whole ticks; software reads the saved timestamp later.</text>
+</svg>

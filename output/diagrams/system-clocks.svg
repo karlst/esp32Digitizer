@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="760" viewBox="0 0 1500 760"><rect width="100%" height="100%" fill="white"/>
+<text x="65" y="74" font-family="Arial,sans-serif" font-size="36" font-weight="700" fill="#203345">System clocks</text>
+<text x="65" y="113" font-family="Arial,sans-serif" font-size="22" font-weight="400" fill="#536271">Illustrative pulse spacing and edge positions - not to scale</text>
+<text x="65" y="204" font-family="Arial,sans-serif" font-size="24" font-weight="700" fill="#203345">ADS127 serial output clock (DCLK)</text>
+<text x="65" y="245" font-family="Arial,sans-serif" font-size="26" font-weight="400" fill="#176c91">32.768 MHz</text>
+<text x="65" y="282" font-family="Arial,sans-serif" font-size="22" font-weight="400" fill="#536271">30.52 ns per cycle</text>
+<polyline points="590,284 620,284 620,188 710,188 710,284 800,284 800,188 890,188 890,284 980,284 980,188 1070,188 1070,284 1160,284 1160,188 1250,188 1250,284 1340,284 1340,188 1430,188" fill="none" stroke="#176c91" stroke-width="3"/>
+<text x="65" y="379" font-family="Arial,sans-serif" font-size="24" font-weight="700" fill="#203345">P4 MCPWM capture timer clock</text>
+<text x="65" y="420" font-family="Arial,sans-serif" font-size="26" font-weight="400" fill="#24796a">160 MHz</text>
+<text x="65" y="457" font-family="Arial,sans-serif" font-size="22" font-weight="400" fill="#536271">6.25 ns per tick</text>
+<polyline points="590,459 602,459 602,363 641,363 641,459 680,459 680,363 719,363 719,459 758,459 758,363 797,363 797,459 836,459 836,363 875,363 875,459 914,459 914,363 953,363 953,459 992,459 992,363 1031,363 1031,459 1070,459 1070,363 1109,363 1109,459 1148,459 1148,363 1187,363 1187,459 1226,459 1226,363 1265,363 1265,459 1304,459 1304,363 1343,363 1343,459 1382,459 1382,363 1421,363 1421,459 1430,459" fill="none" stroke="#24796a" stroke-width="3"/>
+<text x="65" y="554" font-family="Arial,sans-serif" font-size="24" font-weight="700" fill="#203345">ESP32-P4 CPU clock</text>
+<text x="65" y="595" font-family="Arial,sans-serif" font-size="26" font-weight="400" fill="#80568a">360 MHz</text>
+<text x="65" y="632" font-family="Arial,sans-serif" font-size="22" font-weight="400" fill="#536271">2.78 ns per cycle</text>
+<polyline points="590,634 596,634 596,538 618,538 618,634 640,634 640,538 662,538 662,634 684,634 684,538 706,538 706,634 728,634 728,538 750,538 750,634 772,634 772,538 794,538 794,634 816,634 816,538 838,538 838,634 860,634 860,538 882,538 882,634 904,634 904,538 926,538 926,634 948,634 948,538 970,538 970,634 992,634 992,538 1014,538 1014,634 1036,634 1036,538 1058,538 1058,634 1080,634 1080,538 1102,538 1102,634 1124,634 1124,538 1146,538 1146,634 1168,634 1168,538 1190,538 1190,634 1212,634 1212,538 1234,538 1234,634 1256,634 1256,538 1278,538 1278,634 1300,634 1300,538 1322,538 1322,634 1344,634 1344,538 1366,538 1366,634 1388,634 1388,538 1410,538 1410,634 1430,634" fill="none" stroke="#80568a" stroke-width="3"/>
+<text x="590" y="723" font-family="Arial,sans-serif" font-size="19" font-weight="400" fill="#536271">Time progresses to the right</text>
+</svg>

@@ -14,6 +14,11 @@
 
 The normal source filter selects the reusable ADC class; this adds the test's
 setup/loop outside src, keeping the ordinary web/DAC application out of the build.
+
+PlatformIO executes this as a pre-build SCons script, not a standalone Python
+program. Import supplies its build environment. For the external-generator
+timing tests, ads127CaptureControl.cpp is the selected entry point and the real
+AcquisitionApplication is linked below; build flags disable DAC generation.
 """
 Import("env")
 from pathlib import Path

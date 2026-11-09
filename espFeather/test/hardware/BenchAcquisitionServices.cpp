@@ -15,6 +15,12 @@
 /**
  * @file BenchAcquisitionServices.cpp
  * Connect test-only signal generation and observation to acquisition lifecycle calls.
+ * Read initialize -> describe -> reset -> start -> begin/poll -> finish.
+ * AcquisitionApplication calls these hooks from Arduino's scheduled loop task.
+ * Build flags select their behavior; the external-generator build used for
+ * FSYNC/delay tests disables the DAC (Digital-to-Analog Converter) and never
+ * measures A2. Its empty observation hooks are intentional, not missing capture
+ * code: all sample and pulse timing is collected on P4.
  */
 #include <Arduino.h>
 #if ADS127_EXTERNAL_GENERATOR
@@ -24,7 +30,8 @@
 
 /* **
  * initialize - Prepare stopped source and measurement hardware; report combined
- * readiness.
+ * readiness. Return false if a selected hardware service could not initialize;
+ * true does not confirm an external waveform, wiring, or P4 readiness.
  */
 bool BenchAcquisitionServices::initialize()
 {
@@ -45,7 +52,8 @@ bool BenchAcquisitionServices::initialize()
 
 /* **
  * configureDuration - Configure stopped smoke observations; other bench builds
- * refuse the extension.
+ * refuse the extension. seconds is a requested run-duration option, not a
+ * hardware timestamp. Return true only for a supported choice in a smoke build.
  */
 bool BenchAcquisitionServices::configureDuration(unsigned seconds)
 {
@@ -80,7 +88,9 @@ bool BenchAcquisitionServices::getExternalInput() const
 
 /* **
  * describe - Print the selected test identity and voltage pattern without
- * starting it.
+ * starting it. idle comes from the real application's control state; ready=1
+ * requires both idle and successful service initialization. The PC relies on
+ * version=6 to distinguish the external-generator image from DAC-driven tests.
  */
 void BenchAcquisitionServices::describe(bool idle)
 {
@@ -157,8 +167,10 @@ void BenchAcquisitionServices::poll()
 }
 
 /* **
- * getFailed - Combine latched source and observation faults for coordinated
- * shutdown.
+ * getFailed - AcquisitionApplication polls this for local test-service faults
+ * that require coordinated shutdown. The external-generator build returns
+ * false because it has no local generator or A2 observer to monitor; that is
+ * not evidence that the external waveform or ADC acquisition is correct.
  */
 bool BenchAcquisitionServices::getFailed()
 {
@@ -174,7 +186,8 @@ bool BenchAcquisitionServices::getFailed()
 
 /* **
  * getSampling - Request fast polling only while the local ADC is measuring a
- * window.
+ * window. Return false for external-generator timing tests: P4 performs their
+ * measurements, so Feather needs no fast A2 polling loop.
  */
 bool BenchAcquisitionServices::getSampling() const
 {
@@ -188,6 +201,9 @@ bool BenchAcquisitionServices::getSampling() const
 /* **
  * finish - Disable the Feather DAC and export observations after ADC stop.
  * The Rigol build reports controller completion without touching the generator.
+ * runId identifies the acquisition in the report; clean is the application's
+ * completion verdict. EXTERNAL_END is evidence of this hook being called,
+ * not a direct observation that the external generator has stopped.
  */
 void BenchAcquisitionServices::finish(unsigned long runId, bool clean)
 {

@@ -1,0 +1,111 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1260" viewBox="0 0 1920 1260" role="img"><title>ADC samples and GPS timing: data flow</title><rect width="100%" height="100%" fill="white"/>
+<text x="45" y="66" font-family="Arial,sans-serif" font-size="38" font-weight="700" fill="#243746">ADC samples and GPS timing</text>
+<text x="45" y="106" font-family="Arial,sans-serif" font-size="23" font-weight="400" fill="#697780">Sample data and captured times meet in the formatter. SD writes do not determine sample times.</text>
+<rect x="390" y="285" width="1485" height="900" rx="16" fill="none" stroke="#b7c5ce" stroke-width="2"/>
+<text x="415" y="320" font-family="Arial,sans-serif" font-size="24" font-weight="700" fill="#243746">ESP32-P4</text>
+<rect x="45" y="460" width="265" height="100" rx="10" fill="#f4f7f9" stroke="#243746" stroke-width="2"/>
+<text x="63" y="499" font-family="Arial,sans-serif" font-size="24" font-weight="700" fill="#243746">Signal / antenna</text>
+<text x="63" y="536" font-family="Arial,sans-serif" font-size="21" font-weight="400" fill="#243746">Analog signal</text>
+<rect x="45" y="690" width="265" height="150" rx="10" fill="#f4f7f9" stroke="#243746" stroke-width="2"/>
+<text x="63" y="729" font-family="Arial,sans-serif" font-size="24" font-weight="700" fill="#243746">ADS127L18</text>
+<text x="63" y="766" font-family="Arial,sans-serif" font-size="21" font-weight="400" fill="#243746">CH0 analog input</text>
+<text x="63" y="796" font-family="Arial,sans-serif" font-size="21" font-weight="400" fill="#243746">DCLK / FSYNC / DOUT0</text>
+<polyline points="177,560 177,690" fill="none" stroke="#243746" stroke-width="3"/>
+<polygon points="177,690 183.0,677.0 171.0,677.0" fill="#243746"/>
+<rect x="790" y="140" width="420" height="115" rx="10" fill="#f4f7f9" stroke="#227968" stroke-width="2"/>
+<text x="808" y="179" font-family="Arial,sans-serif" font-size="24" font-weight="700" fill="#227968">GPS receiver</text>
+<text x="808" y="216" font-family="Arial,sans-serif" font-size="21" font-weight="400" fill="#227968">UART: date and UTC time</text>
+<text x="808" y="246" font-family="Arial,sans-serif" font-size="21" font-weight="400" fill="#227968">PPS: precise second edge</text>
+<rect x="440" y="360" width="380" height="145" rx="10" fill="#f4f7f9" stroke="#227968" stroke-width="2"/>
+<text x="458" y="399" font-family="Arial,sans-serif" font-size="24" font-weight="700" fill="#227968">UART input - planned</text>
+<text x="458" y="436" font-family="Arial,sans-serif" font-size="21" font-weight="400" fill="#227968">Read date/time messages</text>
+<text x="458" y="466" font-family="Arial,sans-serif" font-size="21" font-weight="400" fill="#227968">Associate UTC with PPS</text>
+<text x="458" y="496" font-family="Arial,sans-serif" font-size="21" font-weight="400" fill="#227968">RX pin still to be assigned</text>
+<rect x="1030" y="360" width="715" height="175" rx="10" fill="#f4f7f9" stroke="#227968" stroke-width="2"/>
+<text x="1048" y="399" font-family="Arial,sans-serif" font-size="24" font-weight="700" fill="#227968">Hardware timing</text>
+<text x="1048" y="436" font-family="Arial,sans-serif" font-size="21" font-weight="400" fill="#227968">GPIO1 / FSYNC: PCNT counts pulses</text>
+<text x="1048" y="466" font-family="Arial,sans-serif" font-size="21" font-weight="400" fill="#227968">MCPWM captures FSYNC and GPIO6 / PPS times</text>
+<text x="1048" y="496" font-family="Arial,sans-serif" font-size="21" font-weight="400" fill="#227968">Both timestamps use the same 160-MHz timer</text>
+<polyline points="850,255 850,325 630,325 630,360" fill="none" stroke="#227968" stroke-width="3"/>
+<polygon points="630,360 636.0,347.0 624.0,347.0" fill="#227968"/>
+<text x="648" y="318" font-family="Arial,sans-serif" font-size="19" font-weight="400" fill="#227968">UTC over UART</text>
+<polyline points="1140,255 1370,255 1370,360" fill="none" stroke="#227968" stroke-width="3"/>
+<polygon points="1370,360 1376.0,347.0 1364.0,347.0" fill="#227968"/>
+<text x="1385" y="311" font-family="Arial,sans-serif" font-size="21" font-weight="400" fill="#227968">PPS -&gt; GPIO6</text>
+<rect x="1030" y="575" width="715" height="100" rx="10" fill="#f4f7f9" stroke="#227968" stroke-width="2"/>
+<text x="1048" y="614" font-family="Arial,sans-serif" font-size="24" font-weight="700" fill="#227968">Core 0: associate timing with samples</text>
+<text x="1048" y="651" font-family="Arial,sans-serif" font-size="21" font-weight="400" fill="#227968">Number FSYNCs; record PPS and block endpoints</text>
+<polyline points="1385,535 1385,575" fill="none" stroke="#227968" stroke-width="3"/>
+<polygon points="1385,575 1391.0,562.0 1379.0,562.0" fill="#227968"/>
+<polyline points="630,505 630,625 1030,625" fill="none" stroke="#227968" stroke-width="3"/>
+<polygon points="1030,625 1017.0,619.0 1017.0,631.0" fill="#227968"/>
+<text x="657" y="612" font-family="Arial,sans-serif" font-size="20" font-weight="400" fill="#227968">UTC for file header</text>
+<rect x="440" y="735" width="210" height="150" rx="10" fill="#f4f7f9" stroke="#237ca0" stroke-width="2"/>
+<text x="458" y="774" font-family="Arial,sans-serif" font-size="24" font-weight="700" fill="#237ca0">PARLIO</text>
+<text x="458" y="811" font-family="Arial,sans-serif" font-size="21" font-weight="400" fill="#237ca0">Reads DOUT0 +</text>
+<text x="458" y="841" font-family="Arial,sans-serif" font-size="21" font-weight="400" fill="#237ca0">FSYNC on DCLK</text>
+<rect x="710" y="735" width="230" height="150" rx="10" fill="#f4f7f9" stroke="#237ca0" stroke-width="2"/>
+<text x="728" y="774" font-family="Arial,sans-serif" font-size="24" font-weight="700" fill="#237ca0">DMA: 32 KiB</text>
+<text x="728" y="811" font-family="Arial,sans-serif" font-size="21" font-weight="400" fill="#237ca0">Raw pin states</text>
+<text x="728" y="841" font-family="Arial,sans-serif" font-size="21" font-weight="400" fill="#237ca0">Cyclic buffer</text>
+<rect x="1030" y="735" width="285" height="150" rx="10" fill="#f4f7f9" stroke="#237ca0" stroke-width="2"/>
+<text x="1048" y="774" font-family="Arial,sans-serif" font-size="24" font-weight="700" fill="#237ca0">Raw block pool</text>
+<text x="1048" y="811" font-family="Arial,sans-serif" font-size="21" font-weight="400" fill="#237ca0">16 x 4 KiB buffers</text>
+<text x="1048" y="841" font-family="Arial,sans-serif" font-size="21" font-weight="400" fill="#237ca0">Ready/free queues</text>
+<text x="1048" y="871" font-family="Arial,sans-serif" font-size="21" font-weight="400" fill="#237ca0">hold buffer addresses</text>
+<rect x="1415" y="735" width="330" height="150" rx="10" fill="#f4f7f9" stroke="#237ca0" stroke-width="2"/>
+<text x="1433" y="774" font-family="Arial,sans-serif" font-size="24" font-weight="700" fill="#237ca0">Core 1: decode + pack</text>
+<text x="1433" y="811" font-family="Arial,sans-serif" font-size="21" font-weight="400" fill="#237ca0">Reconstruct ADC readings</text>
+<text x="1433" y="841" font-family="Arial,sans-serif" font-size="21" font-weight="400" fill="#237ca0">Keep 3 bytes per sample</text>
+<polyline points="310,775 440,775" fill="none" stroke="#237ca0" stroke-width="3"/>
+<polygon points="440,775 427.0,769.0 427.0,781.0" fill="#237ca0"/>
+<text x="323" y="711" font-family="Arial,sans-serif" font-size="18" font-weight="400" fill="#237ca0">Voltage</text>
+<text x="323" y="736" font-family="Arial,sans-serif" font-size="18" font-weight="400" fill="#237ca0">translation</text>
+<text x="440" y="914" font-family="Arial,sans-serif" font-size="19" font-weight="400" fill="#237ca0">DCLK: GPIO0   FSYNC: GPIO1   DOUT0: GPIO2</text>
+<polyline points="650,810 710,810" fill="none" stroke="#237ca0" stroke-width="3"/>
+<polygon points="710,810 697.0,804.0 697.0,816.0" fill="#237ca0"/>
+<polyline points="940,810 1030,810" fill="none" stroke="#237ca0" stroke-width="3"/>
+<polygon points="1030,810 1017.0,804.0 1017.0,816.0" fill="#237ca0"/>
+<text x="943" y="703" font-family="Arial,sans-serif" font-size="18" font-weight="400" fill="#237ca0">Core 0</text>
+<text x="943" y="727" font-family="Arial,sans-serif" font-size="18" font-weight="400" fill="#237ca0">copies</text>
+<polyline points="1315,810 1415,810" fill="none" stroke="#237ca0" stroke-width="3"/>
+<polygon points="1415,810 1402.0,804.0 1402.0,816.0" fill="#237ca0"/>
+<polyline points="365,775 365,345 1000,345 1000,430 1030,430" fill="none" stroke="#227968" stroke-width="3"/>
+<polygon points="1030,430 1017.0,424.0 1017.0,436.0" fill="#227968"/>
+<text x="795" y="339" font-family="Arial,sans-serif" font-size="20" font-weight="400" fill="#227968">FSYNC -&gt; GPIO1</text>
+<rect x="1415" y="980" width="330" height="145" rx="10" fill="#f4f7f9" stroke="#237ca0" stroke-width="2"/>
+<text x="1433" y="1019" font-family="Arial,sans-serif" font-size="24" font-weight="700" fill="#237ca0">Sample staging: 6 MiB</text>
+<text x="1433" y="1056" font-family="Arial,sans-serif" font-size="21" font-weight="400" fill="#237ca0">Packed samples wait for</text>
+<text x="1433" y="1086" font-family="Arial,sans-serif" font-size="21" font-weight="400" fill="#237ca0">the closing PPS boundary</text>
+<rect x="1030" y="980" width="285" height="145" rx="10" fill="#f4f7f9" stroke="#227968" stroke-width="2"/>
+<text x="1048" y="1019" font-family="Arial,sans-serif" font-size="24" font-weight="700" fill="#227968">Core 0: formatter</text>
+<text x="1048" y="1056" font-family="Arial,sans-serif" font-size="21" font-weight="400" fill="#227968">Build tBlock + sBlock</text>
+<text x="1048" y="1086" font-family="Arial,sans-serif" font-size="21" font-weight="400" fill="#227968">Header and end marker</text>
+<rect x="710" y="980" width="230" height="145" rx="10" fill="#f4f7f9" stroke="#237ca0" stroke-width="2"/>
+<text x="728" y="1019" font-family="Arial,sans-serif" font-size="24" font-weight="700" fill="#237ca0">Write ring: 16 MiB</text>
+<text x="728" y="1056" font-family="Arial,sans-serif" font-size="21" font-weight="400" fill="#237ca0">Formatted file bytes</text>
+<text x="728" y="1086" font-family="Arial,sans-serif" font-size="21" font-weight="400" fill="#237ca0">in PSRAM</text>
+<rect x="440" y="980" width="210" height="145" rx="10" fill="#f4f7f9" stroke="#237ca0" stroke-width="2"/>
+<text x="458" y="1019" font-family="Arial,sans-serif" font-size="24" font-weight="700" fill="#237ca0">Core 0: write SD</text>
+<text x="458" y="1056" font-family="Arial,sans-serif" font-size="21" font-weight="400" fill="#237ca0">Writes 128-KiB</text>
+<text x="458" y="1086" font-family="Arial,sans-serif" font-size="21" font-weight="400" fill="#237ca0">chunks</text>
+<rect x="45" y="980" width="265" height="145" rx="10" fill="#f4f7f9" stroke="#237ca0" stroke-width="2"/>
+<text x="63" y="1019" font-family="Arial,sans-serif" font-size="24" font-weight="700" fill="#237ca0">SD card</text>
+<text x="63" y="1056" font-family="Arial,sans-serif" font-size="21" font-weight="400" fill="#237ca0">Header, then repeated</text>
+<text x="63" y="1086" font-family="Arial,sans-serif" font-size="21" font-weight="400" fill="#237ca0">[tBlock][sBlock]</text>
+<text x="63" y="1116" font-family="Arial,sans-serif" font-size="21" font-weight="400" fill="#237ca0">then zero end marker</text>
+<polyline points="1580,885 1580,980" fill="none" stroke="#237ca0" stroke-width="3"/>
+<polygon points="1580,980 1586.0,967.0 1574.0,967.0" fill="#237ca0"/>
+<polyline points="1415,1050 1315,1050" fill="none" stroke="#237ca0" stroke-width="3"/>
+<polygon points="1315,1050 1328.0,1056.0 1328.0,1044.0" fill="#237ca0"/>
+<polyline points="1030,1050 940,1050" fill="none" stroke="#237ca0" stroke-width="3"/>
+<polygon points="940,1050 953.0,1056.0 953.0,1044.0" fill="#237ca0"/>
+<polyline points="710,1050 650,1050" fill="none" stroke="#237ca0" stroke-width="3"/>
+<polygon points="650,1050 663.0,1056.0 663.0,1044.0" fill="#237ca0"/>
+<polyline points="440,1050 310,1050" fill="none" stroke="#237ca0" stroke-width="3"/>
+<polygon points="310,1050 323.0,1056.0 323.0,1044.0" fill="#237ca0"/>
+<polyline points="1745,625 1815,625 1815,940 1172,940 1172,980" fill="none" stroke="#227968" stroke-width="3"/>
+<polygon points="1172,980 1178.0,967.0 1166.0,967.0" fill="#227968"/>
+<text x="1600" y="921" font-family="Arial,sans-serif" font-size="20" font-weight="400" fill="#227968">Timing records</text>
+<text x="45" y="1233" font-family="Arial,sans-serif" font-size="22" font-weight="400" fill="#697780">Bench test: generator supplies PPS; UTC is synthetic. Real GPS UART-to-PPS association remains to be verified.</text>
+<polyline points="630,335 630,355" fill="none" stroke="white" stroke-width="11"/><polyline points="630,335 630,355" fill="none" stroke="#227968" stroke-width="3"/><polyline points="1580,930 1580,950" fill="none" stroke="white" stroke-width="11"/><polyline points="1580,930 1580,950" fill="none" stroke="#237ca0" stroke-width="3"/></svg>

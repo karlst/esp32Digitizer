@@ -29,6 +29,9 @@
  * Own the selected DAC test and optional A2 measurements for one firmware image.
  * Arduino's task owns these objects; BenchDac owns its separately scheduled timer.
  * Production startup does not include or instantiate this class.
+ * With ADS127_EXTERNAL_GENERATOR, neither optional member is constructed.
+ * The adapter then supplies only identity, disabled-DAC initialization and
+ * completion reporting to the real acquisition application.
  */
 class BenchAcquisitionServices : public AcquisitionServices
 {

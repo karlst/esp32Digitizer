@@ -1,8 +1,87 @@
 # Project status
 
-Updated October 22, 2026. This is the single current status document. Dated
+Updated November 7, 2026. This is the single current status document. Dated
 measurements and the reasons for earlier decisions are in
 [test history](P4-EARLY-TEST-HISTORY.md).
+
+## Current timing work - November 7
+
+Start with the [sample timing design](SAMPLE-TIMING-DESIGN.md) for FSYNC/PPS
+alignment, tBlock fields, sample-time readback, and established accuracy limits.
+
+**The new tBlock/sBlock format passed its 60-second hardware test** in
+`captures/fsync-association/20261107-153348`. All 60 PPS boundaries succeeded;
+59 complete intervals retained 60,415,138 samples. Full SD readback verified
+181,248,550 serialized bytes, CRC32 `0a79e9d4`, with zero errors/unsaved bytes.
+Staging peaked at 1,026,927 sample slots; the 16-MiB write ring peaked at
+1,818,316 bytes. Maximum write/flush duration was 110,850 us.
+See [today's complete record](2026-11-07-TIMING-AND-RECORDING.md) for the
+measurements, failed attempts, performance fixes, ownership and remaining limits.
+
+The 60-second combined PPS/sample/SD test passed. Run
+`captures/fsync-association/20261107-135357` captured/mapped all 60 simulated PPS
+pulses, checked sample numbering through two timer wraps, and saved/read back
+184,338,333 bytes with CRC32 `4a00c092`. No capture/storage losses were reported.
+Ring peak was 1,969,541 of 16,777,216 bytes. See the
+[diagnostic guide](FSYNC-ASSOCIATION-TEST.md) for details and measurement limits.
+
+A decoder regression initially caused receive-buffer drops: startup additions
+stopped the compiler inlining frame-start processing. The normal path is inline
+again, with startup/error handling separate. Karl passed decoder checks and then
+the combined hardware test. Diagnostic timing counters remain available.
+
+Current wiring: translated FSYNC to GPIO1; Rigol simulated PPS to GPIO6,
+1 Hz, 10% duty, verified 0–3.3 V. The same signal feeds CH0P through the verified
+divider; CH0N is grounded. P4 uses the FSYNC diagnostic firmware, COM3; Feather
+uses external-source bench firmware, COM4. Karl runs hardware and Git commands.
+
+Adjacent boundary capture also passed in `20261107-145319`: 60 boundaries,
+zero failures/missing pulses, two timer wraps, 184,341,357 sample bytes read back,
+CRC32 `14dadbca`, ring peak 540,669 bytes. Moving the short capture routine into
+internal instruction RAM preceded this successful run; flash-based attempts
+had skipped edges and timed out. Timing limits were not loosened.
+
+The version-1 timed file path is now connected behind a separate
+`--timed-sd-test` / console `t` selection. `TimedIntervalBuffer` stages packed
+samples until a closing PPS boundary is known; `TimedRecorder` formats complete
+intervals and writes them through the reusable buffered writer/FatFs adapter.
+Desktop checks were expanded for staging, exact sample continuity and rotation.
+Karl ran the desktop checks and firmware builds, followed by the passing
+new-format run above. Essential changes include separate formatting/disk tasks,
+regular task sleeps, aligned internal DMA scratch, and internal instruction RAM
+placement for the decoder hot path. The old `--pps-sd-test` remains available.
+
+The new 60-second bench run uses a fresh single-slot file pool, 60 pairs/file,
+and a synthetic 2000-01-01 UTC origin. It normally retains 59 complete intervals.
+The agreed production defaults remain 10 circular files, but this first live
+verification deliberately does not overwrite slots. Real GPS is not yet needed;
+GPS UTC-to-PPS association remains unverified. See [file format](TIMED-FILE-FORMAT.md).
+The next useful check is PC readback of the actual `.DG` file with the existing
+Python reader. New-format live circular reuse and real GPS remain unverified.
+
+## Earlier timing work - November 5
+
+Read [the timing handoff](TIMING-HANDOFF-2026-11-05.md) before resuming. Five
+FSYNC association trials, five ADC delay trials and five same-pulse P4 input
+comparisons completed. Karl approved **2553 ns** as the configurable measured
+input-to-FSYNC correction, including the translator, for this configuration.
+Absolute uncertainty has not been fully quantified; proceed to designing time
+information for recorded samples rather than repeating the delay discussion.
+
+The curve and delay results are preserved in
+[the two-page report](test-results/2026-11-05-adc-pulse-delay.pdf), also copied to
+`output/pdf/`. Raw capture folders and complete statistics are in the handoff.
+Latest PC smoke checks: **19/19 passed**.
+
+At that date the P4 used the input-skew calibration image and GPIO1 was connected
+to the generator. That wiring was subsequently restored; use the November 7
+section above for the current bench configuration.
+
+## Earlier status - October 22
+
+The sections below retain the historical October 22 snapshot. References there
+to the latest firmware, pending rebuilds or current bench state are historical;
+use the November 7 section above for the present timing work.
 
 ## Storage experiment
 

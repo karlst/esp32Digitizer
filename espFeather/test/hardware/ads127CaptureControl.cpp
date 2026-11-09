@@ -17,6 +17,14 @@
  * Arduino entry points for the ADC hardware-test controller.
  * Objects have static lifetime because callbacks and loop continue after setup.
  * The application owns the handshake; the adapter owns test generation/measurement.
+ *
+ * Reading path: setup initializes AcquisitionApplication; loop services its
+ * commands and timeouts. BenchAcquisitionServices selects what this test adds.
+ * For the timing measurements, ADS127_EXTERNAL_GENERATOR selects version 6:
+ * Feather configures/starts/stops the ADC, but the Rigol supplies its input.
+ * The P4 runner sends g to Feather; the real application coordinates ARM/READY
+ * before ADC START and waits for STOP/DONE at shutdown. These entry points do
+ * not duplicate that control sequence or measure pulse timestamps themselves.
  */
 #include "AcquisitionApplication.h"
 #include "BenchAcquisitionServices.h"

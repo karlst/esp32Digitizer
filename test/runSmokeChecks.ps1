@@ -14,6 +14,11 @@
 # Paths come from this script, so it works from any current directory. Child
 # PowerShell processes isolate runner variables and provide reliable exit codes.
 # This compiles PC test programs only: no firmware build, upload or hardware I/O.
+# Reading path: checks lists the suites, prerequisite checks locate executables,
+# and the final loop runs each suite and stops on its first nonzero exit status.
+# For timing work, runDecoderChecks includes the C++ startup/FSYNC arithmetic;
+# fsyncAssociationReportChecks, pulseDelayChecks and inputSkewChecks exercise
+# parsers using invented data with known answers. None measures an actual delay.
 param(
     [string]$Python = 'python',
     [switch]$IncludeBrowser,
@@ -36,9 +41,15 @@ $checks = @(
     @{ Name = 'Feather DAC arithmetic'; Kind = 'PowerShell'; Path = 'espFeather/test/runBenchDacChecks.ps1' },
     @{ Name = 'Feather status parsing'; Kind = 'PowerShell'; Path = 'espFeather/test/runMonitorChecks.ps1' },
     @{ Name = 'P4 recording-file reader'; Kind = 'Python'; Path = 'espP4/test/analogReaderChecks.py' },
+    @{ Name = 'P4 timed-file reader'; Kind = 'Python'; Path = 'espP4/test/timedReaderChecks.py' },
+    @{ Name = 'PPS adjacent sample boundaries'; Kind = 'Python'; Path = 'espP4/test/ppsBoundaryChecks.py' },
+    @{ Name = 'Timed SD completion report'; Kind = 'Python'; Path = 'espP4/test/timedCaptureChecks.py' },
     @{ Name = 'P4 waveform comparison'; Kind = 'Python'; Path = 'espP4/test/comparisonChecks.py' },
     @{ Name = 'Hardware smoke disk parser and timing'; Kind = 'PowerShell'; Path = 'espP4/test/runHardwareSmokeChecks.ps1' },
     @{ Name = 'Hardware smoke pass/fail rules'; Kind = 'Python'; Path = 'espP4/test/hardwareSmokeReportChecks.py' },
+    @{ Name = 'FSYNC association report rules'; Kind = 'Python'; Path = 'espP4/test/fsyncAssociationReportChecks.py' },
+    @{ Name = 'Direct pulse delay analysis'; Kind = 'Python'; Path = 'espP4/test/pulseDelayChecks.py' },
+    @{ Name = 'P4 two-input timing analysis'; Kind = 'Python'; Path = 'espP4/test/inputSkewChecks.py' },
     @{ Name = 'External generator comparison'; Kind = 'Python'; Path = 'espP4/test/externalGeneratorChecks.py' },
     @{ Name = '1 kHz waveform response'; Kind = 'Python'; Path = 'espP4/test/fastSquareChecks.py' },
     @{ Name = 'Grounded-input noise and FFT'; Kind = 'Python'; Path = 'espP4/test/groundedNoiseChecks.py' },

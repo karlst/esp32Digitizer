@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1560" height="1080" viewBox="0 0 1560 1080" role="img" aria-labelledby="title desc">
+<title id="title">System clocks and timing signals</title>
+<desc id="desc">Five nominal rates: PPS 1 Hz, FSYNC 1.024 MHz, DCLK 32.768 MHz, capture timer 160 MHz, CPU 360 MHz. Each row has its own illustrative time scale.</desc>
+<rect width="100%" height="100%" fill="white"/>
+<text x="65" y="73" font-family="Arial,sans-serif" font-size="38" font-weight="700" fill="#203345">System clocks and timing signals</text>
+<text x="65" y="116" font-family="Arial,sans-serif" font-size="23" font-weight="400" fill="#536271">Each row uses its own time scale. Pulse widths and edge positions are illustrative.</text>
+<text x="65" y="200" font-family="Arial,sans-serif" font-size="26" font-weight="700" fill="#203345">PPS - one-second reference</text>
+<text x="65" y="241" font-family="Arial,sans-serif" font-size="24" font-weight="400" fill="#a36423">1 Hz  |  1 second between rising edges</text>
+<text x="65" y="280" font-family="Arial,sans-serif" font-size="22" font-weight="400" fill="#536271">GPS in use; signal generator on the bench</text>
+<polyline points="660,283 710,283 710,186 748,186 748,283 1090,283 1090,186 1128,186 1128,283 1470,283 1470,186 1490,186" fill="none" stroke="#a36423" stroke-width="3"/>
+<text x="65" y="366" font-family="Arial,sans-serif" font-size="26" font-weight="700" fill="#203345">FSYNC - sample boundary</text>
+<text x="65" y="407" font-family="Arial,sans-serif" font-size="24" font-weight="400" fill="#176c91">1.024 MHz  |  976.56 ns per sample</text>
+<text x="65" y="446" font-family="Arial,sans-serif" font-size="22" font-weight="400" fill="#536271">One rising edge identifies each ADC sample</text>
+<polyline points="660,449 688,449 688,352 783,352 783,449 878,449 878,352 973,352 973,449 1068,449 1068,352 1163,352 1163,449 1258,449 1258,352 1353,352 1353,449 1448,449 1448,352 1490,352" fill="none" stroke="#176c91" stroke-width="3"/>
+<text x="65" y="532" font-family="Arial,sans-serif" font-size="26" font-weight="700" fill="#203345">DCLK - ADC serial data clock</text>
+<text x="65" y="573" font-family="Arial,sans-serif" font-size="24" font-weight="400" fill="#176c91">32.768 MHz  |  30.52 ns per bit</text>
+<text x="65" y="612" font-family="Arial,sans-serif" font-size="22" font-weight="400" fill="#536271">32 bit clocks per sample: 8 status + 24 data</text>
+<polyline points="660,615 678,615 678,518 723,518 723,615 768,615 768,518 813,518 813,615 858,615 858,518 903,518 903,615 948,615 948,518 993,518 993,615 1038,615 1038,518 1083,518 1083,615 1128,615 1128,518 1173,518 1173,615 1218,615 1218,518 1263,518 1263,615 1308,615 1308,518 1353,518 1353,615 1398,615 1398,518 1443,518 1443,615 1488,615 1488,518 1490,518" fill="none" stroke="#176c91" stroke-width="3"/>
+<text x="65" y="698" font-family="Arial,sans-serif" font-size="26" font-weight="700" fill="#203345">MCPWM - P4 capture timer clock</text>
+<text x="65" y="739" font-family="Arial,sans-serif" font-size="24" font-weight="400" fill="#24796a">160 MHz  |  6.25 ns per timer tick</text>
+<text x="65" y="778" font-family="Arial,sans-serif" font-size="22" font-weight="400" fill="#536271">The same timer timestamps FSYNC and PPS</text>
+<polyline points="660,781 670,781 670,684 700,684 700,781 730,781 730,684 760,684 760,781 790,781 790,684 820,684 820,781 850,781 850,684 880,684 880,781 910,781 910,684 940,684 940,781 970,781 970,684 1000,684 1000,781 1030,781 1030,684 1060,684 1060,781 1090,781 1090,684 1120,684 1120,781 1150,781 1150,684 1180,684 1180,781 1210,781 1210,684 1240,684 1240,781 1270,781 1270,684 1300,684 1300,781 1330,781 1330,684 1360,684 1360,781 1390,781 1390,684 1420,684 1420,781 1450,781 1450,684 1480,684 1480,781 1490,781" fill="none" stroke="#24796a" stroke-width="3"/>
+<text x="65" y="864" font-family="Arial,sans-serif" font-size="26" font-weight="700" fill="#203345">CPU - P4 instruction clock</text>
+<text x="65" y="905" font-family="Arial,sans-serif" font-size="24" font-weight="400" fill="#80568a">360 MHz  |  2.78 ns per clock cycle</text>
+<text x="65" y="944" font-family="Arial,sans-serif" font-size="22" font-weight="400" fill="#536271">Runs software; a read can take many cycles</text>
+<polyline points="660,947 665,947 665,850 684,850 684,947 703,947 703,850 722,850 722,947 741,947 741,850 760,850 760,947 779,947 779,850 798,850 798,947 817,947 817,850 836,850 836,947 855,947 855,850 874,850 874,947 893,947 893,850 912,850 912,947 931,947 931,850 950,850 950,947 969,947 969,850 988,850 988,947 1007,947 1007,850 1026,850 1026,947 1045,947 1045,850 1064,850 1064,947 1083,947 1083,850 1102,850 1102,947 1121,947 1121,850 1140,850 1140,947 1159,947 1159,850 1178,850 1178,947 1197,947 1197,850 1216,850 1216,947 1235,947 1235,850 1254,850 1254,947 1273,947 1273,850 1292,850 1292,947 1311,947 1311,850 1330,850 1330,947 1349,947 1349,850 1368,850 1368,947 1387,947 1387,850 1406,850 1406,947 1425,947 1425,850 1444,850 1444,947 1463,947 1463,850 1482,850 1482,947 1490,947" fill="none" stroke="#80568a" stroke-width="3"/>
+<text x="65" y="1048" font-family="Arial,sans-serif" font-size="21" font-weight="400" fill="#536271">Nominal rates for our current configuration. Diagram does not specify clock-source or phase relationships.</text>
+</svg>
