@@ -11,10 +11,12 @@
 #include <algorithm>
 #include <cstring>
 #include <set>
+#include <utility>
 static std::map<std::string, std::vector<uint8_t>> fileContents;
 static std::set<std::string> directories;
 static int writeFault = 0;
 static bool syncFault = false;
+static bool renameFault = false;
 static std::vector<MemoryRecordingDisk::Write> writes;
 
 /* **
@@ -46,6 +48,7 @@ bool MemoryRecordingDisk::prepare(bool format)
         writes.clear();
         writeFault = 0;
         syncFault = false;
+        renameFault = false;
     }
     directories.insert("0:");
     return true;
@@ -83,6 +86,43 @@ void MemoryRecordingDisk::failWrite(bool shortWrite)
 void MemoryRecordingDisk::failSync()
 {
     syncFault = true;
+}
+
+/* **
+ * failRename - Refuse exactly the next rename without changing either file.
+ */
+void MemoryRecordingDisk::failRename()
+{
+    renameFault = true;
+}
+
+/* **
+ * f_rename - Move a closed file's name while retaining its reserved bytes.
+ * Callers must close files first. Model name collisions and a one-shot disk
+ * failure; neither may destroy the old file or an existing destination.
+ */
+FRESULT f_rename(const char* oldPath, const char* newPath)
+{
+    FRESULT retVal = FR_OK;
+    if (renameFault)
+    {
+        retVal = FR_DISK_ERR;
+    }
+    else if (!fileContents.count(oldPath))
+    {
+        retVal = FR_NO_FILE;
+    }
+    else if (fileContents.count(newPath))
+    {
+        retVal = FR_EXIST;
+    }
+    else
+    {
+        fileContents[newPath] = std::move(fileContents.at(oldPath));
+        fileContents.erase(oldPath);
+    }
+    renameFault = false;
+    return retVal;
 }
 
 /* **

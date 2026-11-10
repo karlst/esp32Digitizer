@@ -63,8 +63,31 @@ bool TimedRecordingStream::beginBlock(const TimeBlock& timeBlock)
         header._utcFirst = _utcFirst + _intervals;
         header._delayNs = _config._delayNs;
         header._pairsPerFile = _config._pairsPerFile;
-        retVal = TimedFileFormat::encodeHeader(header, bytes, sizeof(bytes)) &&
-            _timedFileSink.beginFile(_files % _config._fileCount) &&
+        // Name the file for its first saved analog sample, not its opening PPS.
+        // Integer nanoseconds are sufficient for flooring to a whole second:
+        // subtracting an integer delay after flooring gives the same second.
+        // Reject multiplication overflow and dates before the Unix epoch rather
+        // than wrapping an unsigned UTC value into a plausible filename.
+        const uint64_t deltaTicks = timeBlock._tcFsFirst - timeBlock._tcPpsFirst;
+        const uint64_t ppsTicks = timeBlock._tcPpsLast - timeBlock._tcPpsFirst;
+        const uint64_t billion = 1000000000;
+        retVal = deltaTicks <= std::numeric_limits<uint64_t>::max() / billion;
+        uint64_t utcSample = header._utcFirst;
+        if (retVal)
+        {
+            const int64_t offsetNs = int64_t(deltaTicks * billion / ppsTicks) - header._delayNs;
+            if (offsetNs < 0)
+            {
+                const uint64_t secondsBack = uint64_t(-offsetNs + billion - 1) / billion;
+                retVal = utcSample >= secondsBack;
+                if (retVal)
+                {
+                    utcSample -= secondsBack;
+                }
+            }
+        }
+        retVal = retVal && TimedFileFormat::encodeHeader(header, bytes, sizeof(bytes)) &&
+            _timedFileSink.beginFile(_files % _config._fileCount, utcSample) &&
             _timedFileSink.submit(bytes, sizeof(bytes));
         _opened = retVal;
         if (retVal)

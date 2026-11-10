@@ -9,7 +9,7 @@ and needs the verified external waveform and GPIO6 connection instead.
 PPS modes require an external 1-Hz input on GPIO6. --pps-sd-test additionally
 creates one new recording through the real SD writer; it preserves existing
 files. PC calendar time labels that file but is not GPS synchronization.
---timed-sd-test writes version-1 tBlock/sBlock files using a synthetic 2000-01-01
+--timed-sd-test writes version-1 tBlock/sBlock files using synthetic 1970-01-01 01:00:00
 UTC origin. Complete intervals only are retained, with full SD CRC readback.
 The timed test acquires for five minutes and rotates across five preserved
 files, with 60 pairs per file. Other PPS tests still acquire for one minute.
@@ -30,7 +30,7 @@ import time
 from captureComparison import readPort
 from fsyncAssociationReport import analyze
 from ppsBoundaryReport import analyzeBoundaries
-from timedCaptureReport import parseSaved as parseTimedSaved, validateSaved as validateTimedSaved
+from timedCaptureReport import parseSaved as parseTimedSaved, validateSaved as validateTimedSaved, validateNames
 
 
 def capture(featherPort, p4Port, runs, output, delay=False, linkOnly=False, frequencyHz=997, readTest=False, indexTest=False, ppsTest=False, sdTest=False, timedTest=False):
@@ -230,7 +230,7 @@ def capture(featherPort, p4Port, runs, output, delay=False, linkOnly=False, freq
                 selected = False
                 while not selected:
                     name, line = nextLine(deadline)
-                    expectedMode = 'TIMED MODE version=2 seconds=300 pairsPerFile=60 files=5 syntheticUtc=1' if timedTest else 'PPS SD MODE version=1 seconds=60 preserve=1' if sdTest else 'PPS MODE version=2 seconds=60 gpio=6' if ppsTest else 'INDEX MODE version=2 seconds=10' if indexTest else 'READ MODE version=3 seconds=10'
+                    expectedMode = 'TIMED MODE version=3 seconds=300 pairsPerFile=60 files=5 syntheticUtc=1' if timedTest else 'PPS SD MODE version=1 seconds=60 preserve=1' if sdTest else 'PPS MODE version=2 seconds=60 gpio=6' if ppsTest else 'INDEX MODE version=2 seconds=10' if indexTest else 'READ MODE version=3 seconds=10'
                     selected = name == 'P4' and line == expectedMode
             if ppsTest:
                 # Existing Feather firmware supports 30/300/600 seconds. Use
@@ -348,8 +348,9 @@ def capture(featherPort, p4Port, runs, output, delay=False, linkOnly=False, freq
             sourceRequested = False
             if timedTest:
                 validateTimedSaved(sdSaved, completed, sampleCount, captureSeconds=300)
+                completed['files'] = validateNames(p4Lines, sdSaved, completed)
                 completed['storage'] = sdSaved
-                print('Timed PASS: five files, 60 pairs per full file, complete tBlock/sBlock counts and full SD CRC readback succeeded; UTC is synthetic.', flush=True)
+                print('Timed PASS: five UTC-named files, measured renames, 60 pairs per full file, complete tBlock/sBlock counts and full SD CRC readback succeeded; UTC is synthetic.', flush=True)
             elif sdTest:
                 # Timing may finish before SD readback. Require exact byte count
                 # for the same acquisition, full retention, no reuse, no losses.

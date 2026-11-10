@@ -55,6 +55,7 @@ struct FILINFO
 };
 
 FRESULT f_open(FIL*, const char*, BYTE);
+FRESULT f_rename(const char*, const char*);
 FRESULT f_close(FIL*);
 FRESULT f_read(FIL*, void*, UINT, UINT*);
 FRESULT f_write(FIL*, const void*, UINT, UINT*);

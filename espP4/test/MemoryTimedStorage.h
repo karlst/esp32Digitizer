@@ -15,13 +15,14 @@ class MemoryTimedStorage : public TimedSlotStorage
 public:
     std::vector<std::vector<uint8_t>> _files;
     std::vector<size_t> _writes;
+    uint64_t _utcSample = 0;
     uint32_t _operations = 0, _opens = 0, _closes = 0;
     bool _failOpen = false, _shortWrite = false, _failClose = false;
 
     /* **
      * openSlot - Replace one simulated prepared slot and record disk activity.
      */
-    bool openSlot(uint32_t iSlot) override
+    bool openSlot(uint32_t iSlot, uint64_t utcSample) override
     {
         ++_operations;
         const bool retVal = !_opened && !_failOpen;
@@ -33,6 +34,7 @@ public:
             }
             _files[iSlot].clear();
             _iSlot = iSlot;
+            _utcSample = utcSample;
             _opened = true;
             ++_opens;
         }

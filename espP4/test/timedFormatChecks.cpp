@@ -177,6 +177,38 @@ static void checkFailures()
 }
 
 /* **
+ * checkSampleSeconds - Filenames use the first saved analog sample, including
+ * delay correction. Test both sides of the exact second boundary; formatting
+ * must floor rather than round, and a pre-epoch result must be rejected.
+ */
+static void checkSampleSeconds()
+{
+    for (uint64_t ticks : {uint64_t(2552), uint64_t(2553), uint64_t(2554)})
+    {
+        MemoryTimedSink sink;
+        TimedRecordingStream stream(sink);
+        assert(stream.start(3600, TimedRecordingConfig{}));
+        TimeBlock block;
+        block._tcPpsFirst = 0;
+        block._tcPpsLast = 1000000000;
+        block._tcFsFirst = ticks;
+        block._tcFsLast = ticks + 1;
+        block._sCount = 2;
+        assert(stream.beginBlock(block));
+        assert(sink._sampleSeconds.size() == 1);
+        assert(sink._sampleSeconds[0] == (ticks < 2553 ? 3599 : 3600));
+    }
+
+    MemoryTimedSink sink;
+    TimedRecordingStream stream(sink);
+    assert(stream.start(0, TimedRecordingConfig{}));
+    TimeBlock block = makeBlock(0, 0);
+    block._tcFsFirst = block._tcPpsFirst;
+    assert(!stream.beginBlock(block));
+    assert(sink._openedSlots.empty());
+}
+
+/* **
  * main - Run desktop-only assertions against the real format/rotation sources.
  */
 int main()
@@ -184,6 +216,7 @@ int main()
     checkLayout();
     checkRotation();
     checkFailures();
+    checkSampleSeconds();
     std::puts("PASS: DG layout, complete-block rotation, slot reuse and failure handling");
     return 0;
 }

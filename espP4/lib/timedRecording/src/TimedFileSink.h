@@ -10,6 +10,8 @@
  * disk task and retains bytes until writing completes. Acceptance is NOT a
  * completed write. A false result is fatal: never retry a possibly accepted
  * prefix. Slot numbers refer only to files preallocated for this session.
+ * beginFile copies utcSample, the first saved analog sample's whole UTC second,
+ * along with the slot request. The disk task uses it to name the prepared file.
  */
 class TimedFileSink
 {
@@ -18,7 +20,7 @@ public:
      * ~TimedFileSink - Permit destruction through the submission interface.
      */
     virtual ~TimedFileSink() = default;
-    virtual bool beginFile(uint32_t iSlot) = 0;
+    virtual bool beginFile(uint32_t iSlot, uint64_t utcSample) = 0;
     virtual bool submit(const uint8_t* data, size_t bytes) = 0;
     virtual bool endFile() = 0;
 };

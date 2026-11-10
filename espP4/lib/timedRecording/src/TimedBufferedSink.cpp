@@ -61,10 +61,10 @@ bool TimedBufferedSink::start(uint32_t slotCount, uint64_t (*clockUs)())
 
 /* **
  * beginFile - Reserve a boundary descriptor without opening a physical file.
- * Publish it before any bytes enter the ring. Acquiring tail guarantees the
+ * Copy utcSample (first saved sample UTC second) before any bytes enter the ring. Acquiring tail guarantees the
  * preceding file close finished before a descriptor is reused after wraparound.
  */
-bool TimedBufferedSink::beginFile(uint32_t iSlot)
+bool TimedBufferedSink::beginFile(uint32_t iSlot, uint64_t utcSample)
 {
     const uint32_t head = _head.load(std::memory_order_relaxed);
     const bool retVal = _active && !getFailed() && !_producerOpen && iSlot < _slotCount &&
@@ -74,6 +74,7 @@ bool TimedBufferedSink::beginFile(uint32_t iSlot)
         auto& boundary = _boundaries[head % _boundaryCount];
         boundary._start = _submitted;
         boundary._iSlot = iSlot;
+        boundary._utcSample = utcSample;
         boundary._ended.store(false, std::memory_order_relaxed);
         _head.store(head + 1, std::memory_order_release);
         _producerOpen = true;
@@ -195,7 +196,7 @@ size_t TimedBufferedSink::write(const uint8_t* data, size_t bytes)
             const auto& boundary = _boundaries[tail % _boundaryCount];
             if (!_diskOpen)
             {
-                _diskOpen = _written == boundary._start && _timedSlotStorage.openSlot(boundary._iSlot);
+                _diskOpen = _written == boundary._start && _timedSlotStorage.openSlot(boundary._iSlot, boundary._utcSample);
                 if (!_diskOpen)
                 {
                     _failed.store(true);

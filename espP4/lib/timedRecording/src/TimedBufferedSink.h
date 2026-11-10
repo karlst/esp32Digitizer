@@ -23,7 +23,7 @@ public:
     explicit TimedBufferedSink(TimedSlotStorage& timedSlotStorage);
     bool initializeMemory(uint8_t* (*allocate)(uint32_t), void (*release)(uint8_t*));
     bool start(uint32_t slotCount, uint64_t (*clockUs)());
-    bool beginFile(uint32_t iSlot) override;
+    bool beginFile(uint32_t iSlot, uint64_t utcSample) override;
     bool submit(const uint8_t* data, size_t bytes) override;
     bool endFile() override;
     bool pump(bool drain = false);
@@ -32,13 +32,13 @@ public:
     BufferedWriter::Statistics getStatistics();
 private:
     /**
-     * Producer writes start/slot before publishing queue head. It writes end
+     * Formatting task writes start/slot/utcSample before publishing queue head. It writes end
      * before releasing ended. Consumer reads those fields only after acquiring
      * their corresponding flag. This makes 64-bit offsets safe on a 32-bit CPU.
      */
     struct Boundary
     {
-        uint64_t _start = 0, _end = 0;
+        uint64_t _start = 0, _end = 0, _utcSample = 0;
         uint32_t _iSlot = 0;
         std::atomic<bool> _ended{false};
     };

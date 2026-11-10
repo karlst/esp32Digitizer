@@ -22,6 +22,7 @@ public:
     static std::map<std::string, std::vector<uint8_t>>& files();
     static void failWrite(bool shortWrite);
     static void failSync();
+    static void failRename();
 
     /**
      * Requested filesystem writes, used to check batching without measuring time.

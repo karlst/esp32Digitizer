@@ -6,6 +6,16 @@ The [client design document](LXDIGITIZER-SAMPLE-TIMING-DESIGN.md) is the
 authoritative description of sample timing. This page records current validation
 and remaining work; it is not a session-by-session history.
 
+## Filename experiment awaiting verification
+
+After the passing run below, the writer was changed to name files
+`LXDyyyymmdd-hhmmss.bin`, using the first saved sample's delay-corrected UTC
+second. The five-minute bench now uses synthetic 1970-01-01 01:00:00 UTC.
+The PC checks expected names; the board reports each rename's duration.
+Desktop checks, build/upload and hardware verification of this change are pending.
+Buffer sizes, write alignment and timing limits are unchanged. The earlier PASS
+does not establish throughput with renaming enabled.
+
 ## Latest result: five-minute timed recording passed
 
 Run `1620634281`, capture `20261110-044459`, completed acquisition, file rotation,

@@ -10,7 +10,7 @@
 /**
  * Disk-task-only file operations. Preparation mounts without formatting and
  * creates a new numbered directory under TIMED. Every slot is preallocated
- * before acquisition; circular recording reuses only those paths. Unrelated
+ * before acquisition; circular recording reuses those allocations under new names. Unrelated
  * files and older sessions are never overwritten or deleted.
  *
  * No format logic is embedded here: headers, tBlocks, samples and end markers
@@ -25,7 +25,7 @@
 class TimedFatStorage : public TimedSlotStorage
 {
 public:
-    enum class Operation { open, copy, write, sync, close, count };
+    enum class Operation { rename, open, copy, write, sync, close, count };
     /** Elapsed microseconds for one operation, owned only by the disk task. */
     struct OperationTiming
     {
@@ -49,7 +49,7 @@ public:
     TimedFatStorage& operator=(const TimedFatStorage&) = delete;
     bool initializeMemory(uint8_t* (*allocate)(uint32_t), void (*release)(uint8_t*));
     bool prepare(RecordingDisk& recordingDisk, uint32_t fileCount, uint64_t capacity);
-    bool openSlot(uint32_t iSlot) override;
+    bool openSlot(uint32_t iSlot, uint64_t utcSample) override;
     size_t write(const uint8_t* data, size_t bytes) override;
     bool flush() override;
     bool closeSlot() override;
@@ -57,8 +57,10 @@ public:
     uint32_t getPendingBytes() const;
     bool readback(bool (*check)(void*, uint32_t, uint64_t, const uint8_t*, uint32_t), void* context);
     const char* getDirectory() const;
+    const char* getPath(uint32_t iSlot) const;
     const char* getError() const;
 private:
+    bool renameSlot(uint32_t iSlot, uint64_t utcSample);
     bool writePending();
     void recordTiming(uint32_t iSlot, Operation operation, uint64_t began,
         uint64_t offset, uint32_t requested, uint32_t actual, uint32_t result);

@@ -41,7 +41,7 @@ private:
     void complete();
     void recordBacklog(bool final = false);
     static bool check(void* context, uint32_t iSlot, uint64_t offset, const uint8_t* bytes, uint32_t count);
-    bool beginFile(uint32_t iSlot) override;
+    bool beginFile(uint32_t iSlot, uint64_t utcSample) override;
     bool submit(const uint8_t* bytes, size_t count) override;
     bool endFile() override;
     P4RecordingDisk _p4RecordingDisk;

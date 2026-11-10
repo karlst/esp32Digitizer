@@ -6,7 +6,8 @@
 /**
  * Operate only on files selected for this recording session. All methods may
  * block on storage and therefore belong exclusively to the disk task. openSlot
- * positions an allocated file at byte zero; closeSlot syncs and closes it. The
+ * names the prepared slot using utcSample (first saved sample's UTC second),
+ * then positions it at byte zero; closeSlot syncs and closes it. The
  * inherited write/flush methods never retain the supplied buffer after return.
  * An adapter may copy a tail into its own buffer; closeSlot must flush it and
  * report failure. A full write return count alone does not confirm durable data.
@@ -14,7 +15,7 @@
 class TimedSlotStorage : public ByteSink
 {
 public:
-    virtual bool openSlot(uint32_t iSlot) = 0;
+    virtual bool openSlot(uint32_t iSlot, uint64_t utcSample) = 0;
     virtual bool closeSlot() = 0;
     /* **
      * getFailed - Report errors that may accompany a full accepted byte count.

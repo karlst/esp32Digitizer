@@ -304,12 +304,12 @@ void TimedRecorder::format()
 
 /* **
  * beginFile - TimedRecordingStream calls on the formatting task with a zero-based
- * slot index. Queue its opening and count accepted file requests. True means
+ * slot index and first saved sample UTC second. Queue its rename/opening. True means
  * queued, not opened on SD; a failed request remains a recording fault.
  */
-bool TimedRecorder::beginFile(uint32_t iSlot)
+bool TimedRecorder::beginFile(uint32_t iSlot, uint64_t utcSample)
 {
-    const bool retVal = _timedBufferedSink.beginFile(iSlot);
+    const bool retVal = _timedBufferedSink.beginFile(iSlot, utcSample);
     _files += retVal;
     return retVal;
 }
@@ -378,10 +378,14 @@ void TimedRecorder::complete()
     // All writing has stopped. Report each file separately so slow ordinary
     // writes can be distinguished from closing/opening at a rotation. These
     // elapsed durations include preemption, so they do not prove card latency.
-    const char* operationNames[] = {"open", "copy", "write", "sync", "close"};
+    const char* operationNames[] = {"rename", "open", "copy", "write", "sync", "close"};
     const auto& timings = _timedFatStorage.getTimings();
     for (size_t iSlot = 0; iSlot < timings.size(); ++iSlot)
     {
+        // Report only after disk work stops; names follow slot reuse and are
+        // the same paths used for full readback below.
+        printf("TIMED FILE slot=%lu path=%s\n", (unsigned long)iSlot, _timedFatStorage.getPath(iSlot));
+        vTaskDelay(1);
         for (unsigned iOperation = 0; iOperation < unsigned(TimedFatStorage::Operation::count); ++iOperation)
         {
             const auto& timing = timings[iSlot]._operations[iOperation];

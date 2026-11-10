@@ -1,6 +1,6 @@
 # Copyright (C) 2026 Karl Stock. SPDX-License-Identifier: GPL-3.0-or-later
 """Check that timed-format host validation rejects mismatched completion counts."""
-from timedCaptureReport import parseSaved, validateSaved
+from timedCaptureReport import parseSaved, validateSaved, validateNames
 
 
 def checkRun(captureSeconds, intervalCount):
@@ -51,10 +51,39 @@ def checkRun(captureSeconds, intervalCount):
             raise AssertionError('Accepted a one-minute run for a five-minute request')
 
 
+def checkNames():
+    """Reject wrong dates and failed/missing renames, including second-boundary cases."""
+    blocks = []
+    for iBlock in range(299):
+        pps = iBlock * 1_000_000_000
+        blocks.append({'tcPpsFirst': pps, 'tcPpsLast': pps + 1_000_000_000,
+                       'tcFsFirst': pps + (2552 if iBlock == 0 else 2553)})
+    saved = {'files': 5, 'directory': '0:/TIMED/S000001'}
+    names = ['005959', '010100', '010200', '010300', '010400']
+    lines = []
+    for iSlot, name in enumerate(names):
+        lines.append(f'TIMED FILE slot={iSlot} path=0:/TIMED/S000001/LXD19700101-{name}.bin')
+        lines.append(f'TIMED IO slot={iSlot} operation=rename calls=1 totalUs=25 maxUs=25 '
+                     'atUs=0 offset=0 requested=0 actual=0 result=0 failures=0')
+    completed = {'intervals': blocks}
+    assert len(validateNames(lines, saved, completed)) == 5
+    variants = [lines[:-1], lines + [lines[0]],
+                [line.replace('005959', '010000') for line in lines],
+                [line.replace('failures=0', 'failures=1') for line in lines]]
+    for bad in variants:
+        try:
+            validateNames(bad, saved, completed)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError('Accepted incorrect filename or rename report')
+
+
 def main():
     """Cover nominal, partial and exactly full final files without operating boards."""
     for captureSeconds, intervalCount in ((60, 59), (300, 298), (300, 299), (300, 300)):
         checkRun(captureSeconds, intervalCount)
+    checkNames()
     print('PASS: timed SD completion checks duration, rotation, bytes and sample counts')
 
 

@@ -101,6 +101,8 @@ static void checkStorage()
         const auto& operations = timings[iSlot]._operations;
         assert(operations[unsigned(TimedFatStorage::Operation::open)]._calls == (iSlot == 0 ? 3 : 2));
         assert(operations[unsigned(TimedFatStorage::Operation::close)]._calls == (iSlot == 0 ? 3 : 2));
+        assert(operations[unsigned(TimedFatStorage::Operation::rename)]._calls == (iSlot == 0 ? 3 : 2));
+        assert(operations[unsigned(TimedFatStorage::Operation::rename)]._failures == 0);
         const auto& writes = operations[unsigned(TimedFatStorage::Operation::write)];
         assert(writes._calls > 0 && writes._totalUs == writes._calls && writes._maxUs == 1);
         assert(writes._requested == writes._actual && writes._failures == 0);
@@ -108,9 +110,11 @@ static void checkStorage()
     assert(MemoryRecordingDisk::files().at("0:/important.txt") == std::vector<uint8_t>({1, 2, 3, 4}));
     for (uint32_t iSlot = 0; iSlot < 2; ++iSlot)
     {
-        char name[20];
-        std::snprintf(name, sizeof(name), "/F%04lu.DG", (unsigned long)iSlot);
-        const auto& file = MemoryRecordingDisk::files().at(std::string(timedFatStorage.getDirectory()) + name);
+        // Delay correction moves these samples just before their opening PPS.
+        // The last retained generations are intervals 4 and 3, not slot IDs.
+        const char* name = iSlot == 0 ? "/LXD19700101-001643.bin" : "/LXD19700101-001642.bin";
+        assert(std::string(timedFatStorage.getPath(iSlot)) == std::string(timedFatStorage.getDirectory()) + name);
+        const auto& file = MemoryRecordingDisk::files().at(timedFatStorage.getPath(iSlot));
         assert(file.size() == 4096);
         assert(std::memcmp(file.data(), memoryTimedSink._files[iSlot].data(), memoryTimedSink._files[iSlot].size()) == 0);
     }
@@ -124,7 +128,7 @@ static void checkStorage()
     {
         assert(MemoryRecordingDisk::files().at(entry.first) == entry.second);
     }
-    assert(timedFatStorage.openSlot(0));
+    assert(timedFatStorage.openSlot(0, 3600));
     const uint8_t bytes[20] = {};
     MemoryRecordingDisk::failWrite(true);
     assert(timedFatStorage.write(bytes, sizeof(bytes)) == sizeof(bytes));
@@ -137,10 +141,10 @@ static void checkStorage()
     assert(failedWrite._actual < failedWrite._requested);
     assert(timedFatStorage.getPendingBytes() == sizeof(bytes) - failedWrite._actual);
     assert(!timedFatStorage.closeSlot());
-    assert(!timedFatStorage.openSlot(0));
+    assert(!timedFatStorage.openSlot(0, 3600));
     assert(!timedFatStorage.readback(checkReadback, &memoryTimedSink));
     assert(timedFatStorage.prepare(memoryRecordingDisk, 1, 4096));
-    assert(timedFatStorage.openSlot(0));
+    assert(timedFatStorage.openSlot(0, 3600));
     MemoryRecordingDisk::failSync();
     assert(!timedFatStorage.closeSlot());
     assert(timedFatStorage.getTimings()[0]._operations[unsigned(TimedFatStorage::Operation::sync)]._failures == 1);
@@ -168,7 +172,7 @@ static void checkAlignment()
         {
             bytes[iByte] = uint8_t(iByte + iSlot * 17);
         }
-        assert(timedFatStorage.openSlot(iSlot));
+        assert(timedFatStorage.openSlot(iSlot, 3600 + iSlot));
         assert(timedFatStorage.write(bytes.data(), 123) == 123);
         assert(timedFatStorage.write(bytes.data() + 123, 17001) == 17001);
         assert(timedFatStorage.write(bytes.data() + 17124, 32883) == 32883);
@@ -188,7 +192,7 @@ static void checkAlignment()
     // A full-block failure during write must be latched even when the return
     // count says all caller bytes were copied. Close must not retry that block.
     assert(timedFatStorage.prepare(memoryRecordingDisk, 1, 65536));
-    assert(timedFatStorage.openSlot(0));
+    assert(timedFatStorage.openSlot(0, 3600));
     MemoryRecordingDisk::clearWrites();
     MemoryRecordingDisk::failWrite(true);
     assert(timedFatStorage.write(expected._files[0].data(), 16384) == 16384);
@@ -199,12 +203,53 @@ static void checkAlignment()
 }
 
 /* **
+ * checkRenameFailures - Refuse collisions and disk failures without losing
+ * preallocation, old contents or unrelated destination files. No write follows
+ * a failed rename; the failure stays latched until a new preparation.
+ */
+static void checkRenameFailures()
+{
+    MemoryRecordingDisk disk;
+    TimedFatStorage storage;
+    storage.setTimingClock(clockUs);
+    assert(storage.initializeMemory(allocateBytes, releaseBytes));
+    assert(storage.prepare(disk, 1, 4096));
+    const std::string original = storage.getPath(0);
+    const std::string collision = std::string(storage.getDirectory()) + "/LXD19700101-010000.bin";
+    MemoryRecordingDisk::files()[collision] = {9, 8, 7};
+    const auto before = MemoryRecordingDisk::files();
+    assert(!storage.openSlot(0, 3600));
+    assert(storage.getFailed() && std::string(storage.getPath(0)) == original);
+    assert(MemoryRecordingDisk::files() == before);
+    assert(storage.getTimings()[0]._operations[unsigned(TimedFatStorage::Operation::rename)]._failures == 1);
+
+    assert(storage.prepare(disk, 1, 4096));
+    const auto beforeFailure = MemoryRecordingDisk::files();
+    MemoryRecordingDisk::failRename();
+    assert(!storage.openSlot(0, 3600));
+    assert(storage.getFailed() && MemoryRecordingDisk::files() == beforeFailure);
+    assert(!storage.openSlot(0, 3601));
+
+    // UTC calendar formatting must handle midnight and leap day on both PCs
+    // and firmware. Renaming the same slot again must retain its full capacity.
+    assert(storage.prepare(disk, 1, 4096));
+    assert(storage.openSlot(0, 951782400));
+    assert(std::string(storage.getPath(0)).find("LXD20000229-000000.bin") != std::string::npos);
+    assert(storage.closeSlot());
+    assert(storage.openSlot(0, 951868800));
+    assert(std::string(storage.getPath(0)).find("LXD20000301-000000.bin") != std::string::npos);
+    assert(MemoryRecordingDisk::files().at(storage.getPath(0)).size() == 4096);
+    assert(storage.closeSlot());
+}
+
+/* **
  * main - Exercise actual FatFs adapter control flow without a physical card.
  */
 int main()
 {
     checkStorage();
     checkAlignment();
+    checkRenameFailures();
     std::puts("PASS: timed files through real ring/FatFs adapter, preservation and failure checks");
     return 0;
 }

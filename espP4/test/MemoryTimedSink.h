@@ -14,12 +14,13 @@ class MemoryTimedSink : public TimedFileSink
 public:
     std::vector<std::vector<uint8_t>> _files;
     std::vector<uint32_t> _openedSlots;
+    std::vector<uint64_t> _sampleSeconds;
     uint32_t _closed = 0, _calls = 0, _rejectCall = 0;
 
     /* **
      * beginFile - Simulate selecting a prepared slot; record its reuse history.
      */
-    bool beginFile(uint32_t iSlot) override
+    bool beginFile(uint32_t iSlot, uint64_t utcSample) override
     {
         const bool retVal = accept() && !_opened;
         if (retVal)
@@ -31,6 +32,7 @@ public:
             _files[iSlot].clear();
             _iSlot = iSlot;
             _openedSlots.push_back(iSlot);
+            _sampleSeconds.push_back(utcSample);
             _opened = true;
         }
         return retVal;

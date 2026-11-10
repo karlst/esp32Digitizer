@@ -29,7 +29,9 @@ FsyncTimedTest::FsyncTimedTest(FsyncAssociationTest& timing, FsyncSdTest& previo
 
 /* **
  * command - Control task accepts t while idle before another destination has
- * been chosen. Files use synthetic 2000-01-01 UTC for the first retained PPS.
+ * been chosen. Files use synthetic 1970-01-01 01:00:00 UTC for the first retained
+ * PPS. The hour permits delay correction to cross into the preceding second
+ * without requiring dates before the Unix epoch.
  * This deliberately tests serialization without claiming GPS synchronization.
  * Selecting this mode raises the calling Core 0 control task to priority 5,
  * above the disk and formatting tasks. Reset restores the default priority.
@@ -61,7 +63,7 @@ void FsyncTimedTest::command(RecordingApplication& application, char key)
             // Extend the application's separate reception watchdog as well as
             // the diagnostic target. Disk preparation happens before this timer.
             _timing.command(application, 'l');
-            printf("TIMED MODE version=2 seconds=300 pairsPerFile=60 files=5 syntheticUtc=1\n");
+            printf("TIMED MODE version=3 seconds=300 pairsPerFile=60 files=5 syntheticUtc=1\n");
         }
         else
         {
@@ -102,7 +104,7 @@ bool FsyncTimedTest::prepare(uint32_t run, const Ads127Config& config)
         settings._pairsPerFile = 60;
         settings._fileCount = 5;
         settings._overwrite = false;
-        retVal = config.matches(ads127DefaultConfig) && _recorder.prepare(run, 946684800, settings);
+        retVal = config.matches(ads127DefaultConfig) && _recorder.prepare(run, 3600, settings);
         _preparing = retVal;
         _failed = !retVal;
     }

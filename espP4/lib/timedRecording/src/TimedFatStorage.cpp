@@ -17,6 +17,7 @@
 #include <cstdio>
 #include <cstring>
 #include <limits>
+#include <ctime>
 
 /* **
  * setTimingClock - Before preparation, supply an optional monotonic microsecond
@@ -175,13 +176,60 @@ bool TimedFatStorage::allocateSlots(uint32_t fileCount)
 }
 
 /* **
- * openSlot - Open only a preallocated session path and rewind to byte zero.
+ * renameSlot - Disk task names a closed preallocated file for its first saved
+ * sample's whole UTC second. Rename preserves its allocation and byte offsets.
+ * Refuse name collisions; never delete a destination to make the rename work.
+ * Update the slot path only after success so reuse and readback find that file.
+ * Measure f_rename separately: its directory writes may wait on the card.
+ */
+bool TimedFatStorage::renameSlot(uint32_t iSlot, uint64_t utcSample)
+{
+    // Restrict the name to four-digit years and a representable library time.
+    bool retVal = utcSample <= 253402300799ULL &&
+        utcSample <= uint64_t(std::numeric_limits<time_t>::max());
+    tm utc = {};
+    if (retVal)
+    {
+        const time_t seconds = static_cast<time_t>(utcSample);
+#ifdef _WIN32
+        retVal = gmtime_s(&utc, &seconds) == 0;
+#else
+        retVal = gmtime_r(&seconds, &utc) != nullptr;
+#endif
+    }
+    char name[32] = {};
+    retVal = retVal && std::strftime(name, sizeof(name), "/LXD%Y%m%d-%H%M%S.bin", &utc) == 23;
+    _error = "naming timed slot";
+    if (retVal)
+    {
+        const std::string path = _directory + name;
+        if (path != _paths[iSlot])
+        {
+            _error = "renaming timed slot";
+            const uint64_t began = _clockUs ? _clockUs() : 0;
+            const FRESULT result = f_rename(_paths[iSlot].c_str(), path.c_str());
+            recordTiming(iSlot, Operation::rename, began, 0, 0, 0, result);
+            retVal = result == FR_OK;
+            if (retVal)
+            {
+                _paths[iSlot] = path;
+            }
+        }
+    }
+    _failed = _failed || !retVal;
+    return retVal;
+}
+
+/* **
+ * openSlot - Rename a closed preallocated slot, open it and rewind to byte zero.
+ * utcSample is the first saved analog sample's UTC second, calculated by the
+ * formatter and copied through the file-boundary queue. No local timezone is used.
  * Reuse does not resize or reallocate the file. A failed seek still closes the
  * FatFs handle so a later error report does not leak an open file.
  */
-bool TimedFatStorage::openSlot(uint32_t iSlot)
+bool TimedFatStorage::openSlot(uint32_t iSlot, uint64_t utcSample)
 {
-    const uint64_t began = _clockUs ? _clockUs() : 0;
+    uint64_t began = _clockUs ? _clockUs() : 0;
     if (_timingOrigin == 0)
     {
         _timingOrigin = began;
@@ -190,7 +238,12 @@ bool TimedFatStorage::openSlot(uint32_t iSlot)
     FRESULT result = FR_INVALID_PARAMETER;
     if (!_opened && !_failed && _scratchUsed == 0 && iSlot < _paths.size())
     {
-        result = f_open(&_file, _paths[iSlot].c_str(), FA_WRITE);
+        if (renameSlot(iSlot, utcSample))
+        {
+            _error = "opening timed slot";
+            began = _clockUs ? _clockUs() : 0;
+            result = f_open(&_file, _paths[iSlot].c_str(), FA_WRITE);
+        }
     }
     bool retVal = result == FR_OK;
     if (retVal)
@@ -211,6 +264,15 @@ bool TimedFatStorage::openSlot(uint32_t iSlot)
     }
     recordTiming(iSlot, Operation::open, began, 0, 0, 0, result);
     return retVal;
+}
+
+/* **
+ * getPath - After disk work stops, obtain the current name of a retained slot
+ * for reporting or verification. Invalid slot indices return an empty string.
+ */
+const char* TimedFatStorage::getPath(uint32_t iSlot) const
+{
+    return iSlot < _paths.size() ? _paths[iSlot].c_str() : "";
 }
 
 /* **

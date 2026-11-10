@@ -3,7 +3,7 @@
 The file is memory-mapped, not copied into a large Python list. Sample values
 are signed 24-bit integers. sampleTime returns integer UTC seconds plus an exact
 fractional second: it never rounds a large Unix timestamp through a float.
-The five-minute bench supplies 946684800 (2000-01-01 UTC) as a synthetic origin.
+The filename test supplies 3600 (1970-01-01 01:00:00 UTC) as a synthetic origin; earlier five-minute files used 946684800 (2000-01-01 UTC).
 There is no on-disk GPS-validity flag: any header origin, including nonzero UTC,
 must be traced to its source before treating calculated sample times as GPS time.
 

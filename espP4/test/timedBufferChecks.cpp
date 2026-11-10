@@ -47,7 +47,7 @@ static void checkBoundaries()
     {
         const std::vector<uint8_t> expected(333 + iFile % 7, uint8_t(iFile));
         const uint32_t operations = memoryTimedStorage._operations;
-        assert(timedBufferedSink.beginFile(iFile % 2));
+        assert(timedBufferedSink.beginFile(iFile % 2, 3600 + iFile));
         assert(timedBufferedSink.submit(expected.data(), 100));
         assert(timedBufferedSink.submit(expected.data() + 100, expected.size() - 100));
         assert(timedBufferedSink.endFile());
@@ -62,6 +62,7 @@ static void checkBoundaries()
                 assert(timedBufferedSink.pump(true));
             }
             assert(memoryTimedStorage._files[iFile % 2] == expected);
+            assert(memoryTimedStorage._utcSample == 3600 + iFile);
         }
     }
     assert(timedBufferedSink.finish());
@@ -85,7 +86,7 @@ static void checkPublishedEnd()
     assert(timedBufferedSink.initializeMemory(allocateBytes, releaseBytes));
     assert(timedBufferedSink.start(1, clockUs));
     std::vector<uint8_t> data(256, 7);
-    assert(timedBufferedSink.beginFile(0));
+    assert(timedBufferedSink.beginFile(0, 3600));
     assert(timedBufferedSink.submit(data.data(), data.size()));
     assert(timedBufferedSink.pump());
     assert(memoryTimedStorage._closes == 0);
@@ -111,7 +112,7 @@ static void checkFailures()
         assert(timedBufferedSink.initializeMemory(allocateBytes, releaseBytes));
         assert(timedBufferedSink.start(1, clockUs));
         const uint8_t data[256] = {};
-        assert(timedBufferedSink.beginFile(0));
+        assert(timedBufferedSink.beginFile(0, 3600));
         assert(timedBufferedSink.submit(data, sizeof(data)));
         if (failure != 3)
         {
@@ -128,11 +129,11 @@ static void checkFailures()
     const uint8_t byte = 0;
     for (unsigned iFile = 0; iFile < 32; ++iFile)
     {
-        assert(timedBufferedSink.beginFile(0));
+        assert(timedBufferedSink.beginFile(0, 3600));
         assert(timedBufferedSink.submit(&byte, 1));
         assert(timedBufferedSink.endFile());
     }
-    assert(!timedBufferedSink.beginFile(0));
+    assert(!timedBufferedSink.beginFile(0, 3600));
     assert(timedBufferedSink.getFailed() && memoryTimedStorage._operations == 0);
     assert(!timedBufferedSink.finish());
 }

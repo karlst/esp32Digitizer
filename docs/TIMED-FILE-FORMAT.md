@@ -172,6 +172,24 @@ a CRC accumulated during serialization with a full readback CRC. A later reader
 cannot establish payload integrity or GPS validity from the header alone. The
 zero marker denotes normal completion, not guaranteed power-loss recovery.
 
+## Filename experiment awaiting verification
+
+Prepared slots are renamed on the disk task immediately before opening them.
+Final names use `LXDyyyymmdd-hhmmss.bin`, with the first saved sample's UTC time
+floored to whole seconds after the delay correction. The header still describes
+the opening PPS; its binary layout is unchanged. Renaming retains preallocation,
+and slot tracking/readback follow the new path. Collisions and rename failures
+fault rather than deleting an existing destination.
+
+Bench protocol version 3 uses synthetic UTC 1970-01-01 01:00:00 (epoch second
+3600), allowing the first sample correction to cross into the preceding second.
+`TIMED FILE` reports final paths; `TIMED IO operation=rename` reports duration and
+failure counts. The PC independently derives the expected names from captured
+boundary ticks and requires a successful rename for every file before PASS.
+This experiment still requires desktop and hardware verification; the passing
+five-minute result above predates renaming. Buffer capacities, alignment,
+acquisition duration and full CRC readback are unchanged.
+
 ## Running and checking the test
 
 After building/uploading the FSYNC diagnostic and matching Feather bench
