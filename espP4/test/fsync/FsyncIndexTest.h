@@ -31,7 +31,11 @@ public:
 
 private:
     PpsSampleTest* _ppsSampleTest = nullptr;
-    // First eight disagreements preserve evidence without printing during capture.
+    /**
+     * One disagreement retained in RAM for report after source shutdown.
+     * getFailed becomes true on the first mismatch; eight entries are storage
+     * capacity for diagnostic evidence, not a retry or allowed-error limit.
+     */
     struct Example
     {
         uint32_t _observation;
@@ -46,6 +50,8 @@ private:
     uint32_t _checked = 0, _matched = 0, _mismatched = 0;
     uint32_t _movingReference = 0, _slowReference = 0, _staleReference = 0;
     uint32_t _unsafeSteps = 0, _maxGapTicks = 0;
+    // _calculatedPulse/_previousTicks are the working numbered reference.
+    // _firstPulse/_firstTicks preserve startup evidence; they are not refreshed.
     uint32_t _firstPulse = 0, _calculatedPulse = 0, _previousTicks = 0;
     uint32_t _firstTicks = 0;
     // First 64 observations can map into the retained 65536-word sample array.

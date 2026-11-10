@@ -6,7 +6,9 @@
  * Reading path: main.cpp supplies this service to RecordingApplication.
  * initialize reserves resources. prepare and started check stopped-ADC startup.
  * Once Feather starts the ADC, Core 1 calls submit with decoded words while
- * Core 0 calls poll/takeSnapshot to save occasional pulse/time pairs (anchors).
+ * Core 0 calls poll to run the selected timing diagnostic. The original short
+ * association mode uses takeSnapshot; the timed-file path uses FsyncIndexTest
+ * for millisecond numbering and PpsSampleTest for once-per-PPS boundaries.
  * stopping freezes hardware; finish checks and prints only after decoding has
  * drained, meaning all receiver data accepted for decoding has been processed.
  * In the delay build, PulseDelayCapture adds timestamps of the generator input.
@@ -58,8 +60,9 @@ void FsyncAssociationTest::initialize(const FrameDecoder& frameDecoder, PulseDel
     ESP_ERROR_CHECK(_words != nullptr ? ESP_OK : ESP_ERR_NO_MEM);
 
     // MCPWM is a timer peripheral with input capture. Capture copies a running
-    // counter into a register on a rising edge (LOW to HIGH). It needs no ISR,
-    // or interrupt service routine, for this test. 160 MHz means 6.25 ns/tick.
+    // counter into a register on a rising edge (LOW to HIGH). FSYNC needs no
+    // per-edge ISR (Interrupt Service Routine); the separate PPS channel does
+    // use one. 160 MHz gives a nominal 6.25 ns/tick, not an absolute error bound.
     mcpwm_capture_timer_config_t timerConfig = {};
     timerConfig.group_id = 0;
     timerConfig.clk_src = MCPWM_CAPTURE_CLK_SRC_PLL160M;
@@ -84,6 +87,7 @@ void FsyncAssociationTest::initialize(const FrameDecoder& frameDecoder, PulseDel
     }
     else
     {
+
         // The ordinary FSYNC build reserves GPIO6 for optional PPS capture.
         // It stays disabled unless the PC selects PPS mode while idle.
         _ppsSampleTest.initialize(_timer);
@@ -123,6 +127,7 @@ void FsyncAssociationTest::initialize(const FrameDecoder& frameDecoder, PulseDel
  */
 bool FsyncAssociationTest::prepare(uint32_t run, const Ads127Config& config)
 {
+
     // The application labels the final report with run; this method only arms
     // the next acquisition. Clear all prior-run evidence before testing startup.
     (void)run;
@@ -231,12 +236,14 @@ void FsyncAssociationTest::started(TaskHandle_t control, TaskHandle_t decoder)
  * pointer arithmetic advances in uint32_t words, while memcpy takes bytes. Copy
  * only the remaining capacity; still count later words while Feather stops.
  * No pointer is retained and no disk access occurs. Core 0 reads the words only
- * after drain. The atomic count lets it request stop after about 32 ms of data.
+ * after drain. The atomic submitted count lets Core 0 request stop at the
+ * selected mode's target, even after this small retained-word array is full.
  * True means the diagnostic accepted the submission, not that every word was
  * retained: after capacity is reached, counting continues but storage stops.
  */
 bool FsyncAssociationTest::submit(const uint32_t* words, size_t count)
 {
+
     // Time the diagnostic copy separately from the ordinary SD submission.
     const int64_t began = esp_timer_get_time();
     const size_t copied = std::min(count, size_t(_wordCapacity - _storedWords));
@@ -284,7 +291,7 @@ void FsyncAssociationTest::paused(int64_t elapsedUs)
 
 /* **
  * getFull - Core 0 requests RAMFULL/STOP at 32768 words normally, or
- * ten seconds in read/index mode or sixty seconds in PPS mode. Only the first
+ * ten seconds in read/index mode or the selected PPS duration. Only the first
  * 65536 words are retained;
  * all later words still pass through the real decoder and are counted.
  * RAMFULL asks Feather to stop the ADC; it is not confirmation of stopped
@@ -292,18 +299,19 @@ void FsyncAssociationTest::paused(int64_t elapsedUs)
  */
 bool FsyncAssociationTest::getFull() const
 {
+
     // Read mode keeps decoding for ten seconds; retained RAM remains bounded.
     return _submitted.load() >= getTargetWords();
 }
 
 /* **
- * getTargetWords - Core 0 chooses the finite run length. PPS mode covers sixty
- * seconds and two capture-timer wraps; read/index modes retain ten seconds.
+ * getTargetWords - Core 0 chooses the finite run length. PPS mode covers 60 or
+ * 300 seconds at the nominal sample rate; read/index modes retain ten seconds.
  * Sample storage stays bounded at 65536 words regardless of the run length.
  */
 uint32_t FsyncAssociationTest::getTargetWords() const
 {
-    const uint32_t retVal = _ppsTest ? 61440000U :
+    const uint32_t retVal = _ppsTest ? _ppsSeconds * 1024000U :
         (_readTest || _indexTest) ? 10240000U : _targetWords;
     return retVal;
 }
@@ -378,14 +386,18 @@ bool FsyncAssociationTest::takeSnapshot()
 }
 
 /* **
- * poll - Core 0 tries a bounded number of reads once per application poll.
+ * poll - Core 0 dispatches one observation to the selected test per control-loop
+ * pass. Index/PPS/timed-file modes call FsyncIndexTest::measure once; they do not
+ * enter the 32-attempt takeSnapshot loop below. That loop belongs only to the
+ * original short association/delay modes. FsyncBoundaryCapture has another,
+ * separate 32-read limit for the once-per-PPS search for consecutive edges.
  * Read mode instead gathers comparison statistics for ten seconds, without
  * saving anchors. Index mode instead predicts pulse numbers from timestamps
- * over ten seconds, or sixty with PPS capture. Association and delay modes
+ * over ten seconds, or the selected duration with PPS capture. Association and delay modes
  * remain unchanged.
  * Rejected reads are normal when a pulse arrives during the read. No printing
  * occurs while samples arrive. Watchdogs allow five seconds for the short test,
- * fourteen for read/index, and sixty-four for PPS. These bounds detect a missing
+ * fourteen for read/index, and four seconds beyond the PPS target. These bounds detect a missing
  * source/stop handshake; they are not the requested sample-capture durations.
  */
 void FsyncAssociationTest::poll()
@@ -410,7 +422,7 @@ void FsyncAssociationTest::poll()
             }
         }
     }
-    if (_running && esp_timer_get_time() - _armedAt > (_ppsTest ? 64000000 : (_readTest || _indexTest) ? 14000000 : 5000000))
+    if (_running && esp_timer_get_time() - _armedAt > (_ppsTest ? int64_t(_ppsSeconds + 4) * 1000000 : (_readTest || _indexTest) ? 14000000 : 5000000))
     {
         _failed = true;
     }
@@ -468,10 +480,12 @@ void FsyncAssociationTest::stopping()
 void FsyncAssociationTest::finish(uint32_t run, uint32_t rate, bool clean, uint32_t samples)
 {
     stopHardware();
+
     // Decoder shutdown has completed, so these Core 1 measurements are frozen.
     printf("FSYNC CPU rawBytes=%llu decodeTotalUs=%llu diagnosticCopyUs=%llu\n",
         (unsigned long long)_rawTotalBytes, (unsigned long long)_decodeTotalUs,
         (unsigned long long)_ramCopyUs);
+
     // Decode duration includes packing, ring copying and checksum work in SD mode.
     printf("FSYNC WORK blocks=%lu pauses=%lu maxWaitUs=%lld maxDecodeUs=%lld maxPauseUs=%lld waitAfterPauseUs=%lld\n",
         (unsigned long)_decodedBlocks, (unsigned long)_pauseCount,
@@ -544,6 +558,7 @@ void FsyncAssociationTest::finish(uint32_t run, uint32_t rate, bool clean, uint3
     }
     if (_indexTest)
     {
+
         // The source is stopped, timing hardware is frozen, and decoder drain
         // completed before finish. Read the settled final FSYNC timestamp for
         // an endpoint comparison that does not depend on racing two registers.
@@ -552,7 +567,7 @@ void FsyncAssociationTest::finish(uint32_t run, uint32_t rate, bool clean, uint3
             finalTicks, _words, _storedWords, stats);
         if (_ppsTest)
         {
-            _ppsSampleTest.report(run, numbered, samples);
+            _ppsSampleTest.report(run, numbered, samples, _ppsSeconds);
             _failed = _failed || !numbered;
         }
     }
@@ -572,7 +587,7 @@ bool FsyncAssociationTest::getBoundary(unsigned iBoundary, TimedBoundary& bounda
  * command - h identifies the existing build. r selects the ten-second read
  * experiment; n selects timestamp-derived numbering. Both are idle-only and
  * unavailable with the separate pulse-delay input. p adds rising-edge PPS
- * capture on GPIO6 to the numbered-sample experiment.
+ * capture on GPIO6 for 60 seconds; l selects 300 seconds for the timed SD adapter.
  * Selection persists until reset; the PC runner waits for this acknowledgement.
  */
 void FsyncAssociationTest::command(RecordingApplication& application, char key)
@@ -584,12 +599,13 @@ void FsyncAssociationTest::command(RecordingApplication& application, char key)
         _indexTest = false;
         printf("READ MODE version=3 seconds=10\n");
     }
-    if (key == 'p' && application.getIdle() && _pulseDelayCapture == nullptr)
+    if ((key == 'p' || key == 'l') && application.getIdle() && _pulseDelayCapture == nullptr)
     {
         _ppsTest = true;
         _indexTest = true;
         _readTest = false;
-        printf("PPS MODE version=2 seconds=60 gpio=6\n");
+        _ppsSeconds = key == 'l' ? 300 : 60;
+        printf("PPS MODE version=2 seconds=%lu gpio=6\n", (unsigned long)_ppsSeconds);
     }
     if (key == 'n' && application.getIdle() && _pulseDelayCapture == nullptr)
     {

@@ -6,6 +6,23 @@
  * queues and fills the write ring; work drains that ring to the card. finish
  * requests shutdown; complete verifies the card only after format has stopped.
  * These are separate tasks (scheduled software threads), not interrupt handlers.
+ *
+ * Ownership on the P4:
+ * - Core 1 decoder: packSamples removes status bits; TimedIntervalBuffer::submit
+ *   copies three-byte samples into 6-MiB staging without waiting for disk I/O.
+ * - Core 0 control/timing: addBoundary supplies PPS/FSYNC ticks and sample index.
+ * - Core 0 formatter (priority 3): waits for a complete interval, serializes its
+ *   tBlock and samples, and copies them into the separate 16-MiB byte ring.
+ * - Core 0 disk task (priority 4): drains up to one 128-KiB chunk per work pass.
+ *   TimedFatStorage turns those bytes into file-aligned 16-KiB SD transfers.
+ * The timed test gives control priority 5 so it can preempt storage tasks for
+ * millisecond FSYNC observations. Interrupts and critical sections can still
+ * delay it; priority is not a timing guarantee. Sleeps allow lower-priority tasks to
+ * run; captured timestamps come from hardware, not the scheduling time.
+ *
+ * finish requests completion; TIMED SAVED confirms drain, file close and full
+ * CRC (Cyclic Redundancy Check) readback. This bench adapter reports synthetic
+ * UTC and does not establish GPS lock or an absolute timing-accuracy bound.
  */
 #include "TimedRecorder.h"
 #include "recordingFormat.h"
@@ -15,7 +32,9 @@
 #include <cstdio>
 
 /* **
- * allocateExternal - Allocate staging/write bytes in external PSRAM, not DMA memory.
+ * allocateExternal - Initialization callback reserves bytes in external PSRAM
+ * (the board's additional RAM), for staging or the write ring. Returns null on
+ * allocation failure. The SD driver does not directly transfer from this memory.
  */
 static uint8_t* allocateExternal(uint32_t bytes)
 {
@@ -69,6 +88,10 @@ bool TimedRecorder::initialize()
     bool retVal = _task != nullptr && _formatTask != nullptr;
     if (!retVal && !_staging)
     {
+        // File-operation diagnostics use the same monotonic clock as the writer.
+        // The disk task collects them without console output during acquisition.
+        _timedFatStorage.setTimingClock(timedClock);
+
         // Allocate before any source starts. The last argument pins both tasks
         // to Core 0; priorities 4 and 3 are scheduling ranks, not core numbers.
         // Each task sees Phase::idle until prepare publishes a complete request.
@@ -142,7 +165,10 @@ bool TimedRecorder::submit(const uint32_t* words, size_t count)
 }
 
 /* **
- * addBoundary - Timing task copies metadata; no formatting or disk work here.
+ * addBoundary - Core 0 timing supplies one saved PPS and adjacent FSYNC pair.
+ * TimedIntervalBuffer::addBoundary copies the record into its queue for the
+ * formatter. False latches a boundary/queue fault there; no caller pointer is
+ * retained. No formatting or disk work occurs on this timing-task call.
  */
 bool TimedRecorder::addBoundary(const TimedBoundary& boundary)
 {
@@ -174,9 +200,9 @@ void TimedRecorder::taskEntry(void* context)
  * then publish Phase::running to transfer stream ownership to that task.
  * Preallocate headroom for clock differences; pump one 128-KiB write per cycle.
  * Sleep one scheduler tick after every iteration, matching SdRecorder's passing
- * scheduling pattern. At priority 4 this task otherwise prevents the lower-
- * priority control task from numbering FSYNC for too long when an entire
- * interval becomes ready. taskYIELD alone would not let that lower priority run.
+ * scheduling pattern. Sleeping allows lower-priority work to run; taskYIELD
+ * alone would not do so. The timed bench now raises control to priority 5,
+ * above this writer, but preserves the sleep and bounded write work.
  * A tick is 1 ms in this build; it affects delivery, not hardware timestamps.
  * Final drain waits for the formatter's completion flag; otherwise a late
  * header/sample submission could race file closure or checksum verification.
@@ -198,6 +224,11 @@ void TimedRecorder::work()
                 _timedIntervalBuffer.start(_staging, _stagingSamples, _timedRecordingStream, _config._pairsPerFile);
             if (ready)
             {
+                // Start the disk-task trace after preallocation, before capture.
+                _backlogCount = 0;
+                _backlogStartedUs = uint64_t(esp_timer_get_time());
+                _backlogLastUs = 0;
+                recordBacklog(true);
                 printf("TIMED READY directory=%s utcFirst=%llu syntheticUtc=1\n",
                     _timedFatStorage.getDirectory(), (unsigned long long)_utcFirst);
                 // Storage initialized the stream while formatting was idle.
@@ -219,6 +250,7 @@ void TimedRecorder::work()
             _timedBufferedSink.pump();
             _diskUs += uint64_t(esp_timer_get_time() - began);
             ++_workCycles;
+            recordBacklog();
             if (_formatFinished.load())
             {
                 // This atomic load observes the formatter's final assignments.
@@ -242,7 +274,8 @@ void TimedRecorder::formatEntry(void* context)
 /* **
  * format - After disk preparation, this task alone owns stream calls and staging
  * consumption. Each cycle copies at most 4096 samples, then sleeps one tick so
- * lower-priority control/timing can run. There are no filesystem calls here.
+ * other work can run. The timed bench's priority-5 control task can also preempt
+ * this formatter. There are no filesystem calls here.
  * Thus an SD write waiting for hardware does not stop filling the 16-MiB ring.
  * After both source submitters stop, drain closed intervals, queue the normal
  * end marker only on success, and release-publish the final statistics/state.
@@ -270,7 +303,9 @@ void TimedRecorder::format()
 }
 
 /* **
- * beginFile - Formatting callback records file count after its queued opening.
+ * beginFile - TimedRecordingStream calls on the formatting task with a zero-based
+ * slot index. Queue its opening and count accepted file requests. True means
+ * queued, not opened on SD; a failed request remains a recording fault.
  */
 bool TimedRecorder::beginFile(uint32_t iSlot)
 {
@@ -280,8 +315,11 @@ bool TimedRecorder::beginFile(uint32_t iSlot)
 }
 
 /* **
- * submit - Formatting callback records a checksum of the exact serialized bytes
- * accepted by the write ring, including headers, tBlocks and end markers.
+ * submit - TimedRecordingStream calls on the formatting task with count bytes,
+ * unlike the decoder-facing submit overload whose count is samples. The byte
+ * ring copies them before return, so the caller can reuse its buffer. On true,
+ * update CRC and byte total for the exact accepted header/tBlock/sample/marker
+ * stream. This baseline is later compared with SD readback, not just RAM copies.
  */
 bool TimedRecorder::submit(const uint8_t* bytes, size_t count)
 {
@@ -306,14 +344,19 @@ bool TimedRecorder::endFile()
  * check - Disk task folds all readback bytes in slot order into a second CRC.
  * This adapter never reuses a slot, so slot order is recording order. Offsets
  * are supplied by TimedFatStorage; it reads only bytes written in this session.
+ * After each 256 KiB of readback, sleep one scheduler tick so the idle task can
+ * service its watchdog. This runs after acquisition; it cannot delay samples.
  */
 bool TimedRecorder::check(void* context, uint32_t iSlot, uint64_t offset, const uint8_t* bytes, uint32_t count)
 {
     (void)iSlot;
-    (void)offset;
     auto& recorder = *static_cast<TimedRecorder*>(context);
     recorder._readCrc = esp_rom_crc32_le(recorder._readCrc, bytes, count);
     recorder._readBytes += count;
+    if ((offset + count) / 262144 != offset / 262144)
+    {
+        vTaskDelay(1);
+    }
     return true;
 }
 
@@ -326,9 +369,36 @@ bool TimedRecorder::check(void* context, uint32_t iSlot, uint64_t offset, const 
  */
 void TimedRecorder::complete()
 {
+    // Preserve the backlog before finish drains or abandons queued bytes.
+    recordBacklog(true);
     bool passed = _formatPassed && !getFailed();
     const bool saved = _timedBufferedSink.finish();
     passed = saved && passed;
+
+    // All writing has stopped. Report each file separately so slow ordinary
+    // writes can be distinguished from closing/opening at a rotation. These
+    // elapsed durations include preemption, so they do not prove card latency.
+    const char* operationNames[] = {"open", "copy", "write", "sync", "close"};
+    const auto& timings = _timedFatStorage.getTimings();
+    for (size_t iSlot = 0; iSlot < timings.size(); ++iSlot)
+    {
+        for (unsigned iOperation = 0; iOperation < unsigned(TimedFatStorage::Operation::count); ++iOperation)
+        {
+            const auto& timing = timings[iSlot]._operations[iOperation];
+            if (timing._calls != 0)
+            {
+                printf("TIMED IO slot=%lu operation=%s calls=%llu totalUs=%llu maxUs=%llu atUs=%llu offset=%llu requested=%lu actual=%lu result=%lu failures=%lu\n",
+                    (unsigned long)iSlot, operationNames[iOperation],
+                    (unsigned long long)timing._calls, (unsigned long long)timing._totalUs,
+                    (unsigned long long)timing._maxUs, (unsigned long long)timing._atUs,
+                    (unsigned long long)timing._offset, (unsigned long)timing._requested,
+                    (unsigned long)timing._actual, (unsigned long)timing._result,
+                    (unsigned long)timing._failures);
+                // Reporting is post-acquisition; let lower-priority tasks run.
+                vTaskDelay(1);
+            }
+        }
+    }
     if (passed)
     {
         printf("TIMED VERIFY bytes=%llu\n", (unsigned long long)_bytes);
@@ -336,6 +406,17 @@ void TimedRecorder::complete()
     }
     _failed.store(!passed);
     const auto stats = _timedBufferedSink.getStatistics();
+    for (unsigned iSample = 0; iSample < _backlogCount; ++iSample)
+    {
+        const auto& sample = _backlogSamples[iSample];
+        printf("TIMED BACKLOG elapsedUs=%llu writtenBytes=%llu queuedBytes=%lu peakBytes=%lu overflows=%lu pendingBytes=%lu\n",
+            (unsigned long long)sample._elapsedUs, (unsigned long long)sample._writtenBytes,
+            (unsigned long)sample._queuedBytes, (unsigned long)sample._peakBytes,
+            (unsigned long)sample._overflows, (unsigned long)sample._pendingBytes);
+        // Up to 320 rows: do not monopolize Core 0 while printing the trace.
+        vTaskDelay(1);
+    }
+    printf("TIMED BACKLOG LIMIT: disk-task snapshots after writes; blocked writes delay rows; writtenBytes excludes pending transfer bytes; queuedBytes is ring only; final row precedes drain\n");
     printf("TIMED WORK cycles=%lu formatUs=%llu diskUs=%llu\n",
         (unsigned long)_workCycles, (unsigned long long)_formatUs, (unsigned long long)_diskUs);
     printf("TIMED %s run=%lu directory=%s files=%lu intervals=%llu samples=%llu bytes=%llu crc=%08lx stagePeak=%lu ringPeak=%lu maxWriteUs=%lu errors=%lu unsaved=%lu syntheticUtc=1\n",
@@ -344,5 +425,33 @@ void TimedRecorder::complete()
         (unsigned long long)_timedIntervalBuffer.getSamples(), (unsigned long long)_bytes,
         (unsigned long)_crc, (unsigned long)_timedIntervalBuffer.getPeak(),
         (unsigned long)stats._peak, (unsigned long)stats._maxUs,
-        (unsigned long)stats._errors, (unsigned long)stats._unsavedBytes);
+        (unsigned long)stats._errors, (unsigned long)(stats._unsavedBytes + _timedFatStorage.getPendingBytes()));
+}
+
+/* **
+ * recordBacklog - Disk task samples the existing writer statistics about once
+ * per second. final also takes an immediate snapshot before shutdown drain.
+ * No other task reads the writer-owned byte total. Queue occupancy is the
+ * writer's atomic snapshot of bytes waiting in its ring, not ADC staging.
+ * Differences in writtenBytes divided by differences in elapsedUs give the
+ * observed write rate. A blocked write delays this method too; retain actual
+ * elapsed times rather than inventing measurements for the missing seconds.
+ * Fixed storage covers this five-minute test. Rows are printed only at complete.
+ * writtenBytes means bytes accepted by FatFs after subtracting the adapter's
+ * pending tail. It is not readback verification or a power-loss durability claim.
+ * queuedBytes/peakBytes describe the byte ring only, not interval staging.
+ */
+void TimedRecorder::recordBacklog(bool final)
+{
+    const uint64_t now = uint64_t(esp_timer_get_time());
+    if (_backlogCount < 320 && (final || now - _backlogLastUs >= 1000000))
+    {
+        const auto stats = _timedBufferedSink.getStatistics();
+        // The ring counts bytes copied into the adapter as accepted. Subtract
+        // the adapter's retained tail to report only bytes accepted by FatFs.
+        const uint32_t pending = _timedFatStorage.getPendingBytes();
+        _backlogSamples[_backlogCount++] = {now - _backlogStartedUs, stats._bytes - pending,
+            stats._used, stats._peak, stats._overflows, pending};
+        _backlogLastUs = now;
+    }
 }

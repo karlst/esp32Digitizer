@@ -96,7 +96,7 @@ int main()
     {
         const auto& bytes = sink._files[iFile];
         assert(bytes.size() == 256 + 3 * (48 + 300) + 48);
-        assert(read(bytes, 4, 8) == 946684800 + iFile * 3);
+        assert(read(bytes, 6, 8) == 946684800 + iFile * 3);
         for (unsigned iBlock = 0; iBlock < 3; ++iBlock)
         {
             const unsigned iInterval = iFile * 3 + iBlock;

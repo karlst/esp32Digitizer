@@ -39,6 +39,7 @@ private:
     void work();
     void format();
     void complete();
+    void recordBacklog(bool final = false);
     static bool check(void* context, uint32_t iSlot, uint64_t offset, const uint8_t* bytes, uint32_t count);
     bool beginFile(uint32_t iSlot) override;
     bool submit(const uint8_t* bytes, size_t count) override;
@@ -69,4 +70,20 @@ private:
     // Each task owns its own elapsed total, excluding deliberate sleeps/readback.
     uint64_t _formatUs = 0, _diskUs = 0;
     uint32_t _workCycles = 0;
+    /**
+     * Disk-task snapshots of queue occupancy and accepted bytes. _elapsedUs
+     * measures time since prepared storage, not GPS time. A blocked write delays
+     * snapshots, so gaps between these rows are not necessarily sample loss.
+     * _pendingBytes belongs to the adapter's transfer buffer, outside the ring.
+     */
+    struct BacklogSample
+    {
+        uint64_t _elapsedUs = 0, _writtenBytes = 0;
+        uint32_t _queuedBytes = 0, _peakBytes = 0, _overflows = 0, _pendingBytes = 0;
+    };
+    // Five-minute bench run plus shutdown headroom. No allocation or printing
+    // during capture. Only the disk task records and later reports these rows.
+    BacklogSample _backlogSamples[320];
+    unsigned _backlogCount = 0;
+    uint64_t _backlogStartedUs = 0, _backlogLastUs = 0;
 };

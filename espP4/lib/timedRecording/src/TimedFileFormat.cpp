@@ -17,9 +17,11 @@ static void putInteger(uint8_t* data, uint64_t value, unsigned bytes)
 }
 
 /* **
- * encodeHeader - Validate metadata and write all 256 bytes once at file start.
- * Offsets: DG at 0, version at 2, UTC origin at 4, correction at 12, pair limit
- * at 16, and 236 zero reserved bytes at 20. The header is never rewritten with
+ * encodeHeader - Validate metadata and fill the caller's 256-byte memory buffer.
+ * TimedRecordingStream submits that buffer at file start; this function performs
+ * no disk I/O. False leaves the buffer untouched because validation precedes it.
+ * Offsets: LXDG at 0, version at 4, UTC origin at 6, correction at 14, pair limit
+ * at 18, and 234 zero reserved bytes at 22. The header is never rewritten with
  * completion counters. UTC zero is permitted for synthetic relative-time tests.
  */
 bool TimedFileFormat::encodeHeader(const TimedFileHeader& header, uint8_t* data, size_t capacity)
@@ -29,12 +31,14 @@ bool TimedFileFormat::encodeHeader(const TimedFileHeader& header, uint8_t* data,
     if (retVal)
     {
         std::memset(data, 0, _headerBytes);
-        data[0] = 'D';
-        data[1] = 'G';
-        putInteger(data + 2, _version, 2);
-        putInteger(data + 4, header._utcFirst, 8);
-        putInteger(data + 12, static_cast<uint32_t>(header._delayNs), 4);
-        putInteger(data + 16, header._pairsPerFile, 4);
+        data[0] = 'L';
+        data[1] = 'X';
+        data[2] = 'D';
+        data[3] = 'G';
+        putInteger(data + 4, _version, 2);
+        putInteger(data + 6, header._utcFirst, 8);
+        putInteger(data + 14, static_cast<uint32_t>(header._delayNs), 4);
+        putInteger(data + 18, header._pairsPerFile, 4);
     }
     return retVal;
 }
@@ -57,10 +61,14 @@ bool TimedFileFormat::validBlock(const TimeBlock& timeBlock)
 }
 
 /* **
- * encodeBlock - Write four 64-bit tick counts, sample count, second number and
+ * encodeBlock - Fill a caller-owned 48-byte memory buffer with four 64-bit tick
+ * counts, sample count, second number and
  * ten reserved zero bytes. sCount determines exactly how many sample bytes a
  * reader skips before attempting to read another tBlock; sample contents are
  * never searched for a special marker value.
+ * Offsets 16/24 store the opening/closing PPS (tcPpsCurrent/Next in the client
+ * document). Integer fields remain ticks; no float or sample-time correction
+ * is serialized. False means invalid fields or insufficient output capacity.
  */
 bool TimedFileFormat::encodeBlock(const TimeBlock& timeBlock, uint8_t* data, size_t capacity)
 {

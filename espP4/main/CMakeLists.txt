@@ -68,7 +68,8 @@ if(CONFIG_P4_FSYNC_ASSOCIATION)
     target_sources(${COMPONENT_LIB} PRIVATE "../test/fsync/FsyncAssociationTest.cpp"
         "../test/fsync/FsyncAssociationAnalysis.cpp" "../test/fsync/PulseDelayCapture.cpp"
         "../test/fsync/FsyncReadTest.cpp" "../test/fsync/FsyncIndexTest.cpp" "../test/fsync/PpsSampleTest.cpp" "../test/fsync/FsyncSdTest.cpp"
-        "../test/fsync/FsyncBoundaryMath.cpp" "../test/fsync/FsyncBoundaryCapture.cpp")
+        "../test/fsync/FsyncBoundaryMath.cpp" "../test/fsync/FsyncBoundaryCapture.cpp"
+        "../test/fsync/FsyncPollTrace.cpp")
     target_sources(${COMPONENT_LIB} PRIVATE "../test/fsync/FsyncTimedTest.cpp" "src/TimedRecorder.cpp"
         "../lib/timedRecording/src/TimedFileFormat.cpp" "../lib/timedRecording/src/TimedRecordingStream.cpp"
         "../lib/timedRecording/src/TimedIntervalBuffer.cpp" "../lib/timedRecording/src/TimedBufferedSink.cpp"

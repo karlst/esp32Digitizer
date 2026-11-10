@@ -1,12 +1,27 @@
 /* Copyright (C) 2026 Karl Stock. SPDX-License-Identifier: GPL-3.0-or-later
- * Read reset, measure, report in that order. Core 1 still runs the real decoder.
- * A nominal sample period is 160000000 / 1024000 = 156.25 capture-timer ticks.
- * For example, 160000 ticks between observations rounds to 1024 samples.
- * Updating from every timestamp avoids extrapolating the nominal rate for ten
- * seconds. It does require frequent observations, unlike a once-per-PPS read.
+ * Attach an FSYNC pulse number to a captured timer tick count. FSYNC is the
+ * ADC's frame-start signal: one rising edge (LOW to HIGH) identifies one sample.
+ * PCNT is the hardware pulse counter. MCPWM's capture channel saves the timer
+ * count at an edge; it does not save the pulse number. Their registers update
+ * independently, so reading both once is not enough to establish a matched pair.
+ *
+ * Reading path: reset clears a run; measure establishes the first usable pair
+ * and maintains numbering; getFailed tells the controller to stop on a fault;
+ * report checks the stopped counter and prints evidence after acquisition.
+ * Core 0 calls measure about every millisecond, while Core 1 decodes samples.
+ * Each call reads count/ticks/count/ticks. Before initialization, a usable pair
+ * sets the starting reference. Later, elapsed captured ticks advance a predicted
+ * pulse number; a usable PCNT pair checks that prediction without resetting it.
+ *
+ * A nominal sample period is 160000000 / 1024000 = 156.25 timer ticks.
+ * Frequent updates limit accumulated error from the independent clock rates.
+ * PpsSampleTest receives the numbered references and uses them to number block
+ * boundaries after PPS (one pulse per second). This millisecond routine neither
+ * creates a tBlock nor timestamps an edge with the time software reads it.
  */
 #include "FsyncIndexTest.h"
 #include "PpsSampleTest.h"
+#include "FsyncPollTrace.h"
 #include "esp_cpu.h"
 #include "esp_timer.h"
 #include "esp_rom_sys.h"
@@ -40,46 +55,56 @@ void FsyncIndexTest::reset(PpsSampleTest* ppsSampleTest)
     _maxResidualSamples = 0;
     _previousAt = 0;
     _initialized = _lost = false;
+    FsyncPollTrace::reset();
 }
 
 /* **
- * measure - Called roughly each millisecond while real samples are being decoded.
- * The counter argument is the PCNT unit cleared before the ADC starts. Its
- * driver extends wraps, making the first reference an absolute pulse number.
- * PCNT reads bracket one timestamp read for startup/comparison only. A second timestamp
- * read screens the reference for changes. No retry loop is used: if either
- * register changed or the bracket took a whole FSYNC period, this observation
- * cannot validate the prediction. Once initialized, its first timestamp still
- * advances the predictor, independent of the reference count and its validity.
+ * measure - FsyncAssociationTest::poll calls this on Core 0 about every ms.
+ * counter is the PCNT unit reset before ADC startup. One call performs one
+ * four-read observation, not a loop of 32 retries. If startup cannot use it,
+ * the next poll tries again. After startup, the first captured tick value can
+ * advance numbering even when the repeated values fail the PCNT comparison
+ * checks. Prediction guards still apply to every update.
  *
- * The initial anchor uses a stable observed pair, not an independently latched
- * atomic pair. report therefore also checks the predicted absolute number
- * against the final, settled count/timestamp after ADC stop. Hardware-update
- * latency remains a limitation of the comparison reference, so disagreements are evidence to inspect, not proof
- * that the predictor alone was wrong.
+ * There is no return value: counters retain the result. A usable PCNT count
+ * that disagrees increments _mismatched; a prediction gap over 10 ms or residual
+ * >=0.25 sample sets _lost. getFailed exposes either condition to the recording
+ * controller, which requests source shutdown. This function does not itself
+ * stop the ADC. A mismatch is never corrected by adopting the PCNT value.
  *
- * Reject prediction gaps above 10 ms or a rounding residual >= 0.25 sample.
- * This deliberately leaves at least a quarter-sample margin to the half-sample
- * rounding boundary. It is an experimental guard, not a proven oscillator bound.
- * After a guard failure stop advancing; never silently restart from PCNT.
- * Unsigned timestamp subtraction handles one timer wrap; wall time guards the
- * maximum gap. PCNT resets at 32767; extendCount attaches the raw count to the
- * driver total, so comparisons include every wrap rather than only a modulus.
+ * A residual is the distance from the calculated pulse increment to its nearest
+ * integer. The 0.25 guard leaves room before rounding changes at 0.5; it is not
+ * an absolute-time accuracy claim. Four stable reads are a software check, not
+ * hardware capture of count and time together. report supplies an additional
+ * check against the settled registers after the ADC stops.
  */
 void FsyncIndexTest::measure(pcnt_unit_handle_t counter)
 {
+    FsyncPollTrace::mark(FsyncPollTrace::Stage::registers);
+
+    // Vary the observation phase by 0..31 microseconds so this diagnostic does
+    // not repeatedly sample the same part of an FSYNC period. This delay affects
+    // when registers are read, never the tick count already saved by hardware.
     _random ^= _random << 13;
     _random ^= _random >> 17;
     _random ^= _random << 5;
     esp_rom_delay_us(_random & 31);
 
-    // The driver's accumulated count includes all 32767-pulse hardware wraps.
-    // Attach the subsequent raw count to it only within a bounded 100-us age.
-    // This is comparison/startup evidence, never feedback into the predictor.
+    // PCNT's raw register resets after 32767 pulses. The driver keeps the total
+    // across those resets; extendCount later uses this total to interpret the
+    // raw register. Require that baseline to be no more than 100 us old, much
+    // shorter than a full counter cycle (~32 ms), to avoid attaching an old cycle.
     const int64_t baselineAt = esp_timer_get_time();
     int baseline = 0;
     ESP_ERROR_CHECK(pcnt_unit_get_count(counter, &baseline));
     const int64_t now = esp_timer_get_time();
+
+    // Briefly exclude local interrupts while reading the four registers. This
+    // reduces software interruptions; it does not stop FSYNC or make the two
+    // hardware peripherals update together. CPU-cycle reads measure duration.
+    // The fences bound the measured register sequence; there is no fence between
+    // each of its four reads. The empty asm keeps all four results observable to
+    // the compiler before the ending timing read.
     portENTER_CRITICAL(&_mux);
     const uint32_t begin = esp_cpu_get_cycle_count();
     asm volatile("fence iorw, iorw" ::: "memory");
@@ -92,7 +117,20 @@ void FsyncIndexTest::measure(pcnt_unit_handle_t counter)
     const uint32_t end = esp_cpu_get_cycle_count();
     portEXIT_CRITICAL(&_mux);
 
+    // Do not extend the register-read critical section. Freeze evidence once
+    // numbering is lost so a shutdown delay cannot replace the capture stall.
+    if (!_lost)
+    {
+        FsyncPollTrace::checkpoint();
+    }
+    FsyncPollTrace::mark(FsyncPollTrace::Stage::application);
+
     ++_observations;
+
+    // These checks decide whether PCNT can establish/check numbering. At the
+    // fixed 360-MHz CPU rate, 352 cycles is about 978 ns, one sample period.
+    // A moving, slow or stale observation is skipped for comparison, not treated
+    // as a pulse-number mismatch. Pulse 1 is the discarded startup frame.
     const bool moving = countBefore != countAfter || ticks != ticksAfter;
     const bool slow = uint32_t(end - begin) >= 352;
     const bool stale = esp_timer_get_time() - baselineAt > 100;
@@ -102,6 +140,9 @@ void FsyncIndexTest::measure(pcnt_unit_handle_t counter)
     _movingReference += moving;
     _slowReference += slow;
     _staleReference += stale;
+
+    // Establish the reference only once. A rejected observation increments a
+    // diagnostic counter and returns to the caller; retry occurs on a later poll.
     if (!_initialized)
     {
         if (usableReference)
@@ -119,8 +160,10 @@ void FsyncIndexTest::measure(pcnt_unit_handle_t counter)
     }
     else if (!_lost)
     {
-        // Multiply ticks by four to represent the 156.25-tick period exactly.
-        // Adding half the divisor implements nearest-whole-sample rounding.
+        // Advance from the previous numbered timestamp, not the startup time.
+        // 156.25 = 625/4, so (4*deltaTicks + 312)/625 rounds to a whole pulse
+        // with integer division. Example: 160000 ticks adds 1024 pulses.
+        // Unsigned subtraction handles one 32-bit timer wrap between reads.
         const uint32_t deltaTicks = ticks - _previousTicks;
         const uint32_t deltaPulses = uint32_t((uint64_t(deltaTicks) * 4 + 312) / 625);
         const double residual = std::abs(double(deltaTicks) / 156.25 - deltaPulses);
@@ -137,6 +180,12 @@ void FsyncIndexTest::measure(pcnt_unit_handle_t counter)
             _advancedPulses += deltaPulses;
             _previousTicks = ticks;
             _previousAt = now;
+
+            // PCNT independently checks the prediction only when its four-read
+            // observation was usable. A rejected observation does not prevent
+            // the timestamp-based update above. The first mismatch makes
+            // getFailed true; the eight-entry array is diagnostic capacity, not
+            // permission to tolerate eight mismatches. report prints it later.
             if (usableReference)
             {
                 ++_checked;
@@ -161,6 +210,8 @@ void FsyncIndexTest::measure(pcnt_unit_handle_t counter)
     }
     if (_initialized && !_lost && _ppsSampleTest != nullptr)
     {
+        // Supply a recent numbered FSYNC reference. PpsSampleTest uses it when
+        // PPS is pending; this does not emit one file timing block per call.
         _ppsSampleTest->observe(_calculatedPulse, _previousTicks);
     }
 
@@ -249,6 +300,7 @@ bool FsyncIndexTest::report(uint32_t run, bool clean, uint32_t finalPulse, uint3
             (unsigned long)example._observation, (unsigned long)example._calculated,
             example._observed, (unsigned long)example._ticks, example._error);
     }
+    FsyncPollTrace::report();
     printf("INDEX LIMIT: sample zero uses checked startup convention; stopped endpoint checks absolute offset; no fabricated sample-zero timestamp; nominal clock ratio; frequent anchors; SD load depends on selected mode\n");
     printf("INDEX RESULT run=%lu status=%s agreement=%s\n", (unsigned long)run,
         clean && _checked != 0 ? "MEASURED" : "FAIL",

@@ -10,11 +10,18 @@
  * changes until two adjacent captures are read. A skipped edge moves the search
  * forward; it does not install an interrupt at the 1.024-MHz sample rate.
  * Failure is reported rather than guessing the missing predecessor timestamp.
+ * This is the once-per-PPS search, not FsyncIndexTest's millisecond four-read
+ * observation. It reads only the FSYNC capture register; PCNT is not read here.
  */
 class FsyncBoundaryCapture
 {
 public:
-    /** Raw evidence retained even when capture rejects the pair. Core 0 owns it. */
+    /**
+     * Last two raw hardware tick counts and CPU cycles spent searching, retained
+     * even on failure. _numbered means the pair passed resolve's arithmetic;
+     * capture also requires the search to finish within its elapsed-time limit.
+     * Core 0 owns this record and reports it only after acquisition stops.
+     */
     struct ReadResult
     {
         uint32_t _tcBefore = 0;

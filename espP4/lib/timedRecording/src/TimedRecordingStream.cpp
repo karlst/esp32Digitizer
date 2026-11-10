@@ -1,6 +1,14 @@
 // Copyright (C) 2026 Karl Stock. SPDX-License-Identifier: GPL-3.0-or-later
-// start -> beginBlock -> submitSamples (repeat) -> finish. No storage is touched
-// directly; TimedFileSink accepts copies/boundaries for its asynchronous writer.
+/*
+ * Serialize complete intervals into [header][tBlock][sBlock]...[zero marker].
+ * Reading path: start supplies the UTC origin/configuration; beginBlock submits
+ * the interval metadata; submitSamples copies its three-byte samples in batches;
+ * closeFile rotates after the configured pair count; finish closes a short file.
+ * The P4 formatting task is the single caller while acquisition is active.
+ * TimedFileSink is the submission interface: the P4 implementation copies bytes
+ * into a separate ring and queues file openings/closures for the disk task.
+ * Successful submission is not confirmation that SD writing has finished.
+ */
 #include "TimedRecordingStream.h"
 #include <limits>
 
@@ -47,6 +55,9 @@ bool TimedRecordingStream::beginBlock(const TimeBlock& timeBlock)
         _intervals < std::numeric_limits<uint64_t>::max() - _utcFirst;
     if (retVal && !_opened)
     {
+        // Start a file only when its first complete interval is available.
+        // _intervals counts all previous intervals; adding it to the acquisition
+        // UTC origin gives this file's opening PPS. File-relative nSec is zero.
         uint8_t bytes[TimedFileFormat::_headerBytes];
         TimedFileHeader header;
         header._utcFirst = _utcFirst + _intervals;
@@ -63,6 +74,8 @@ bool TimedRecordingStream::beginBlock(const TimeBlock& timeBlock)
     }
     if (retVal)
     {
+        // Submit metadata before samples. _remaining prevents the next tBlock
+        // from being accepted until exactly sCount samples have been copied.
         uint8_t bytes[TimedFileFormat::_tBlockBytes];
         retVal = TimedFileFormat::encodeBlock(timeBlock, bytes, sizeof(bytes)) &&
             _timedFileSink.submit(bytes, sizeof(bytes));
@@ -153,7 +166,8 @@ bool TimedRecordingStream::getFailed() const
 }
 
 /* **
- * getFull - True after the final allocated file closes under stop-on-full.
+ * getFull - True after closure of the final allocated file has been queued in
+ * stop-on-full mode. It does not confirm that disk writes or flushes completed.
  */
 bool TimedRecordingStream::getFull() const
 {

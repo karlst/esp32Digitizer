@@ -23,12 +23,17 @@ public:
     void start();
     void stop();
     void observe(uint32_t pulse, uint32_t ticks);
-    void report(uint32_t run, bool numbered, uint32_t decodedWords) const;
+    void report(uint32_t run, bool numbered, uint32_t decodedWords, uint32_t seconds) const;
     bool getFailed() const;
     bool getBoundary(unsigned iBoundary, TimedBoundary& boundary) const;
 
 private:
-    /** One PPS edge and a later observed FSYNC belonging to a known sample. */
+    /**
+     * One PPS event with two distinct FSYNC records: the millisecond numbering
+     * reference (_fsTicks/_sample), and the adjacent pair selected afterward
+     * (_tcFsBefore/_tcFsAfter/_firstSample). Only the adjacent pair defines the
+     * file boundary. Raw ticks are 32-bit; extended ticks preserve timer wraps.
+     */
     struct Reference
     {
         uint32_t _event;
@@ -47,7 +52,11 @@ private:
     mcpwm_cap_channel_handle_t _channel = nullptr;
     mutable portMUX_TYPE _mux = portMUX_INITIALIZER_UNLOCKED;
     FsyncBoundaryCapture _fsyncBoundaryCapture;
-    static constexpr unsigned _capacity = 80;
+    // Retain the five-minute run plus 20 spare edges for start/stop timing.
+    // These arrays stay in internal RAM; no allocation occurs in the capture ISR.
+    static constexpr unsigned _capacity = 320;
+    // ISR writes events/count/overflow; observe and getFailed read them under
+    // _mux. The task sets _armed under that lock before enabling/disabling capture.
     uint32_t _events[_capacity] = {};
     unsigned _count = 0;
     bool _armed = false, _overflow = false;

@@ -1,4 +1,4 @@
-"""Independent byte fixtures for the DG reader; no board, SD card or packages.
+"""Independent byte fixtures for the LXDG reader; no board, SD card or packages.
 
 Fixtures are packed here rather than produced by the implementation under test.
 They cover the user's 110/93/103-sample example, integer timing across timer wrap,
@@ -13,7 +13,7 @@ from timedReader import TimedReader
 
 def fixture():
     """Return explicit little-endian metadata and signed three-byte samples."""
-    data = bytearray(struct.pack('<2sHQiI', b'DG', 1, 1800000000, 2553, 60) + bytes(236))
+    data = bytearray(struct.pack('<4sHQiI', b'LXDG', 1, 1800000000, 2553, 60) + bytes(234))
     for iBlock, count in enumerate((110, 93, 103)):
         ppsFirst = 0xfffffff0 + iBlock * 160000001
         first = ppsFirst + 1000
@@ -68,13 +68,18 @@ def main():
             assert whole + fraction == Fraction(1800000001) + Fraction(844, 160000001) - Fraction(2553, 1000000000)
         for length in (0, 255, 256, 303, 350, len(original) - 1):
             rejected(path, original[:length])
-        for offset, value in ((0, ord('X')), (2, 2), (20, 1), (256 + 38, 1), (256 + 36, 1)):
+        for offset, value in ((0, ord('X')), (1, ord('Y')), (2, ord('Z')), (3, ord('H')), (4, 2), (22, 1), (256 + 38, 1), (256 + 36, 1)):
             damaged = bytearray(original)
             damaged[offset] = value
             rejected(path, damaged)
         damaged = bytearray(original)
         struct.pack_into('<I', damaged, 256 + 32, 0xffffffff)
         rejected(path, damaged)
+        # Earlier bench files used a two-byte DG identifier and different
+        # header offsets. Reject them instead of interpreting their UTC wrongly.
+        legacyHeader = struct.pack('<2sHQiI', b'DG', 1, 1800000000, 2553, 60) + bytes(236)
+        rejected(path, legacyHeader + original[256:])
+
         # PPS continuity is checked at record boundaries, not by searching data.
         damaged = bytearray(original)
         secondBlock = 256 + 48 + 110 * 3

@@ -8,6 +8,7 @@
 #include "FsyncAssociationTest.h"
 #include "FsyncSdTest.h"
 #include "FsyncTimedTest.h"
+#include "FsyncPollTrace.h"
 #include "AdcReceiver.h"
 #include "SampleDecoder.h"
 #include "RecordingApplication.h"
@@ -47,7 +48,8 @@ static FsyncTimedTest fsyncTimedTest(fsyncAssociationTest, fsyncSdTest, timedRec
 // The wrapper defaults to RAM and enables the ordinary recorder only on command.
 static AdcReceiver adcReceiver;
 static SampleDecoder sampleDecoder(adcReceiver, &fsyncAssociationTest);
-// The optional PPS experiment needs sixty seconds plus source-stop allowance.
+// Ordinary PPS mode needs sixty seconds plus source-stop allowance. Timed SD
+// selection raises this reception timeout to 305 seconds while idle.
 // Ordinary association/delay runs still stop at their original word target.
 static RecordingApplication recordingApplication(adcReceiver, sampleDecoder,
     fsyncTimedTest, 65000, &fsyncAssociationTest);
@@ -77,9 +79,14 @@ extern "C" void app_main()
         // advances acquisition and calls diagnostic poll/stop/finish hooks.
         // Yield one scheduler tick so other tasks can run; this is not a
         // sample-timing delay and does not determine hardware capture times.
+        // Fixed-memory diagnostics include time spent waiting for other tasks.
+        FsyncPollTrace::mark(FsyncPollTrace::Stage::controller);
         recordingController.poll();
+        FsyncPollTrace::mark(FsyncPollTrace::Stage::boundaries);
         fsyncTimedTest.poll();
+        FsyncPollTrace::mark(FsyncPollTrace::Stage::application);
         recordingApplication.poll();
+        FsyncPollTrace::mark(FsyncPollTrace::Stage::sleep);
         vTaskDelay(1);
     }
 }

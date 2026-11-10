@@ -20,18 +20,23 @@ def parseSaved(line):
     return result
 
 
-def validateSaved(saved, completed, sampleCount):
-    """Check the 60-second bench file: complete intervals, one file, exact bytes.
+def validateSaved(saved, completed, sampleCount, captureSeconds=60):
+    """Check complete intervals, 60-pair file rotation and exact aggregate bytes.
 
     Board readback compares every serialized byte by CRC. Here the independent
     boundary report supplies expected sample counts and therefore file size.
-    Partial startup/shutdown intervals are intentionally excluded. No UTC claim.
+    captureSeconds selects the expected run length; default 60 retains checks
+    for older bench transcripts. The five-minute runner supplies 300. Each file
+    contributes its own 256-byte header and 48-byte end marker. Allow one edge
+    either side of the usual duration-minus-one interval count for generator
+    phase and clock difference. Partial intervals are excluded. No UTC claim.
     """
     intervals = completed.get('intervals', [])
     samples = sum(block['sCount'] for block in intervals)
-    expectedBytes = 256 + len(intervals) * 48 + samples * 3 + 48
-    valid = (completed['timingPassed'] and 58 <= len(intervals) <= 60 and
-             saved['run'] == completed['run'] and saved['files'] == 1 and
+    expectedFiles = (len(intervals) + 59) // 60
+    expectedBytes = expectedFiles * (256 + 48) + len(intervals) * 48 + samples * 3
+    valid = (completed['timingPassed'] and captureSeconds - 2 <= len(intervals) <= captureSeconds and
+             saved['run'] == completed['run'] and saved['files'] == expectedFiles and
              saved['intervals'] == len(intervals) and saved['samples'] == samples and
              saved['bytes'] == expectedBytes and saved['errors'] == saved['unsaved'] == 0 and
              0 < saved['stagePeak'] <= 2097152 and 0 < saved['ringPeak'] <= 16777216 and

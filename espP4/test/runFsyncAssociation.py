@@ -11,6 +11,8 @@ creates one new recording through the real SD writer; it preserves existing
 files. PC calendar time labels that file but is not GPS synchronization.
 --timed-sd-test writes version-1 tBlock/sBlock files using a synthetic 2000-01-01
 UTC origin. Complete intervals only are retained, with full SD CRC readback.
+The timed test acquires for five minutes and rotates across five preserved
+files, with 60 pairs per file. Other PPS tests still acquire for one minute.
 
 Reading path: main selects ports/options; capture opens both USB consoles,
 identifies firmware, checks the separate board-to-board serial link once, then
@@ -58,7 +60,9 @@ def capture(featherPort, p4Port, runs, output, delay=False, linkOnly=False, freq
     timing success and Feather DONE. It permits only one run per invocation.
     timedTest selects version-1 tBlock/sBlock files instead of sample-only files;
     the board uses a synthetic UTC origin and reports independently checked
-    complete-interval counts. It shares SD preparation/timeout handling below.
+    complete-interval counts. It runs for 300 seconds with five 60-pair files
+    and a 600-second Feather safety timeout. The host allows 20 minutes for SD
+    preparation, acquisition, shutdown, console output and full readback.
     Results go to files, not a return value; exceptions retain logs and propagate
     to main, which exits unsuccessfully. A completed link probe proves a reply,
     not that the ADC can produce valid samples.
@@ -226,22 +230,24 @@ def capture(featherPort, p4Port, runs, output, delay=False, linkOnly=False, freq
                 selected = False
                 while not selected:
                     name, line = nextLine(deadline)
-                    expectedMode = 'TIMED MODE version=1 seconds=60 syntheticUtc=1' if timedTest else 'PPS SD MODE version=1 seconds=60 preserve=1' if sdTest else 'PPS MODE version=2 seconds=60 gpio=6' if ppsTest else 'INDEX MODE version=2 seconds=10' if indexTest else 'READ MODE version=3 seconds=10'
+                    expectedMode = 'TIMED MODE version=2 seconds=300 pairsPerFile=60 files=5 syntheticUtc=1' if timedTest else 'PPS SD MODE version=1 seconds=60 preserve=1' if sdTest else 'PPS MODE version=2 seconds=60 gpio=6' if ppsTest else 'INDEX MODE version=2 seconds=10' if indexTest else 'READ MODE version=3 seconds=10'
                     selected = name == 'P4' and line == expectedMode
             if ppsTest:
                 # Existing Feather firmware supports 30/300/600 seconds. Use
-                # 300 as its safety timeout; P4's normal RAMFULL/STOP handshake
-                # ends the actual capture at 60 seconds. Wait for confirmation
+                # a timeout longer than acquisition; P4's RAMFULL/STOP handshake
+                # ends capture at 60 or 300 seconds. Wait for confirmation
                 # before starting. Reset restores Feather's default afterward.
-                ports['Feather'].write(b'@TEST 300\n')
+                safetySeconds = 600 if timedTest else 300
+                captureSeconds = 300 if timedTest else 60
+                ports['Feather'].write(f'@TEST {safetySeconds}\n'.encode('ascii'))
                 deadline = time.monotonic() + 5
                 durationReady = False
                 while not durationReady:
                     name, line = nextLine(deadline)
-                    durationReady = name == 'Feather' and line == 'TEST OK seconds=300'
+                    durationReady = name == 'Feather' and line == f'TEST OK seconds={safetySeconds}'
                     if name == 'Feather' and line == 'TEST rejected':
                         raise ValueError('Feather refused the longer safety timeout')
-                print('60-second PPS test; Feather safety timeout confirmed at 300 seconds.', flush=True)
+                print(f'{captureSeconds}-second PPS test; Feather safety timeout confirmed at {safetySeconds} seconds.', flush=True)
             label = 'Timed tBlock/sBlock + SD' if timedTest else 'PPS/sample + SD' if sdTest else 'PPS/sample association' if ppsTest else 'FSYNC numbering' if indexTest else 'FSYNC reads' if readTest else 'Pulse delay' if delay else 'FSYNC'
             destination = 'preparing SD, then capturing' if sdTest else 'capturing in RAM'
             print(f'{label} trial {iRun + 1}/{runs}: {destination}...', flush=True)
@@ -250,7 +256,7 @@ def capture(featherPort, p4Port, runs, output, delay=False, linkOnly=False, freq
             # the byte is only a request. Completion requires both P4's validated
             # report and Feather's DONE for the same run, in either arrival order.
             ports['Feather'].write(b'g')
-            deadline = time.monotonic() + (480 if sdTest else 90 if ppsTest else 30 if delay or readTest or indexTest else 12)
+            deadline = time.monotonic() + (1200 if timedTest else 480 if sdTest else 90 if ppsTest else 30 if delay or readTest or indexTest else 12)
             # These seconds cover capture, shutdown and console transfer. They
             # are not the ADC capture duration or the pulse-timestamp resolution.
             p4Lines = []
@@ -341,9 +347,9 @@ def capture(featherPort, p4Port, runs, output, delay=False, linkOnly=False, freq
                     completed = analyzeDelay(p4Lines, frequencyHz=frequencyHz)
             sourceRequested = False
             if timedTest:
-                validateTimedSaved(sdSaved, completed, sampleCount)
+                validateTimedSaved(sdSaved, completed, sampleCount, captureSeconds=300)
                 completed['storage'] = sdSaved
-                print('Timed PASS: complete tBlock/sBlock counts and full SD CRC readback succeeded; UTC is synthetic.', flush=True)
+                print('Timed PASS: five files, 60 pairs per full file, complete tBlock/sBlock counts and full SD CRC readback succeeded; UTC is synthetic.', flush=True)
             elif sdTest:
                 # Timing may finish before SD readback. Require exact byte count
                 # for the same acquisition, full retention, no reuse, no losses.
@@ -416,7 +422,7 @@ def main():
     parser.add_argument('--p4', default='COM3')
     parser.add_argument('--runs', type=int, default=5)
     parser.add_argument('--pps-sd-test', action='store_true', help='Sixty-second PPS capture plus new preserved-files SD recording and readback; use --runs 1')
-    parser.add_argument('--timed-sd-test', action='store_true', help='Sixty-second version-1 tBlock/sBlock SD test; synthetic UTC, preserved old files; use --runs 1')
+    parser.add_argument('--timed-sd-test', action='store_true', help='Five-minute LXDG version-1 test, 60 pairs/file across five files with full CRC readback; synthetic UTC, preserved old files; use --runs 1')
     parser.add_argument('--pps-test', action='store_true', help='Sixty-second PPS/sample association across timer wraps; rising PPS on GPIO6')
     parser.add_argument('--index-test', action='store_true', help='Ten-second timestamp-derived numbering experiment')
     parser.add_argument('--read-test', action='store_true', help='Ten-second read-consistency experiment; no PPS needed')

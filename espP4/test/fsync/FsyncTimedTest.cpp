@@ -7,10 +7,16 @@
  * Control methods run on Core 0; submit runs in the Core 1 decoder task.
  * Other test selections delegate to the existing FsyncSdTest, preserving the
  * sample-only comparison path. Neither path is a production GPS time source.
+ *
+ * The timing service observes FSYNC about every millisecond but supplies only
+ * one boundary per PPS. poll copies each completed boundary to TimedRecorder,
+ * which combines consecutive boundaries with the intervening decoded samples.
+ * Nothing here substitutes the time poll runs for a captured PPS/FSYNC tick.
  */
 #include "FsyncTimedTest.h"
 #include "RecordingApplication.h"
 #include "sdkconfig.h"
+#include "freertos/task.h"
 #include <cstdio>
 
 /* **
@@ -25,6 +31,8 @@ FsyncTimedTest::FsyncTimedTest(FsyncAssociationTest& timing, FsyncSdTest& previo
  * command - Control task accepts t while idle before another destination has
  * been chosen. Files use synthetic 2000-01-01 UTC for the first retained PPS.
  * This deliberately tests serialization without claiming GPS synchronization.
+ * Selecting this mode raises the calling Core 0 control task to priority 5,
+ * above the disk and formatting tasks. Reset restores the default priority.
  */
 void FsyncTimedTest::command(RecordingApplication& application, char key)
 {
@@ -34,11 +42,26 @@ void FsyncTimedTest::command(RecordingApplication& application, char key)
         printf("TIMED rejected: use FSYNC firmware, not pulse-delay firmware\n");
 #else
         if (!_otherSelected && !_selected && application.getIdle() &&
-            !application.isRecordingDestinationLocked() && _recorder.initialize())
+            !application.isRecordingDestinationLocked() && application.setTimeout(305000) && _recorder.initialize())
         {
             _selected = true;
-            _timing.command(application, 'p');
-            printf("TIMED MODE version=1 seconds=60 syntheticUtc=1\n");
+
+            // nullptr means the calling task: the main control loop on Core 0.
+            // Higher numbers run first when tasks are ready. Priority 5 lets
+            // timing observations preempt the priority-4 writer and priority-3
+            // formatter. The main loop still sleeps one tick on every pass,
+            // allowing both storage tasks to run. Core 1 decoding stays at 10.
+            // This is a bench scheduling experiment, not a timing guarantee;
+            // interrupt handling and critical sections can still delay us.
+            const UBaseType_t previousPriority = uxTaskPriorityGet(nullptr);
+            vTaskPrioritySet(nullptr, 5);
+            printf("TIMED SCHED controlBefore=%lu controlNow=%lu disk=4 format=3 decoder=10\n",
+                (unsigned long)previousPriority, (unsigned long)uxTaskPriorityGet(nullptr));
+
+            // Extend the application's separate reception watchdog as well as
+            // the diagnostic target. Disk preparation happens before this timer.
+            _timing.command(application, 'l');
+            printf("TIMED MODE version=2 seconds=300 pairsPerFile=60 files=5 syntheticUtc=1\n");
         }
         else
         {
@@ -46,7 +69,7 @@ void FsyncTimedTest::command(RecordingApplication& application, char key)
         }
 #endif
     }
-    else if (_selected && (key == 'd' || key == 'p' || key == 'n' || key == 'r'))
+    else if (_selected && (key == 'd' || key == 'p' || key == 'l' || key == 'n' || key == 'r'))
     {
         printf("TIMED rejected: reset P4 before changing mode\n");
     }
@@ -59,7 +82,7 @@ void FsyncTimedTest::command(RecordingApplication& application, char key)
 
 /* **
  * prepare - Request a fresh preserved pool with the agreed 60 pairs per file.
- * This one-minute verification uses one slot and stops rather than overwrites;
+ * This five-minute verification uses five slots and stops rather than overwrites;
  * application defaults remain 10 circular slots in TimedRecordingConfig.
  */
 bool FsyncTimedTest::prepare(uint32_t run, const Ads127Config& config)
@@ -72,10 +95,12 @@ bool FsyncTimedTest::prepare(uint32_t run, const Ads127Config& config)
         _nextBoundary = 0;
         TimedRecordingConfig settings;
 
-        // Use a fresh single-slot session for this test. The configured limit
-        // still allows 60 pairs, but 60 observed PPS edges give 59 closed pairs.
+        // Use five fresh slots, rotating after 60 complete pairs per file.
+        // About 300 PPS edges give 299 closed pairs: four full files and a
+        // shorter fifth file. Preserve every file for the aggregate CRC readback.
         // This fixed UTC value identifies a synthetic origin, not today's date.
-        settings._fileCount = 1;
+        settings._pairsPerFile = 60;
+        settings._fileCount = 5;
         settings._overwrite = false;
         retVal = config.matches(ads127DefaultConfig) && _recorder.prepare(run, 946684800, settings);
         _preparing = retVal;
@@ -176,8 +201,8 @@ bool FsyncTimedTest::getFailed() const
 }
 
 /* **
- * getFull - The existing sixty-second timing target requests the normal source stop.
- * Sixty observed PPS edges supply 59 complete intervals, not 60 intervals.
+ * getFull - The five-minute timing target requests the normal source stop.
+ * About 300 observed PPS edges supply 299 complete intervals, not 300 intervals.
  */
 bool FsyncTimedTest::getFull() const
 {

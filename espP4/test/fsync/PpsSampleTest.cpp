@@ -2,10 +2,21 @@
  * Reading path: initialize reserves GPIO6; start arms rising-edge capture;
  * captured saves hardware times; observe associates numbered FSYNC observations;
  * stop freezes events; report prints only after the real decoder has drained.
+ * A capture is a hardware-saved tick count at a rising edge (LOW to HIGH), not
+ * the later time an interrupt handler or control task reads that count.
+ *
+ * Two rates matter: the PPS interrupt saves about one event per second; observe
+ * runs about every millisecond on Core 0 with a numbered FSYNC reference. It
+ * extends raw timer counts to 64 bits and processes any waiting PPS event.
+ * For that event, FsyncBoundaryCapture finds two consecutive FSYNC edges.
+ * getBoundary hands their sample index/ticks to the recorder; two such boundary
+ * records are needed to build one complete tBlock/sBlock pair. This class does
+ * not build those file records, decode samples, or obtain UTC date/time.
  * GPIO6 must receive a safe 3.3-V PPS signal with a shared ground. Never connect
  * a generator output and GPS output to this input at the same time.
  */
 #include "PpsSampleTest.h"
+#include "freertos/task.h"
 #include <cstdio>
 
 /* **
@@ -13,6 +24,8 @@
  * The caller supplies the same hardware timer, so tick counts share an origin.
  * Pull-down biases an unplugged input LOW. Only rising edges are captured;
  * falling edges and pulse width do not participate in this experiment.
+ * prescale=1 captures every selected edge. Registering the callback does not
+ * enable acquisition; start enables the channel after clearing the old run.
  */
 void PpsSampleTest::initialize(mcpwm_cap_timer_handle_t timer)
 {
@@ -49,9 +62,13 @@ void PpsSampleTest::start()
 
 /* **
  * captured - The driver calls this interrupt service routine (ISR) on Core 0.
- * cap_value was latched by hardware at the edge; interrupt execution time is
- * not the measurement. Copy under a short lock, without printing or allocating.
- * Overflow invalidates the run. False means no task wakeup is requested.
+ * event->cap_value is the 32-bit timer value saved by hardware at the PPS edge;
+ * context is the PpsSampleTest pointer registered by initialize. Copy the value
+ * into _events under the same lock observe uses to read the array and count.
+ * This prevents observe seeing a new count before its event value is copied.
+ * No printing or allocation occurs in the interrupt. Full storage latches an
+ * overflow fault; getFailed makes it visible to the acquisition controller.
+ * False means no task wakeup is requested, not that the capture failed.
  */
 bool PpsSampleTest::captured(mcpwm_cap_channel_handle_t channel,
     const mcpwm_capture_event_data_t* event, void* context)
@@ -104,6 +121,10 @@ void PpsSampleTest::stop()
  */
 void PpsSampleTest::observe(uint32_t pulse, uint32_t ticks)
 {
+    // Each input tick value was saved by FSYNC hardware and then numbered by
+    // FsyncIndexTest. Add short unsigned differences to retain elapsed time
+    // across 32-bit wraps (~26.84 s). The first raw count remains the origin;
+    // this does not reset the timer to zero or substitute software arrival time.
     if (!_haveFirst)
     {
         _firstTicks = _previousTicks = ticks;
@@ -119,6 +140,8 @@ void PpsSampleTest::observe(uint32_t pulse, uint32_t ticks)
     bool waiting = false;
     while (!waiting)
     {
+        // Copy one pending ISR event while locked, then do all mapping/search
+        // work outside the lock. _references belongs only to this Core 0 task.
         uint32_t ppsTicks = 0;
         portENTER_CRITICAL(&_mux);
         const bool available = _nextEvent < _count;
@@ -133,6 +156,9 @@ void PpsSampleTest::observe(uint32_t pulse, uint32_t ticks)
         }
         else if (uint32_t(ticks - ppsTicks) > 0x7fffffffU)
         {
+            // Under the short-gap assumption, a difference over half the timer
+            // range means PPS is newer than this FSYNC reference. Leave this
+            // event queued until a later observe call supplies a newer FSYNC.
             waiting = true;
         }
         else if (uint64_t(uint32_t(ticks - ppsTicks)) > _elapsedTicks)
@@ -147,13 +173,17 @@ void PpsSampleTest::observe(uint32_t pulse, uint32_t ticks)
             if (ticks - ppsTicks <= 1600000 && pulse >= 2 && _referencesCount < _capacity)
             {
                 auto& reference = _references[_referencesCount];
+                // Subtract the short FSYNC-to-PPS difference from the extended
+                // FSYNC count to place PPS on the same 64-bit timeline. Sample
+                // index pulse-2 follows the checked discarded-startup-frame rule.
                 reference = {_nextEvent, ppsTicks, ticks, pulse - 2,
                     extendedTicks - uint32_t(ticks - ppsTicks), extendedTicks};
 
                 // Capture an actual adjacent pair after this PPS. The earlier
                 // edge ends the previous block; the later one starts the next.
-                // Keep the original reference too, so existing comparison rows
-                // retain their meaning and the extra numbering is auditable.
+                // The millisecond reference is not necessarily either boundary
+                // edge. Retain it separately for the PPS SAMPLE diagnostic row;
+                // PPS BOUNDARY reports the edges actually used for file blocks.
                 FsyncBoundary boundary;
                 reference._boundaryValid = _fsyncBoundaryCapture.capture(pulse, ticks, boundary, reference._readResult);
                 if (reference._boundaryValid)
@@ -169,6 +199,9 @@ void PpsSampleTest::observe(uint32_t pulse, uint32_t ticks)
                 }
                 if (_referencesCount)
                 {
+                    // Bench guard: 160 million ticks per nominal second, with
+                    // +/-1% allowance. These are hardcoded acceptance limits,
+                    // not GPS specifications or a measurement error bound.
                     const uint64_t interval = reference._ppsTicksExtended - _references[_referencesCount - 1]._ppsTicksExtended;
                     _badIntervals += interval < 158400000 || interval > 161600000;
                 }
@@ -181,8 +214,10 @@ void PpsSampleTest::observe(uint32_t pulse, uint32_t ticks)
             ++_nextEvent;
         }
     }
-    // A missing edge must stop acquisition rather than merely fail the report
-    // after a full minute. Allow 1.1 seconds from the first reference or last PPS.
+    // Fault during acquisition instead of waiting for the final report. The
+    // hardcoded 176 million ticks allows 1.1 nominal seconds from the first
+    // numbered reference (before any PPS) or from the last mapped PPS. Once
+    // missing is true it remains true until start resets the run.
     const uint64_t sincePps = _referencesCount ?
         extendedTicks - _references[_referencesCount - 1]._ppsTicksExtended : _elapsedTicks;
     _missing = _missing || sincePps > 176000000;
@@ -204,7 +239,11 @@ bool PpsSampleTest::getFailed() const
 /* **
  * getBoundary - Core 0 copies a completed observed boundary to the recorder.
  * observe and this call run sequentially on that task; no ISR writes references.
- * False means this index is not available or failed capture, never a guessed pair.
+ * iBoundary is a zero-based index in the saved PPS references. The returned
+ * record contains extended ticks for PPS and its two selected FSYNC edges,
+ * plus the absolute sample index of the later FSYNC. The recorder copies it;
+ * no live hardware registers or borrowed array pointers leave this object.
+ * False leaves boundary unchanged: the index is absent or capture failed.
  */
 bool PpsSampleTest::getBoundary(unsigned iBoundary, TimedBoundary& boundary) const
 {
@@ -221,8 +260,9 @@ bool PpsSampleTest::getBoundary(unsigned iBoundary, TimedBoundary& boundary) con
 /* **
  * report - After stop and decoder drain, validate approximately one-second PPS
  * spacing and sample numbering, then print each direct timestamp difference.
- * Require 59..61 mapped pulses, 59..61 captured pulses, and at least two timer
- * wraps during the sixty-second acquisition. One edge can fall outside the
+ * seconds is the requested 60- or 300-second acquisition duration. Require
+ * mapped/captured pulse totals within one of that duration, and at least two
+ * timer wraps for 60 seconds or eleven for 300. One edge can fall outside the
  * numbered window depending on source phase and shutdown timing. Leading
  * and trailing pulses outside numbered observations are reported, not mapped.
  * Reference sample numbers must exist in the decoded stream, although only its
@@ -234,7 +274,7 @@ bool PpsSampleTest::getBoundary(unsigned iBoundary, TimedBoundary& boundary) con
  * analog-input time relative to PPS. Neither GPS UTC association nor GPS time
  * validity is checked here; an arbitrary 1-Hz input is not proof of GPS lock.
  */
-void PpsSampleTest::report(uint32_t run, bool numbered, uint32_t decodedWords) const
+void PpsSampleTest::report(uint32_t run, bool numbered, uint32_t decodedWords, uint32_t seconds) const
 {
     unsigned badIntervals = 0;
     unsigned boundaries = 0;
@@ -244,6 +284,11 @@ void PpsSampleTest::report(uint32_t run, bool numbered, uint32_t decodedWords) c
         const uint32_t interval = _events[iEvent] - _events[iEvent - 1];
         badIntervals += interval < 158400000 || interval > 161600000;
         printf("PPS INTERVAL event=%u ticks=%lu\n", iEvent, (unsigned long)interval);
+
+        // Acquisition is already stopped. Block for one scheduler tick so
+        // lower-priority work and the idle task can run during this long report.
+        // taskYIELD alone would leave this priority-5 task ready to run again.
+        vTaskDelay(1);
     }
     for (unsigned iReference = 0; iReference < _referencesCount; ++iReference)
     {
@@ -281,10 +326,14 @@ void PpsSampleTest::report(uint32_t run, bool numbered, uint32_t decodedWords) c
             (unsigned long)reference._sample, (unsigned long)reference._fsTicks,
             (unsigned long)difference, difference * 6.25, difference * 6.25 - 2553.0,
             (unsigned long long)reference._ppsTicksExtended, (unsigned long long)reference._fsTicksExtended);
+
+        // Two long rows per reference can keep the console busy for seconds.
+        // Sleeping here changes report speed only, never captured timestamps.
+        vTaskDelay(1);
     }
     const bool passed = numbered && samplesExist && !getFailed() && badIntervals == 0 &&
-        _late == 0 && _referencesCount >= 59 && _referencesCount <= 61 &&
-        _count >= 59 && _count <= 61 && _wraps >= 2;
+        _late == 0 && _referencesCount >= seconds - 1 && _referencesCount <= seconds + 1 &&
+        _count >= seconds - 1 && _count <= seconds + 1 && _wraps >= (seconds == 300 ? 11U : 2U);
     printf("PPS WRAPS count=%lu observedSeconds=%.6f\n",
         (unsigned long)_wraps, double(_elapsedTicks) / 160000000.0);
     printf("PPS BOUNDARIES captured=%u failed=%u missing=%u\n",

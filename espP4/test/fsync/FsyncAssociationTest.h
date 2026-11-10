@@ -57,6 +57,8 @@ private:
     bool _indexTest = false;
     PpsSampleTest _ppsSampleTest;
     bool _ppsTest = false;
+    // Selected while idle: ordinary PPS tests last 60 seconds; timed SD lasts 300.
+    uint32_t _ppsSeconds = 60;
     uint32_t getTargetWords() const;
     bool takeSnapshot();
     void stopHardware();

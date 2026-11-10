@@ -59,6 +59,7 @@ static void checkStorage()
     MemoryRecordingDisk memoryRecordingDisk;
     MemoryRecordingDisk::files()["0:/important.txt"] = {1, 2, 3, 4};
     TimedFatStorage timedFatStorage;
+    timedFatStorage.setTimingClock(clockUs);
     assert(timedFatStorage.initializeMemory(allocateBytes, releaseBytes));
     assert(timedFatStorage.prepare(memoryRecordingDisk, 2, 4096));
     TimedBufferedSink timedBufferedSink(timedFatStorage);
@@ -90,6 +91,20 @@ static void checkStorage()
     assert(actualStream.finish() && expectedStream.finish());
     assert(timedBufferedSink.finish());
     assert(timedFatStorage.readback(checkReadback, &memoryTimedSink));
+
+    // Preparation and readback must not inflate recording-operation counters.
+    // Five one-pair files reuse slots 0,1,0,1,0. Each has one open and close.
+    const auto& timings = timedFatStorage.getTimings();
+    assert(timings.size() == 2);
+    for (unsigned iSlot = 0; iSlot < 2; ++iSlot)
+    {
+        const auto& operations = timings[iSlot]._operations;
+        assert(operations[unsigned(TimedFatStorage::Operation::open)]._calls == (iSlot == 0 ? 3 : 2));
+        assert(operations[unsigned(TimedFatStorage::Operation::close)]._calls == (iSlot == 0 ? 3 : 2));
+        const auto& writes = operations[unsigned(TimedFatStorage::Operation::write)];
+        assert(writes._calls > 0 && writes._totalUs == writes._calls && writes._maxUs == 1);
+        assert(writes._requested == writes._actual && writes._failures == 0);
+    }
     assert(MemoryRecordingDisk::files().at("0:/important.txt") == std::vector<uint8_t>({1, 2, 3, 4}));
     for (uint32_t iSlot = 0; iSlot < 2; ++iSlot)
     {
@@ -103,6 +118,8 @@ static void checkStorage()
     // Preparation creates another directory, leaving the completed session intact.
     const auto saved = MemoryRecordingDisk::files();
     assert(timedFatStorage.prepare(memoryRecordingDisk, 1, 4096));
+    assert(timedFatStorage.getTimings().size() == 1);
+    assert(timedFatStorage.getTimings()[0]._operations[unsigned(TimedFatStorage::Operation::write)]._calls == 0);
     for (const auto& entry : saved)
     {
         assert(MemoryRecordingDisk::files().at(entry.first) == entry.second);
@@ -110,12 +127,75 @@ static void checkStorage()
     assert(timedFatStorage.openSlot(0));
     const uint8_t bytes[20] = {};
     MemoryRecordingDisk::failWrite(true);
-    assert(timedFatStorage.write(bytes, sizeof(bytes)) < sizeof(bytes));
+    assert(timedFatStorage.write(bytes, sizeof(bytes)) == sizeof(bytes));
+    assert(timedFatStorage.getPendingBytes() == sizeof(bytes));
+    assert(!timedFatStorage.flush());
     assert(timedFatStorage.getFailed());
-    assert(timedFatStorage.closeSlot());
+    const auto& failedWrite = timedFatStorage.getTimings()[0]._operations[unsigned(TimedFatStorage::Operation::write)];
+    assert(failedWrite._calls == 1 && failedWrite._failures == 1);
+    assert(failedWrite._offset == 0 && failedWrite._requested == sizeof(bytes));
+    assert(failedWrite._actual < failedWrite._requested);
+    assert(timedFatStorage.getPendingBytes() == sizeof(bytes) - failedWrite._actual);
+    assert(!timedFatStorage.closeSlot());
+    assert(!timedFatStorage.openSlot(0));
+    assert(!timedFatStorage.readback(checkReadback, &memoryTimedSink));
+    assert(timedFatStorage.prepare(memoryRecordingDisk, 1, 4096));
     assert(timedFatStorage.openSlot(0));
     MemoryRecordingDisk::failSync();
     assert(!timedFatStorage.closeSlot());
+    assert(timedFatStorage.getTimings()[0]._operations[unsigned(TimedFatStorage::Operation::sync)]._failures == 1);
+}
+
+/* **
+ * checkAlignment - Feed two files through deliberately awkward caller chunks.
+ * Full SD writes must still begin at 16-KiB offsets, followed by one short
+ * tail per file. Readback compares all bytes to detect padding or carryover.
+ */
+static void checkAlignment()
+{
+    MemoryRecordingDisk memoryRecordingDisk;
+    TimedFatStorage timedFatStorage;
+    assert(timedFatStorage.initializeMemory(allocateBytes, releaseBytes));
+    assert(timedFatStorage.prepare(memoryRecordingDisk, 2, 65536));
+    MemoryTimedSink expected;
+    expected._files.resize(2);
+    MemoryRecordingDisk::clearWrites();
+    for (unsigned iSlot = 0; iSlot < 2; ++iSlot)
+    {
+        auto& bytes = expected._files[iSlot];
+        bytes.resize(50007);
+        for (size_t iByte = 0; iByte < bytes.size(); ++iByte)
+        {
+            bytes[iByte] = uint8_t(iByte + iSlot * 17);
+        }
+        assert(timedFatStorage.openSlot(iSlot));
+        assert(timedFatStorage.write(bytes.data(), 123) == 123);
+        assert(timedFatStorage.write(bytes.data() + 123, 17001) == 17001);
+        assert(timedFatStorage.write(bytes.data() + 17124, 32883) == 32883);
+        assert(timedFatStorage.getPendingBytes() == 855);
+        assert(timedFatStorage.closeSlot());
+        assert(timedFatStorage.getPendingBytes() == 0);
+    }
+    const auto& writes = MemoryRecordingDisk::getWrites();
+    assert(writes.size() == 8);
+    for (unsigned iWrite = 0; iWrite < writes.size(); ++iWrite)
+    {
+        assert(writes[iWrite]._offset == (iWrite % 4) * 16384);
+        assert(writes[iWrite]._length == (iWrite % 4 == 3 ? 855 : 16384));
+    }
+    assert(timedFatStorage.readback(checkReadback, &expected));
+
+    // A full-block failure during write must be latched even when the return
+    // count says all caller bytes were copied. Close must not retry that block.
+    assert(timedFatStorage.prepare(memoryRecordingDisk, 1, 65536));
+    assert(timedFatStorage.openSlot(0));
+    MemoryRecordingDisk::clearWrites();
+    MemoryRecordingDisk::failWrite(true);
+    assert(timedFatStorage.write(expected._files[0].data(), 16384) == 16384);
+    assert(timedFatStorage.getFailed());
+    assert(timedFatStorage.getPendingBytes() > 0);
+    assert(!timedFatStorage.closeSlot());
+    assert(MemoryRecordingDisk::getWrites().size() == 1);
 }
 
 /* **
@@ -124,6 +204,7 @@ static void checkStorage()
 int main()
 {
     checkStorage();
+    checkAlignment();
     std::puts("PASS: timed files through real ring/FatFs adapter, preservation and failure checks");
     return 0;
 }

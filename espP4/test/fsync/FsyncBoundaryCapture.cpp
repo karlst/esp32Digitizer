@@ -51,6 +51,8 @@ bool IRAM_ATTR FsyncBoundaryCapture::capture(uint32_t referencePulse, uint32_t r
     bool adjacent = false;
     uint32_t elapsed = esp_cpu_get_cycle_count() - began;
 
+    // This is at most 32 additional reads after the initial register read,
+    // within 20 us total, not 32 millisecond observations or startup retries.
     // A delayed read may jump four edges, for example. Keep that newer actual
     // capture and look for the edge after it instead of rejecting the PPS.
     // Both limits bound local interrupt exclusion; reject even an adjacent

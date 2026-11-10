@@ -18,7 +18,8 @@ enum FRESULT
     FR_OK,
     FR_DISK_ERR,
     FR_NO_FILE,
-    FR_EXIST
+    FR_EXIST,
+    FR_INVALID_PARAMETER = 19
 };
 
 constexpr BYTE FA_READ = 1, FA_WRITE = 2, FA_CREATE_NEW = 4, AM_DIR = 16;

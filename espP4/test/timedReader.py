@@ -1,10 +1,16 @@
-"""Read DG version-one tBlock/sBlock files without third-party packages.
+"""Read LXDG version-one tBlock/sBlock files without third-party packages.
 
 The file is memory-mapped, not copied into a large Python list. Sample values
 are signed 24-bit integers. sampleTime returns integer UTC seconds plus an exact
 fractional second: it never rounds a large Unix timestamp through a float.
-UTC zero is reserved by the bench workflow as a synthetic origin. A file alone
-does not certify that its origin came from GPS or that hardware timing was valid.
+The five-minute bench supplies 946684800 (2000-01-01 UTC) as a synthetic origin.
+There is no on-disk GPS-validity flag: any header origin, including nonzero UTC,
+must be traced to its source before treating calculated sample times as GPS time.
+
+Reading path: parse follows header/tBlock/sample byte counts; sample retrieves
+one voltage code; sampleTime converts that sample's interpolated FSYNC ticks to
+UTC and subtracts the input-path delay. The two PPS values in this implementation
+are named tcPpsFirst/Last; the client document calls them tcPpsCurrent/Next.
 """
 import argparse
 from dataclasses import dataclass
@@ -16,13 +22,18 @@ import struct
 
 HEADER_BYTES = 256
 TBLOCK_BYTES = 48
-HEADER = struct.Struct('<2sHQiI236s')
+HEADER = struct.Struct('<4sHQiI234s')
 TBLOCK = struct.Struct('<QQQQIH10s')
 
 
 @dataclass(frozen=True)
 class TimeBlock:
-    """Timing fields plus the byte offset of samples in the mapped file."""
+    """One interval's timing fields and sample-byte offset, without sample copies.
+
+    Tick counts are extended integers from the same hardware timer, not seconds.
+    tcPpsFirst/Last are consecutive opening/closing PPS counts. sampleOffset is
+    a byte offset from the file start; sCount is a count of three-byte samples.
+    """
     tcFsFirst: int
     tcFsLast: int
     tcPpsFirst: int
@@ -56,13 +67,23 @@ class TimedReader:
             raise
 
     def parse(self):
-        """Follow declared block sizes; reject gaps/duplicates in PPS numbering."""
+        """Called at open to walk records and retain only their small metadata.
+
+        Advance by 48 bytes for a tBlock and 3*sCount bytes for its samples.
+        An all-zero record ends the file only where a tBlock is expected; sample
+        bytes are never searched for a marker. Raise ValueError on structural
+        errors. These checks cannot detect arbitrary corruption of sample data
+        or establish the hardware association between FSYNC and sample numbers.
+        """
         fileId, version, self.utcFirst, self.delayNs, self.pairsPerFile, reserved = HEADER.unpack_from(self.mapping)
-        if fileId != b'DG' or version != 1:
-            raise ValueError('Expected DG file format version 1')
+        if fileId != b'LXDG' or version != 1:
+            raise ValueError('Expected LXDG file format version 1')
         if any(reserved) or not 1 <= self.pairsPerFile <= 65535 or self.delayNs < 0:
             raise ValueError('Invalid header fields or nonzero reserved bytes')
         offset = HEADER_BYTES
+
+        # The marker ends meaningful data; preallocated bytes beyond it are not
+        # part of the recording. previous checks continuity between tBlocks.
         ended = False
         previous = None
         while not ended:
@@ -108,10 +129,24 @@ class TimedReader:
         block = self.blocks[iBlock]
         if not 0 <= iSample < block.sCount:
             raise IndexError('Sample index outside sBlock')
+
+        # There are sCount-1 gaps between the first and last samples. For three
+        # samples at ticks 100, 200, 300, the spacing is (300-100)/(3-1)=100.
+        # Fraction retains an exact numerator/denominator instead of rounding
+        # the intermediate tick count to a float or an integer hardware tick.
         ticks = Fraction(block.tcFsFirst) + Fraction(
             (block.tcFsLast - block.tcFsFirst) * iSample, block.sCount - 1)
+
+        # Opening PPS has UTC utcFirst+nSec. Divide the sample's tick offset by
+        # the measured ticks between successive PPS pulses; this corrects the
+        # block's average timer rate. Subtract delayNs/1e9 once, in seconds, to
+        # obtain analog-input time. This is interpolation, not a jitter correction.
         seconds = Fraction(self.utcFirst + block.nSec) + (
             ticks - block.tcPpsFirst) / (block.tcPpsLast - block.tcPpsFirst) - Fraction(self.delayNs, 1000000000)
+
+        # Return whole UTC seconds plus a fraction in [0,1). To obtain the
+        # document's tSample in nanoseconds, the caller can use
+        # (whole + fraction)*1_000_000_000, retaining Fraction arithmetic.
         whole = seconds.numerator // seconds.denominator
         return whole, seconds - whole
 

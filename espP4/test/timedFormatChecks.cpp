@@ -79,10 +79,10 @@ static void checkLayout()
     assert(timedRecordingStream.finish());
     const auto& file = memoryTimedSink._files.at(0);
     assert(file.size() == 256 + 48 + 9 + 48);
-    assert(file[0] == 'D' && file[1] == 'G' && readInteger(file, 2, 2) == 1);
-    assert(readInteger(file, 4, 8) == 1800000000 && readInteger(file, 12, 4) == 2553);
-    assert(readInteger(file, 16, 4) == 60);
-    assert(allBytes(file.data() + 20, 236, 0));
+    assert(std::memcmp(file.data(), "LXDG", 4) == 0 && readInteger(file, 4, 2) == 1);
+    assert(readInteger(file, 6, 8) == 1800000000 && readInteger(file, 14, 4) == 2553);
+    assert(readInteger(file, 18, 4) == 60);
+    assert(allBytes(file.data() + 22, 234, 0));
     assert(readInteger(file, 256, 8) == 0xfffffffaULL);
     assert(readInteger(file, 264, 8) == 0x100000004ULL);
     assert(readInteger(file, 272, 8) == 0xfffffff0ULL);
@@ -129,11 +129,11 @@ static void checkRotation()
         }
         assert(timedRecordingStream.getFull() == !overwrite);
         assert(memoryTimedSink._openedSlots == std::vector<uint32_t>({0, 1}));
-        assert(readInteger(memoryTimedSink._files[1], 4, 8) == 1002);
+        assert(readInteger(memoryTimedSink._files[1], 6, 8) == 1002);
         if (overwrite)
         {
             writeBlock(timedRecordingStream, 4, 0);
-            assert(readInteger(memoryTimedSink._files[0], 4, 8) == 1004);
+            assert(readInteger(memoryTimedSink._files[0], 6, 8) == 1004);
             assert(memoryTimedSink._openedSlots == std::vector<uint32_t>({0, 1, 0}));
         }
         assert(timedRecordingStream.finish());

@@ -1,12 +1,25 @@
 // Copyright (C) 2026 Karl Stock. SPDX-License-Identifier: GPL-3.0-or-later
-// Read start, submit/addBoundary, pump, finish. No hardware calls are used here.
+/*
+ * Turn decoded samples and saved PPS boundaries into tBlock/sBlock pairs.
+ * Read start, submit/addBoundary, pump, finish in that order. On the P4, Core 1's
+ * decoder calls submit; Core 0's timing task calls addBoundary; a separate Core 0
+ * formatting task calls pump. A task is a scheduled software thread. No hardware
+ * register reads or disk writes occur here.
+ *
+ * Samples are packed 24-bit readings (three bytes each). A boundary contains
+ * PPS ticks plus two consecutive FSYNC edges selected shortly after PPS. The
+ * later sample starts an interval; the earlier sample at the NEXT boundary ends
+ * it. pump waits for two boundaries AND all samples, writes the tBlock first,
+ * then copies the sBlock through TimedRecordingStream into the separate SD ring.
+ */
 #include "TimedIntervalBuffer.h"
 #include <algorithm>
 #include <cstring>
 
 /* **
- * start - Reset only while all three callers are stopped. Memory holds capacity
- * three-byte samples, numbered from zero. The already-started stream must live
+ * start - Reset only while all three callers are stopped. memory holds capacity
+ * three-byte samples, numbered from zero; capacity is samples, not bytes, and
+ * must be a power of two for masked ring positions. The already-started stream must live
  * through finish. False means invalid configuration; no acquisition may start.
  */
 bool TimedIntervalBuffer::start(uint8_t* memory, uint32_t capacity,
@@ -61,7 +74,10 @@ bool TimedIntervalBuffer::submit(const uint8_t* packed, uint32_t count)
 }
 
 /* **
- * addBoundary - Timing task copies an observed adjacent pair into a small queue.
+ * addBoundary - Timing task copies one TimedBoundary into the eight-entry queue.
+ * It supplies the PPS tick count, both adjacent FSYNC tick counts, and the
+ * absolute sample index of the later FSYNC. This is not a tBlock yet: the next
+ * boundary supplies this interval's closing PPS and last-sample tick count.
  * The formatting task retains its opening entry until the whole interval has
  * been copied. No shared 64-bit value is read before head's release/acquire.
  * Reject invalid spacing or queue overflow; never infer a missing boundary.
@@ -87,9 +103,11 @@ bool TimedIntervalBuffer::addBoundary(const TimedBoundary& boundary)
 }
 
 /* **
- * release - Formatting task relinquishes samples only after a successful copy
+ * release - Formatting task relinquishes count samples only after a successful copy
  * or an intentional pre-first-boundary discard. sampleRead is extended to 64
- * bits; the ring's 32-bit counters wrap safely because capacity is a power of two.
+ * bits; head/tail differences use unsigned wraparound, while masking with
+ * capacity-1 converts the counters to physical array positions. Updating tail
+ * with release ordering lets the decoder reuse only these completed slots.
  */
 void TimedIntervalBuffer::release(uint32_t count)
 {
@@ -127,8 +145,9 @@ bool TimedIntervalBuffer::pump()
         if (!_remaining && boundaries >= 2 && _sampleRead == first._sampleFirst)
         {
             // Subtract sample indices, not tick counts, to determine sCount.
-            // The closing pair's earlier sample is exactly one before its
-            // sampleFirst, so the subtraction includes both retained endpoints.
+            // Example: opening sampleFirst=110 and closing sampleFirst=213
+            // retain samples 110..212, count=103. The closing boundary's earlier
+            // FSYNC belongs to sample 212; its later FSYNC starts the next block.
             const auto& last = _boundaries[(iBoundary + 1) % _boundaryCapacity];
             const uint64_t count = last._sampleFirst - first._sampleFirst;
             const uint64_t ticks = last._tcPps - first._tcPps;
@@ -142,6 +161,9 @@ bool TimedIntervalBuffer::pump()
                 // Wait for every sample in this closed interval before emitting
                 // its tBlock. DMA delivery can lag the hardware boundary capture.
                 TimeBlock block;
+                // Header names in the client document are tcPpsCurrent/Next;
+                // the existing C++ fields tcPpsFirst/Last store those same two
+                // consecutive PPS counts. nSec restarts at zero each file.
                 block._tcFsFirst = first._tcFsAfter;
                 block._tcFsLast = last._tcFsBefore;
                 block._tcPpsFirst = first._tcPps;
@@ -216,7 +238,9 @@ uint64_t TimedIntervalBuffer::getIntervals() const
 }
 
 /* **
- * getSamples - Number of retained samples submitted to the stream, excluding tails.
+ * getSamples - Formatter-owned count of retained samples submitted to the stream,
+ * excluding startup/shutdown partial intervals. Read from another task only
+ * after formatting stops. This count alone does not confirm an SD write.
  */
 uint64_t TimedIntervalBuffer::getSamples() const
 {

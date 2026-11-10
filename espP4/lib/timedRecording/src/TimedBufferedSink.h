@@ -58,7 +58,9 @@ private:
     // Submission-task state. Disk finish reads producerOpen only after join.
     uint64_t _submitted = 0;
     bool _producerOpen = false;
-    // Disk-task state. Other tasks read statistics only after finish.
+    // Disk-task state. _written counts bytes accepted by the storage adapter,
+    // including its owned transfer tail. File closure confirms tail flushing.
+    // Other tasks read statistics only after finish.
     uint64_t _written = 0;
     bool _diskOpen = false;
 };

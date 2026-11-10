@@ -1,6 +1,18 @@
 // Copyright (C) 2026 Karl Stock. SPDX-License-Identifier: GPL-3.0-or-later
-// Reading path: start, producer begin/submit/end, consumer pump/write/close, finish.
-// Disk calls exist only below write/closeCompleted/flush, never in submission.
+/*
+ * Connect the formatter's byte stream to the reusable buffered disk writer.
+ * The formatting task calls beginFile/submit/endFile: these copy bytes and file
+ * boundary descriptors into owned queues without disk I/O. The disk task calls
+ * pump/write/closeCompleted/finish to open, write and close the requested files.
+ * Read start first, then those two call sequences. The queue's release/acquire
+ * indices prevent reuse of descriptors until the disk task has finished them.
+ *
+ * A file boundary descriptor records logical stream byte offsets, not FSYNC or
+ * PPS ticks. The 128-KiB byte-ring chunks can cross file boundaries and tBlocks;
+ * write splits them at file ends. TimedFatStorage separately accumulates aligned
+ * 16-KiB transfers from each file's byte zero. Neither transfer size defines an
+ * sBlock. _written counts bytes accepted by the adapter, including its RAM tail.
+ */
 #include "TimedBufferedSink.h"
 #include <algorithm>
 #include <limits>
@@ -124,8 +136,10 @@ bool TimedBufferedSink::endFile()
 }
 
 /* **
- * closeCompleted - Disk task closes a fully written file whose end was published.
- * A producer may publish end after the final bytes were pumped, so this is also
+ * closeCompleted - Disk task closes a file after all its bytes were accepted by
+ * the storage adapter and the formatter supplied its exact end offset. The
+ * adapter may still hold a short RAM tail; closeSlot writes and flushes it.
+ * The formatter may publish end after the final bytes were pumped, so this is also
  * called from pump when no additional byte chunk is available. Tail is released
  * only after close succeeds. On failure the descriptor remains unavailable.
  */
@@ -159,9 +173,10 @@ bool TimedBufferedSink::closeCompleted()
 
 /* **
  * write - BufferedWriter calls on the disk task with one owned ring span.
- * Split only at file boundaries; the storage adapter may further split a disk
- * transfer to its DMA scratch size. For example, a chunk containing the final
- * 100 bytes of one file and 500 bytes of the next produces two file writes.
+ * Split only at file boundaries; the storage adapter collects bytes into its
+ * DMA-safe transfer buffer. For example, a chunk containing the final 100 bytes
+ * of one file and 500 bytes of the next produces two adapter submissions with
+ * a file close/open between them, not necessarily two immediate physical writes.
  * Never release or retry a partially written span; BufferedWriter accounts it.
  */
 size_t TimedBufferedSink::write(const uint8_t* data, size_t bytes)

@@ -8,6 +8,8 @@
  * block on storage and therefore belong exclusively to the disk task. openSlot
  * positions an allocated file at byte zero; closeSlot syncs and closes it. The
  * inherited write/flush methods never retain the supplied buffer after return.
+ * An adapter may copy a tail into its own buffer; closeSlot must flush it and
+ * report failure. A full write return count alone does not confirm durable data.
  */
 class TimedSlotStorage : public ByteSink
 {
