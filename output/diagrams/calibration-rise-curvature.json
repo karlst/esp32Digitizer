@@ -1,0 +1,97 @@
+{
+  "source": "captures/pulse-delay/20261105-153442/result.json",
+  "risingEdges": 176,
+  "normalization": "Each edge: first eight samples = 0%; last eight = 100%. No time shifting by measured center.",
+  "fit": "Least squares degree 5, 1500..3600 ns; x=(t-2550)/1000. Local shape model, not independent timing truth.",
+  "model": {
+    "lo": 1500,
+    "hi": 3600,
+    "d": 5,
+    "c": [
+      0.5076973816761794,
+      0.6689558682397421,
+      -0.012168588552598811,
+      -0.277704640444133,
+      0.0049619682610837455,
+      0.06769337420996732
+    ],
+    "crossingNs": 2538.495214167537
+  },
+  "fitSensitivity": [
+    {
+      "lo": 1500,
+      "hi": 3600,
+      "d": 3,
+      "crossingNs": 2538.7239243596764
+    },
+    {
+      "lo": 1500,
+      "hi": 3600,
+      "d": 4,
+      "crossingNs": 2537.6658665332275
+    },
+    {
+      "lo": 1500,
+      "hi": 3600,
+      "d": 5,
+      "crossingNs": 2538.495214167537
+    },
+    {
+      "lo": 1400,
+      "hi": 3700,
+      "d": 3,
+      "crossingNs": 2538.616091233104
+    },
+    {
+      "lo": 1400,
+      "hi": 3700,
+      "d": 4,
+      "crossingNs": 2537.590819033791
+    },
+    {
+      "lo": 1400,
+      "hi": 3700,
+      "d": 5,
+      "crossingNs": 2538.4902356998587
+    },
+    {
+      "lo": 1700,
+      "hi": 3400,
+      "d": 3,
+      "crossingNs": 2538.533930608131
+    },
+    {
+      "lo": 1700,
+      "hi": 3400,
+      "d": 4,
+      "crossingNs": 2538.111258730845
+    },
+    {
+      "lo": 1700,
+      "hi": 3400,
+      "d": 5,
+      "crossingNs": 2538.3539290874237
+    }
+  ],
+  "predictedChordBiasNs": {
+    "count": 176,
+    "mean": -1.6060298052833921,
+    "min": -37.28063356423672,
+    "max": 38.56229207484512,
+    "sd": 27.150604142379667
+  },
+  "observedMinusPredictedChordNs": {
+    "count": 176,
+    "mean": -0.041429421143959644,
+    "min": -11.604639930064877,
+    "max": 11.311936650455209,
+    "sd": 4.593567337257857
+  },
+  "leaveOneTrialOutResidualNs": {
+    "count": 176,
+    "mean": -0.04572005067447032,
+    "min": -12.039146550740497,
+    "max": 12.124790010672314,
+    "sd": 4.84440051697888
+  }
+}

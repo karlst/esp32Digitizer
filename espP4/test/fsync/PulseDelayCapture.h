@@ -26,7 +26,9 @@ private:
     /** One hardware timer reading and the direction of the voltage transition. */
     struct Event
     {
-        // Timer count at the physical transition; true identifies LOW to HIGH.
+        // Timer count latched when the input circuitry detects the transition;
+        // this includes the input path's threshold/detection effects. It is not
+        // the time software services the interrupt. true means LOW to HIGH.
         uint32_t _ticks = 0;
         bool _rising = false;
     };

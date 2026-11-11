@@ -1,0 +1,9 @@
+# Isolated slow-ramp GPIO6 threshold measurement; GPIO23 is an output.
+CONFIG_P4_INPUT_THRESHOLD=y
+# CONFIG_P4_INPUT_SKEW is not set
+# CONFIG_P4_FSYNC_ASSOCIATION is not set
+# CONFIG_P4_PULSE_DELAY is not set
+# CONFIG_P4_HARDWARE_SMOKE is not set
+# CONFIG_P4_CAPTURE_PROFILE is not set
+# CONFIG_P4_DIAGNOSTICS is not set
+# CONFIG_P4_SD_CHOKE is not set

@@ -12,6 +12,15 @@
 
 menu "P4 capture diagnostics"
 
+config P4_INPUT_THRESHOLD
+    bool "Standalone GPIO6 threshold marker on GPIO23"
+    default n
+    help
+        A slow external ramp drives GPIO6. MCPWM capture interrupts copy its
+        current digital level to GPIO23. Observe both on a scope; serial
+        counters report polarity and marker audit disagreements.
+        Starts at boot; no ADC acquisition, Feather commands or SD access.
+
 config P4_INPUT_SKEW
     bool "Same-pulse GPIO1/GPIO6 hardware timestamp comparison"
     default n

@@ -33,11 +33,16 @@ env.Append(CPPPATH=[str(projectRoot / 'include'),
                    str(projectRoot.parent / 'common'),
                    str(frameworkRoot / 'libraries' / 'SPI' / 'src')])
 selectedSource = env.GetProjectOption('custom_test_source', 'ads127SpiDiagnostic.cpp')
-if selectedSource not in ['ads127SpiDiagnostic.cpp', 'ads127CaptureControl.cpp', 'benchDacLoopback.cpp']:
+if selectedSource not in ['ads127SpiDiagnostic.cpp', 'ads127CaptureControl.cpp',
+                          'benchDacLoopback.cpp', 'ads127ScopeControl.cpp']:
     raise ValueError('Unknown Feather hardware test: ' + selectedSource)
+# The scope-only test needs just its entry point and the reusable ADC driver.
+# It neither generates analog input nor runs the P4 recording handshake.
+sourceFilter = ['-<*>', '+<' + selectedSource + '>']
+if selectedSource != 'ads127ScopeControl.cpp':
+    sourceFilter += ['+<BenchDac.cpp>', '+<InputSnapshot.cpp>', '+<BenchAcquisitionServices.cpp>']
 env.BuildSources('$BUILD_DIR/hardwareTests', str(projectRoot / 'test' / 'hardware'),
-                 src_filter=['-<*>', '+<' + selectedSource + '>', '+<BenchDac.cpp>',
-                             '+<InputSnapshot.cpp>', '+<BenchAcquisitionServices.cpp>'])
+                 src_filter=sourceFilter)
 
 # Compile the real controller only for capture environments. Other diagnostics
 # keep their own entry points and do not need its handshake state machine.

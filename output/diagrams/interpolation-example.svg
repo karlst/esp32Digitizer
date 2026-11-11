@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="600" viewBox="0 0 1000 600">
+<rect width="1000" height="600" fill="white"/>
+<g font-family="Segoe UI,Arial,sans-serif" fill="#172b3a">
+<text x="55" y="46" font-size="27" font-weight="600">Estimating a crossing between two samples</text>
+<text x="55" y="78" font-size="18">Illustrative numbers — not the recorded calibration waveform</text>
+<path d="M140 130 V445 H900" fill="none" stroke="#34495e" stroke-width="2"/>
+<text x="45" y="123" font-size="18">Voltage</text>
+<text x="745" y="537" font-size="18">Time relative to input rise</text>
+<g stroke="#dce4ea" stroke-width="1"><path d="M140 380 H900 M140 280 H900 M140 180 H900"/></g>
+<g font-size="19" text-anchor="end"><text x="123" y="387">0.4 V</text><text x="123" y="287">0.8 V</text><text x="123" y="187">1.2 V</text></g>
+<path d="M260 380 L780 180" fill="none" stroke="#2479b3" stroke-width="4"/>
+<path d="M140 280 H520 V445" fill="none" stroke="#d78222" stroke-width="2" stroke-dasharray="7 5"/>
+<path d="M260 380 V445 M780 180 V445" stroke="#2479b3" stroke-width="1.5" stroke-dasharray="5 5"/>
+<circle cx="260" cy="380" r="8" fill="#2479b3"/><circle cx="780" cy="180" r="8" fill="#2479b3"/>
+<circle cx="520" cy="280" r="9" fill="white" stroke="#d78222" stroke-width="4"/>
+<text x="195" y="347" font-size="20" fill="#175f90">Measured sample</text>
+<text x="690" y="148" font-size="20" fill="#175f90">Measured sample</text>
+<text x="540" y="303" font-size="20" fill="#a45d0b">Estimated 0.8 V crossing</text>
+<text x="540" y="329" font-size="17" fill="#a45d0b">No sample was taken here.</text>
+<g text-anchor="middle" font-size="18"><text x="260" y="475">2,000 ns</text><text x="520" y="475" fill="#a45d0b">2,488.5 ns</text><text x="780" y="475">2,977 ns</text></g>
+<path d="M260 497 H780 M260 491 V503 M780 491 V503" stroke="#34495e" stroke-width="1.5"/>
+<text x="520" y="529" text-anchor="middle" font-size="19">977 ns between samples</text>
+<text x="55" y="578" font-size="20">Assumption: voltage changes along the straight line between the measured points.</text>
+</g></svg>

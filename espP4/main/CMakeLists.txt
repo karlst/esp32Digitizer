@@ -13,6 +13,14 @@
 # Compile P4 capture and storage plus the P4-local reusable byte writer. The reusable writer
 # has no receiver dependency; these include paths expose its interface to sdRecorder.
 # Select one small startup file. Application and storage implementations are shared.
+if(CONFIG_P4_INPUT_THRESHOLD)
+    # Isolated GPIO threshold measurement: no ADC, Feather or storage startup.
+    idf_component_register(SRCS "../test/inputThreshold/main.cpp" "../test/inputThreshold/InputThresholdTest.cpp"
+        INCLUDE_DIRS "../test/inputThreshold"
+        REQUIRES esp_driver_mcpwm esp_driver_gpio esp_timer)
+    return()
+endif()
+
 if(CONFIG_P4_INPUT_SKEW)
     idf_component_register(SRCS "../test/inputSkew/main.cpp" "../test/inputSkew/InputSkewTest.cpp"
         INCLUDE_DIRS "../test/inputSkew"

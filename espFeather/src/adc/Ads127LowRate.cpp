@@ -181,7 +181,8 @@ bool Ads127LowRate::configure(const Ads127Config& adsConfigRequested, bool exter
     {
 
         // Reassert stop after configuration: register changes can restart filter
-        // sequencing. The later start must still wait for the receiver READY reply.
+        // sequencing. The caller starts later, after receiver READY for recording
+        // tests or the operator's explicit start command for the scope-only test.
         retVal = stop() && reportStatus("configured, before ARM");
     }
     if (!retVal)
@@ -195,7 +196,8 @@ bool Ads127LowRate::configure(const Ads127Config& adsConfigRequested, bool exter
 
 /* **
  * start - Request conversions after successful configure(); return whether the
- * echo matches. The caller must establish receiver readiness first. This
+ * echo matches. Recording callers establish receiver readiness first; the
+ * scope-only caller instead waits for the operator's start command. This
  * function checks configured but has no access to the receiver's READY message.
  * CONTROL bit 1 self-clears. Its write echo is not proof of clock/sample
  * delivery.
