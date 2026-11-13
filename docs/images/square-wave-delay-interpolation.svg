@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="470" viewBox="0 0 1000 470">
+<rect width="1000" height="470" fill="white"/>
+<g font-family="Arial, sans-serif" font-size="17" fill="#202b38">
+<text x="100" y="35" font-size="24">One recorded rising transition (997 Hz input)</text>
+<text x="100" y="64">Dots: ADC readings at their assigned FSYNC times</text>
+<path d="M100 350 H920" stroke="#d7dce2"/><text x="48" y="356">0%</text>
+<path d="M100 230.0 H920" stroke="#d7dce2"/><text x="48" y="236.0">50%</text>
+<path d="M100 110 H920" stroke="#d7dce2"/><text x="48" y="116">100%</text>
+<path d="M100.0 100 V370" stroke="#e9ecf0"/><text x="100.0" y="400" text-anchor="middle">0</text>
+<path d="M236.66666666666666 100 V370" stroke="#e9ecf0"/><text x="236.66666666666666" y="400" text-anchor="middle">1000</text>
+<path d="M373.3333333333333 100 V370" stroke="#e9ecf0"/><text x="373.3333333333333" y="400" text-anchor="middle">2000</text>
+<path d="M510.0 100 V370" stroke="#e9ecf0"/><text x="510.0" y="400" text-anchor="middle">3000</text>
+<path d="M646.6666666666666 100 V370" stroke="#e9ecf0"/><text x="646.6666666666666" y="400" text-anchor="middle">4000</text>
+<path d="M783.3333333333334 100 V370" stroke="#e9ecf0"/><text x="783.3333333333334" y="400" text-anchor="middle">5000</text>
+<path d="M920.0 100 V370" stroke="#e9ecf0"/><text x="920.0" y="400" text-anchor="middle">6000</text>
+<polyline fill="none" stroke="#2373a5" stroke-width="2" points="178.19722410230315,350.1883240965141 311.658152860599,339.87722683074895 445.11908161889494,231.09219235481038 578.5800103771908,121.4352596698053 712.0409391356854,110.76270922915259 845.5018678939814,110.57767962772203"/>
+<circle cx="178.19722410230315" cy="350.1883240965141" r="5" fill="#2373a5"/>
+<circle cx="311.658152860599" cy="339.87722683074895" r="5" fill="#2373a5"/>
+<circle cx="445.11908161889494" cy="231.09219235481038" r="5" fill="#2373a5"/>
+<circle cx="578.5800103771908" cy="121.4352596698053" r="5" fill="#2373a5"/>
+<circle cx="712.0409391356854" cy="110.76270922915259" r="5" fill="#2373a5"/>
+<circle cx="845.5018678939814" cy="110.57767962772203" r="5" fill="#2373a5"/>
+<circle cx="445.11908161889494" cy="231.09219235481038" r="7" fill="#2373a5"/>
+<circle cx="578.5800103771908" cy="121.4352596698053" r="7" fill="#2373a5"/>
+<path d="M446.4483637945547 230.0 V370" stroke="#be5514" stroke-width="2" stroke-dasharray="6 4"/>
+<circle cx="446.4483637945547" cy="230.0" r="6" fill="#be5514"/>
+<text x="461.4483637945547" y="260.0" fill="#a8430d">Interpolated crossing: 2535.0 ns</text>
+<text x="510" y="440" text-anchor="middle">Nanoseconds after the input edge was captured at GPIO6</text>
+</g></svg>

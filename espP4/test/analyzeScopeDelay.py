@@ -2,28 +2,34 @@
 """Decode a stopped four-channel scope export and compare sine-wave phases.
 
 Reading path: main -> loadCapture -> decode -> fitFrequency/fitSine.
+
 CH1 is the analog input, CH2 FSYNC, CH3 DCLK and CH4 DOUT0, all on
-the same scope time axis. This program reads files only; it never touches USB.
-Requires NumPy. Outputs go beside the capture, leaving original files intact.
+the same scope time axis.
 
 Each FSYNC rising edge starts 8 status bits followed by 24 signed data bits.
-Read on rising DCLK, as in the project's FrameDecoder. No searching for a bit
-shift that happens to give plausible samples. Bad frames prevent delay fitting.
-The result is phase delay at the measured sine frequency, modulo one period;
-it is not automatically broadband group delay or a 95% absolute error bound.
+Read on rising DCLK.
 
-For the timing calculation, read fitSine and phaseDelay first, then main:
-1. decode attaches each ADC value to the FSYNC edge that announces its frame.
-2. fitFrequency estimates the sine frequency from CH1, the measured analog input.
-3. fitSine independently fits CH1 voltages and decoded ADC values at that same
-   frequency. Both fits use seconds on the scope's original shared time axis.
-4. phaseDelay converts the difference between those fitted phases into ns.
+Four numbered sections in main follow
+the method in docs/SINE-PHASE-DELAY-TEST.md. Before those steps, decode converts
+the digital waveforms to signed ADC values and attaches their FSYNC times.
+1. Estimate frequency: fitFrequency searches for the best fit to CH1. No FFT
+   (Fast Fourier Transform) is used anywhere in this program.
+2. Fit the input sine wave: fitSine uses least squares on recorded CH1 volts.
+3. Fit the output sine wave: fitSine uses least squares on decoded ADC values.
+   Both fits use the same frequency and the scope's original shared time axis.
+4. Calculate delay: phaseDelay converts input phase minus output phase into ns.
+
+Each fit returns ONE phase for all points supplied to it, not a phase per point.
+The differences between points and the fitted curve are voltage/code residuals,
+not individual phase measurements. The eight optional segment fits in main
+produce separate delay estimates to examine variation within one capture.
+No statistical uncertainty for a fitted phase is calculated by this program.
 
 No GPIO6 timestamp, P4 timer, or earlier 2553-ns correction enters this calculation.
 The ADC curve is plotted at output FSYNC times, not corrected analog-input times.
 Thus a delayed ADC response appears as a phase lag relative to the CH1 input.
 The analog curve and ADC curve need not have the same number of measured points;
-each is fitted at its own measured times. We do not invent extra ADC samples.
+each is fitted at its own measured times. No extra ADC samples are invented.
 """
 import argparse
 import collections
@@ -153,10 +159,16 @@ def fitSine(times, values, frequency):
     scope's shared axis; values contains either CH1 volts or signed ADC codes.
     frequency is in Hz and is held fixed during this call.
 
-    We choose offset, a and b to minimize the sum of squared differences between
+    Offset, a and b are chosen to minimize the sum of squared differences between
     measured values and offset + a*sin(w*t) + b*cos(w*t), where w = 2*pi*f.
     This is a fit to all supplied points, not a selected edge or peak crossing.
     Every point has equal weight within its own fit.
+
+    This shared helper implements steps 2 and 3. It is also used during step 1
+    to compare candidate frequencies. For each supplied point, the fitted value
+    is subtracted from the measured value. Those differences are squared and
+    summed; np.linalg.lstsq selects the coefficients giving the smallest sum.
+    One offset, one amplitude and one phase describe the whole supplied set.
 
     The identity A*sin(w*t + phi) = A*cos(phi)*sin(w*t)
     + A*sin(phi)*cos(w*t) gives a = A*cos(phi), b = A*sin(phi).
@@ -171,9 +183,13 @@ def fitSine(times, values, frequency):
     RMS in the units of values, and residual RMS divided by fitted amplitude.
     Residual means measured value minus fitted value. Its RMS describes departure
     from a sine; it is not a phase confidence interval or an absolute timing bound.
+    RMS means root mean square: square the residuals, average, then take the
+    square root. The per-point residual array is not a list of phase shifts.
+    The fit does not calculate the variance or confidence interval of its phase.
     Noise, distortion and short records can bias phase despite a successful fit.
     This function does not reject weak signals or ill-conditioned short fits.
     """
+
     # Each row represents one measurement time. The three columns say how much
     # the constant offset, sine and cosine contribute at that time. NumPy's
     # least-squares solver returns their three coefficients in this same order.
@@ -188,6 +204,7 @@ def fitSine(times, values, frequency):
     # phase describes the sine's position in its cycle at scope time zero.
     residual = values - matrix @ coefficients
     amplitude = np.hypot(coefficients[1], coefficients[2])
+    
     return {'offset': float(coefficients[0]), 'amplitude': float(amplitude),
             'phase': float(np.arctan2(coefficients[2], coefficients[1])),
             'residualRms': float(np.sqrt(np.mean(residual ** 2))),
@@ -201,7 +218,11 @@ def fitFrequency(times, values, nominal):
     operator's --frequency setting in Hz. The generator setting restricts the
     search to +/-2%; it is not assumed to be the exact signal frequency.
 
-    Only this search averages groups of 32 scope points to reduce computation
+    Step 1 uses repeated least-squares fits. At each candidate
+    frequency, offset, amplitude and phase are fitted anew. The frequency is
+    selected by comparing the remaining differences from the measured input.
+
+    This search averages groups of 32 scope points to reduce computation
     and some high-frequency noise. At 3.2 ns per point, each group spans 102.4 ns.
     For an ideal sine on a uniform grid, assigning the average to the group's
     mean time preserves phase while changing amplitude. It does not remove
@@ -211,12 +232,14 @@ def fitFrequency(times, values, nominal):
     search interval. An optimum on the coarse grid's endpoint raises an error.
     This search does not prove a unique optimum or quantify frequency uncertainty.
     """
+
     # Reshape complete consecutive groups into rows, then average each row.
     # Discard at most 31 trailing points here; the final phase fit still uses
     # the original input points within the complete ADC sample time span.
     count = len(times) // 32 * 32
     fitTimes = times[:count].reshape(-1, 32).mean(axis=1)
     fitValues = values[:count].reshape(-1, 32).mean(axis=1)
+
     # First try 41 equally spaced frequencies. fitSine re-estimates offset and
     # amplitude at each frequency, so the score measures the remaining mismatch.
     grid = np.linspace(nominal * 0.98, nominal * 1.02, 41)
@@ -224,6 +247,7 @@ def fitFrequency(times, values, nominal):
     best = int(np.argmin(scores))
     if best in (0, len(grid) - 1):
         raise ValueError('Frequency optimum outside search range')
+    
     # Refine between the neighbors of the best grid point. Each iteration tests
     # two interior frequencies and removes the less promising end of the interval
     # (golden-section search). Forty-five iterations narrow the numerical search;
@@ -246,6 +270,12 @@ def phaseDelay(inputFit, outputFit, frequency):
     both fitted at frequency Hz on the same scope time axis. If output is input
     delayed by tau seconds, its phase is phiOut = phiIn - 2*pi*f*tau.
     Hence tau = (phiIn - phiOut)/(2*pi*f). A positive result means output lags.
+
+    Step 4 operates on just two fitted phase numbers: one for the input and one
+    for the output. No per-sample delays are calculated or averaged here. One
+    delay estimate is returned per pair of fits. Different estimates arise when
+    another capture or another subset of points is fitted. Their variation must
+    be examined separately; this conversion does not produce a variance or CI.
 
     A sine repeats every cycle: phase alone cannot distinguish tau from tau
     plus any whole number of periods. This function chooses the phase difference
@@ -323,35 +353,56 @@ def main():
     times, channels = loadCapture(args.capture)
     report = {'capture': str(args.capture), 'status': 'decode checks failed', 'thresholdChecks': {}}
     decoded = {}
+
+    # Preparation: recover ADC values and their output FSYNC times from the
+    # saved digital voltage arrays. This is separate from fitting sine waves.
+    # codes is the array of signed 24-bit ADC readings reconstructed from DOUT0
     for threshold in (0.7, 0.9, 1.1):
         sampleTimes, codes, checks = decode(times, channels, threshold)
         report['thresholdChecks'][str(threshold)] = checks
         decoded[threshold] = (sampleTimes, codes)
+    
     checks = report['thresholdChecks']['0.9']
+    
     if checks['badFrameLengths'] == 0 and checks['badStatus'] == 0 and checks['completeFrames'] > 100:
         # The central 0.9-V decoding must have no detected framing/status errors
-        # and enough samples before fitting. This does not establish correct
-        # decoding at every other threshold or rule out all payload corruption.
+        # and enough samples before fitting.
+
+        # 1) ESTIMATE FREQUENCY FROM THE INPUT
+        # Search near the generator setting using CH1 only. Score each trial frequency
+        # by least squares.
         frequency = fitFrequency(times, channels[1], args.frequency)
         sampleTimes, codes = decoded[0.9]
 
-        # Compare the same time span, excluding analog data before the first or
-        # after the last complete decoded ADC sample. Input uses the original
-        # CH1 voltages; output uses signed ADC codes at output FSYNC times.
-        # Fit both at ONE frequency: differing frequencies would make their
-        # phase difference change with the chosen time origin.
+        # 2) USE LEAST SQUARES TO FIT THE INPUT SINE WAVE
+        # Input uses the original CH1 voltages; output uses signed ADC codes at output FSYNC times.
+
+        # exclude times outside the sample interval
         mask = (times >= sampleTimes[0]) & (times <= sampleTimes[-1])
+
+        #perform least squares fit
         inputFit = fitSine(times[mask], channels[1][mask], frequency)
+
+        # 3) USE LEAST SQUARES TO FIT THE OUTPUT SINE WAVE
+        # Fit the signed ADC values at their FSYNC times. Converting codes to
+        # volts is unnecessary: amplitude and offset are fitted independently.
         outputFit = fitSine(sampleTimes, codes, frequency)
+
+        # 4) CALCULATE DELAY FROM THE PHASE DIFFERENCE
+        # Subtract the two fitted phases, express the result within +/- half
+        # a cycle, divide by 2*pi*frequency, and convert seconds to nanoseconds.
+        # This gives one delay estimate, not a distribution of sample delays.
         report.update(status='phase estimate; absolute uncertainty not established',
                       frequencyHz=frequency, inputFit=inputFit, outputFit=outputFit,
                       delayNs=phaseDelay(inputFit, outputFit, frequency))
 
+        # ADDITIONAL CHECK: SENSITIVITY TO DIGITAL VOLTAGE THRESHOLD
         # Repeat the digital edge interpretation at 0.7, 0.9 and 1.1 V. The analog
         # input fit stays fixed. Compare decoded codes as well as delay: matching
         # codes support stable bit decoding, while changing FSYNC crossing times
         # can still shift the measured delay. This is not an ADC-voltage threshold.
         report['thresholdSensitivity'] = {}
+        
         for threshold, (otherTimes, otherCodes) in decoded.items():
             otherChecks = report['thresholdChecks'][str(threshold)]
             report['thresholdSensitivity'][str(threshold)] = {
@@ -359,17 +410,13 @@ def main():
                 'delayNs': phaseDelay(inputFit, fitSine(otherTimes, otherCodes, frequency), frequency)
                 if otherChecks['badFrameLengths'] == 0 and otherChecks['badStatus'] == 0 else None}
 
+        # ADDITIONAL CHECK: VARIATION BETWEEN EIGHT PARTS OF THIS CAPTURE
         # Divide the complete-sample span into eight non-overlapping time ranges.
         # Each range includes its left endpoint and excludes its right endpoint;
         # the last ADC sample is therefore omitted from these segment fits only.
-        # Refit phase, amplitude and offset in each range, holding the frequency
-        # from the WHOLE capture fixed. We do not average these delays to obtain
-        # the main result; that result comes from the whole-span fits above.
-        # Fractions of a sine cycle can give unstable estimates, especially when
-        # offset and amplitude can compensate for a phase change. Segment scatter
-        # is diagnostic and does not by itself supply an absolute confidence bound.
         segments = []
         limits = np.linspace(sampleTimes[0], sampleTimes[-1], 9)
+        
         for lo, hi in zip(limits[:-1], limits[1:]):
             analogMask = (times >= lo) & (times < hi)
             adcMask = (sampleTimes >= lo) & (sampleTimes < hi)

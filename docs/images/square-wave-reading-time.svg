@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="670" viewBox="0 0 1200 670">
+  <desc>An input edge at timer count 200000 sets time zero. FSYNC pulses continue independently, approximately 977 nanoseconds apart. One selected reading has estimated FSYNC count 200400, placing its decoded voltage at 2500 nanoseconds on the reconstructed curve. This single point does not determine the transition delay.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto-start-reverse"><path d="M0 0 L8 4 L0 8 Z" fill="#536779"/></marker>
+    <style>
+      text {font-family:Arial,sans-serif;font-size:19px;fill:#233347}
+      .label {font-weight:bold;font-size:21px}
+      .small {font-size:17px}
+      .guide {stroke:#97a6b3;stroke-width:1.5;stroke-dasharray:5 6}
+      .wave {fill:none;stroke:#245a81;stroke-width:3}
+    </style>
+  </defs>
+  <rect width="1200" height="670" fill="white"/>
+  <text x="260" y="30" class="small">Illustrative timing — all rows share the same horizontal time axis</text>
+  <path d="M360 100 V590 M860 210 V590" class="guide"/>
+
+  <text x="25" y="116" class="label">Input at GPIO6</text>
+  <text x="25" y="144" class="small">Direct generator signal</text>
+  <path d="M260 155 H360 V95 H1120" class="wave"/>
+  <text x="380" y="70">Input edge detected: 200,000 ticks</text>
+  <text x="380" y="125" class="small">Time zero</text>
+
+  <path d="M360 200 H860" stroke="#536779" stroke-width="1.5" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+  <rect x="432" y="181" width="356" height="30" fill="white"/>
+  <text x="610" y="202" text-anchor="middle">400 ticks × 6.25 ns = 2500 ns</text>
+
+  <text x="25" y="285" class="label">FSYNC at GPIO1</text>
+  <text x="25" y="313" class="small">Through the translator</text>
+  <path d="M260 325 H274 V265 H305 V325 H469 V265 H500 V325 H665 V265 H696 V325 H860 V265 H891 V325 H1055 V265 H1086 V325 H1120" class="wave"/>
+  <path d="M860 325 V265 H891 V325" fill="none" stroke="#d07820" stroke-width="4"/>
+  <text x="860" y="239" text-anchor="middle" fill="#a85c12">Selected reading: estimated count 200,400</text>
+  <path d="M469 356 H665" stroke="#536779" stroke-width="1.5" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+  <text x="567" y="383" text-anchor="middle" class="small">About 977 ns</text>
+  <text x="860" y="383" text-anchor="middle" class="small">Each FSYNC identifies an ADC reading.</text>
+
+  <text x="25" y="460" class="label">One plotted reading</text>
+  <text x="25" y="488" class="small">Voltage decoded from DOUT0</text>
+  <path d="M260 560 H1135 M260 560 V420" fill="none" stroke="#536779" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <path d="M260 468 H860" class="guide"/>
+  <circle cx="860" cy="468" r="7" fill="#d07820"/>
+  <text x="280" y="454">V[i]</text>
+  <text x="880" y="450">This reading's decoded voltage</text>
+  <text x="360" y="587" text-anchor="middle">0</text>
+  <text x="860" y="587" text-anchor="middle">+2500 ns</text>
+  <text x="690" y="618" text-anchor="middle">Time relative to the input edge</text>
+  <text x="600" y="651" text-anchor="middle" class="small">The delay was calculated from the combined voltage curve, not from this one FSYNC edge.</text>
+</svg>
